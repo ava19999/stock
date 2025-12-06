@@ -1,35 +1,28 @@
+// FILE: src/types.ts
 export interface InventoryItem {
   id: string;
-  partNumber: string; // No. Part
-  name: string; // Nama Barang
-  description: string; // Deskripsi
-  price: number; // Harga
-  quantity: number; // Jumlah Stok
-  shelf: string; // Rak
-  imageUrl: string; // Foto (Base64 or URL)
+  partNumber: string;
+  name: string;
+  description: string;
+  quantity: number;
+  shelf: string;
+  price: number;
+  imageUrl: string;
   lastUpdated: number;
 }
 
 export type InventoryFormData = Omit<InventoryItem, 'id' | 'lastUpdated'>;
 
-export interface AIAnalysisResult {
-  suggestedName?: string;
-  suggestedDescription?: string;
-  suggestedShelfCategory?: string;
-}
-
 export interface CartItem extends InventoryItem {
   cartQuantity: number;
 }
-
-export type OrderStatus = 'pending' | 'processing' | 'completed' | 'cancelled';
 
 export interface Order {
   id: string;
   customerName: string;
   items: CartItem[];
   totalAmount: number;
-  status: OrderStatus;
+  status: 'pending' | 'processing' | 'completed' | 'cancelled';
   timestamp: number;
 }
 
@@ -43,10 +36,10 @@ export interface Message {
 
 export interface ChatSession {
   customerId: string;
-  customerName: string; // Bisa "Guest 123" atau nama input user
+  customerName: string;
   messages: Message[];
   lastMessage: string;
   lastTimestamp: number;
-  unreadAdminCount: number; // Pesan user yang belum dibaca admin
-  unreadUserCount: number; // Pesan admin yang belum dibaca user
+  unreadAdminCount: number;
+  unreadUserCount: number;
 }
