@@ -1,6 +1,8 @@
+// FILE: src/components/ItemForm.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
 import { analyzeInventoryImage, generateDescription } from '../services/geminiService';
+import { compressImage } from '../utils'; // Import fungsi kompresi baru
 import { Camera, Upload, Sparkles, X, Save, Loader2 } from 'lucide-react';
 
 interface ItemFormProps {
@@ -60,31 +62,38 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Convert to base64
+    // Baca file
     const reader = new FileReader();
     reader.onloadend = async () => {
-      const base64String = reader.result as string;
-      setFormData(prev => ({ ...prev, imageUrl: base64String }));
-      
-      // Auto-analyze
-      if (process.env.API_KEY) {
-        setIsAnalyzing(true);
-        try {
-          const analysis = await analyzeInventoryImage(base64String);
-          if (analysis.suggestedName || analysis.suggestedDescription) {
-             setFormData(prev => ({
-               ...prev,
-               name: analysis.suggestedName || prev.name,
-               description: analysis.suggestedDescription || prev.description,
-               // Normalize suggested shelf as well
-               shelf: analysis.suggestedShelfCategory ? analysis.suggestedShelfCategory.toUpperCase().replace(/-/g, ' ') : prev.shelf
-             }));
+      const originalBase64 = reader.result as string;
+
+      // 1. Kompresi Gambar sebelum disimpan ke State
+      try {
+        const compressedBase64 = await compressImage(originalBase64);
+        setFormData(prev => ({ ...prev, imageUrl: compressedBase64 }));
+        
+        // 2. Kirim gambar yang sudah dikompres ke AI (lebih hemat data)
+        if (process.env.API_KEY) {
+          setIsAnalyzing(true);
+          try {
+            const analysis = await analyzeInventoryImage(compressedBase64);
+            if (analysis.suggestedName || analysis.suggestedDescription) {
+               setFormData(prev => ({
+                 ...prev,
+                 name: analysis.suggestedName || prev.name,
+                 description: analysis.suggestedDescription || prev.description,
+                 // Normalize suggested shelf as well
+                 shelf: analysis.suggestedShelfCategory ? analysis.suggestedShelfCategory.toUpperCase().replace(/-/g, ' ') : prev.shelf
+               }));
+            }
+          } catch (error) {
+            console.error("AI Analysis failed", error);
+          } finally {
+            setIsAnalyzing(false);
           }
-        } catch (error) {
-          console.error("AI Analysis failed", error);
-        } finally {
-          setIsAnalyzing(false);
         }
+      } catch (error) {
+        console.error("Gagal memproses gambar", error);
       }
     };
     reader.readAsDataURL(file);
@@ -109,7 +118,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-lg border border-gray-200 max-w-3xl mx-auto overflow-hidden">
+    <div className="bg-white rounded-xl shadow-lg border border-gray-200 max-w-3xl mx-auto overflow-hidden animate-in zoom-in-95 duration-200">
       <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
         <h2 className="text-xl font-bold text-gray-800">
           {initialData ? 'Edit Barang' : 'Tambah Barang Baru'}
@@ -142,7 +151,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
                   </div>
                 )}
                 {isAnalyzing && (
-                  <div className="absolute inset-0 bg-white/80 flex flex-col items-center justify-center">
+                  <div className="absolute inset-0 bg-white/80 flex flex-col items-center justify-center z-10">
                     <Loader2 className="animate-spin text-blue-600 mb-2" size={32} />
                     <span className="text-xs font-medium text-blue-600">AI Menganalisis...</span>
                   </div>
