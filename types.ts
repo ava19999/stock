@@ -26,6 +26,21 @@ export interface Order {
   timestamp: number;
 }
 
+// --- TAMBAHAN BARU ---
+export interface StockHistory {
+  id: string;
+  itemId: string;
+  partNumber: string;
+  name: string;
+  type: 'in' | 'out'; // 'in' = Masuk (Restock), 'out' = Keluar (Terjual/Koreksi)
+  quantity: number;   // Jumlah perubahan (misal: 1, 5, 10)
+  previousStock: number; // Stok sebelum berubah
+  currentStock: number;  // Stok sesudah berubah
+  timestamp: number;
+  reason: string;     // Keterangan: "Restock Manual", "Order #...", "Barang Baru"
+}
+// ---------------------
+
 export interface Message {
   id: string;
   sender: 'user' | 'admin';

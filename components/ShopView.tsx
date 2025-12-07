@@ -1,20 +1,19 @@
 // FILE: src/components/ShopView.tsx
 import React, { useState, useMemo } from 'react';
-import { InventoryItem, CartItem, Order } from '../types';
-import { ShoppingCart, Search, Plus, X, ChevronRight, Tag, User, Filter, Car, Package, ClipboardList, Clock, Truck, CheckCircle } from 'lucide-react';
+import { InventoryItem, CartItem } from '../types';
+import { ShoppingCart, Search, Plus, X, Tag, Car, Package } from 'lucide-react';
+import { formatRupiah } from '../utils';
 
 interface ShopViewProps {
   items: InventoryItem[];
   cart: CartItem[];
-  orders: Order[]; // New Prop: Data Pesanan
-  currentCustomerName: string; // New Prop: Nama User saat ini
   onAddToCart: (item: InventoryItem) => void;
   onRemoveFromCart: (itemId: string) => void;
   onCheckout: (customerName: string) => void;
 }
 
 export const ShopView: React.FC<ShopViewProps> = ({ 
-  items = [], cart = [], orders = [], currentCustomerName, onAddToCart, onRemoveFromCart, onCheckout 
+  items = [], cart = [], onAddToCart, onRemoveFromCart, onCheckout 
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Semua');
@@ -22,8 +21,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
   // Modals State
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false);
-  const [isOrdersModalOpen, setIsOrdersModalOpen] = useState(false); // New Modal
-  const [orderTab, setOrderTab] = useState<'pending' | 'processing' | 'completed'>('pending'); // Tabs
   
   const [customerNameInput, setCustomerNameInput] = useState('');
 
@@ -52,28 +49,9 @@ export const ShopView: React.FC<ShopViewProps> = ({
     });
   }, [safeItems, searchTerm, selectedCategory]);
 
-  // --- LOGIC FILTER PESANAN SAYA ---
-  const myOrders = useMemo(() => {
-      // Filter pesanan berdasarkan nama user yang login (atau guest name)
-      // Jika user belum pernah login (guest), mungkin kosong, tapi kita handle aman.
-      if (!currentCustomerName) return [];
-      return orders.filter(o => o.customerName.toLowerCase() === currentCustomerName.toLowerCase());
-  }, [orders, currentCustomerName]);
-
-  const filteredOrders = useMemo(() => {
-      return myOrders.filter(o => {
-          if (orderTab === 'pending') return o.status === 'pending';
-          if (orderTab === 'processing') return o.status === 'processing';
-          if (orderTab === 'completed') return o.status === 'completed' || o.status === 'cancelled';
-          return false;
-      }).sort((a, b) => b.timestamp - a.timestamp); // Urutkan terbaru
-  }, [myOrders, orderTab]);
-
   // --- HELPERS ---
   const cartTotal = cart.reduce((sum, item) => sum + ((item.price || 0) * item.cartQuantity), 0);
   const cartItemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
-  const formatRupiah = (num: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num || 0);
-  const formatDate = (ts: number) => new Date(ts).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
   return (
     <div className="relative min-h-full">
@@ -82,28 +60,18 @@ export const ShopView: React.FC<ShopViewProps> = ({
       <div className="sticky top-[64px] z-30 bg-gray-50/95 backdrop-blur-sm pt-2 pb-2 -mx-2 px-2 md:mx-0 md:px-0 space-y-3 border-b border-gray-200/50">
         <div className="flex gap-2">
             {/* Search Bar */}
-            <div className="relative max-w-2xl w-full group">
-            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                <Search size={18} className="text-gray-400 group-focus-within:text-blue-600 transition-colors" />
+            <div className="relative w-full group">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <Search size={18} className="text-gray-400 group-focus-within:text-blue-600 transition-colors" />
+              </div>
+              <input
+                  type="text"
+                  placeholder="Cari sparepart..."
+                  className="pl-10 pr-4 py-3 w-full bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm transition-all"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+              />
             </div>
-            <input
-                type="text"
-                placeholder="Cari sparepart..."
-                className="pl-10 pr-4 py-3 w-full bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm transition-all"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-            />
-            </div>
-            
-            {/* TOMBOL PESANAN SAYA (BARU) */}
-            <button 
-                onClick={() => setIsOrdersModalOpen(true)}
-                className="flex-shrink-0 bg-white border border-gray-200 text-gray-600 px-4 rounded-xl hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all flex items-center gap-2 shadow-sm"
-            >
-                <ClipboardList size={20} />
-                <span className="hidden sm:inline font-medium text-sm">Pesanan Saya</span>
-                {myOrders.length > 0 && <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{myOrders.length}</span>}
-            </button>
         </div>
 
         {/* Category Tabs */}
@@ -192,88 +160,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
                   <button type="submit" disabled={!customerNameInput.trim()} className="py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50">Kirim</button>
                 </div>
               </form>
-           </div>
-        </div>
-      )}
-
-      {/* --- MODAL PESANAN SAYA (BARU) --- */}
-      {isOrdersModalOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOrdersModalOpen(false)}></div>
-           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl h-[80vh] flex flex-col relative overflow-hidden animate-in zoom-in-95">
-              
-              {/* Header */}
-              <div className="bg-white px-6 py-4 border-b border-gray-100 flex justify-between items-center">
-                <div>
-                    <h3 className="text-xl font-bold text-gray-900">Pesanan Saya</h3>
-                    <p className="text-xs text-gray-500">Halo, {currentCustomerName || 'Tamu'}</p>
-                </div>
-                <button onClick={() => setIsOrdersModalOpen(false)} className="p-2 text-gray-400 hover:bg-gray-100 rounded-full"><X size={20}/></button>
-              </div>
-
-              {/* Tabs */}
-              <div className="flex border-b border-gray-100">
-                  {[
-                      { id: 'pending', label: 'Menunggu', icon: Clock, color: 'text-orange-600' },
-                      { id: 'processing', label: 'Dikirim', icon: Truck, color: 'text-blue-600' },
-                      { id: 'completed', label: 'Selesai', icon: CheckCircle, color: 'text-green-600' }
-                  ].map((tab: any) => (
-                      <button
-                        key={tab.id}
-                        onClick={() => setOrderTab(tab.id)}
-                        className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 border-b-2 transition-all ${orderTab === tab.id ? `border-gray-900 text-gray-900` : 'border-transparent text-gray-400 hover:text-gray-600'}`}
-                      >
-                          <tab.icon size={16} className={orderTab === tab.id ? tab.color : ''} />
-                          {tab.label}
-                      </button>
-                  ))}
-              </div>
-
-              {/* Content */}
-              <div className="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-4">
-                  {filteredOrders.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                          <ClipboardList size={48} className="opacity-20 mb-3" />
-                          <p className="text-sm font-medium">Belum ada pesanan di status ini</p>
-                      </div>
-                  ) : (
-                      filteredOrders.map(order => (
-                          <div key={order.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                              <div className="flex justify-between items-start mb-3 pb-3 border-b border-gray-50">
-                                  <div>
-                                      <p className="text-[10px] text-gray-400 font-mono mb-1">ID: {order.id}</p>
-                                      <p className="text-xs font-bold text-gray-600">{formatDate(order.timestamp)}</p>
-                                  </div>
-                                  <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide ${
-                                      order.status === 'pending' ? 'bg-orange-100 text-orange-700' :
-                                      order.status === 'processing' ? 'bg-blue-100 text-blue-700' :
-                                      order.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                                  }`}>
-                                      {order.status === 'pending' ? 'Menunggu Konfirmasi' : 
-                                       order.status === 'processing' ? 'Sedang Dikirim' : 
-                                       order.status === 'completed' ? 'Selesai' : 'Dibatalkan'}
-                                  </span>
-                              </div>
-                              
-                              <div className="space-y-2 mb-3">
-                                  {order.items.slice(0, 3).map((item, idx) => (
-                                      <div key={idx} className="flex justify-between text-xs text-gray-700">
-                                          <span className="line-clamp-1 flex-1">{item.name}</span>
-                                          <span className="font-mono text-gray-400 ml-2">x{item.cartQuantity}</span>
-                                      </div>
-                                  ))}
-                                  {order.items.length > 3 && <p className="text-[10px] text-gray-400 italic">+ {order.items.length - 3} barang lainnya...</p>}
-                              </div>
-
-                              <div className="flex justify-between items-center pt-2 border-t border-gray-50">
-                                  <span className="text-xs text-gray-500">Total Belanja</span>
-                                  <span className="text-sm font-bold text-gray-900">{formatRupiah(order.totalAmount)}</span>
-                              </div>
-                          </div>
-                      ))
-                  )}
-              </div>
-
            </div>
         </div>
       )}
