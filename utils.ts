@@ -1,8 +1,23 @@
 // FILE: src/utils.ts
-export const compressImage = (base64Str: string, maxWidth = 800, quality = 0.7): Promise<string> => {
-  return new Promise((resolve) => {
+
+export const formatRupiah = (amount: number): string => {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(amount);
+};
+
+export const generateId = (): string => {
+  return Math.random().toString(36).substr(2, 9);
+};
+
+// --- FUNGSI KOMPRESI GAMBAR (PENTING) ---
+export const compressImage = (base64: string, maxWidth = 800, quality = 0.7): Promise<string> => {
+  return new Promise((resolve, reject) => {
     const img = new Image();
-    img.src = base64Str;
+    img.src = base64;
     img.onload = () => {
       const canvas = document.createElement('canvas');
       let width = img.width;
@@ -10,39 +25,27 @@ export const compressImage = (base64Str: string, maxWidth = 800, quality = 0.7):
 
       // Hitung rasio aspek untuk resize
       if (width > maxWidth) {
-        height *= maxWidth / width;
+        height = Math.round((height * maxWidth) / width);
         width = maxWidth;
       }
 
       canvas.width = width;
       canvas.height = height;
+
       const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0, width, height);
-        // Konversi kembali ke base64 dengan kualitas (quality) 0.7 (70%)
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      } else {
-        resolve(base64Str); // Fallback jika gagal
+      if (!ctx) {
+        reject(new Error('Gagal membuat context canvas'));
+        return;
       }
+
+      // Gambar ulang dengan ukuran baru
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Konversi kembali ke Base64 dengan kualitas (quality) yang diturunkan (0.0 - 1.0)
+      // 'image/jpeg' lebih kecil ukurannya dibanding png untuk foto
+      const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+      resolve(compressedBase64);
     };
-    img.onerror = () => {
-      resolve(base64Str);
-    };
+    img.onerror = (error) => reject(error);
   });
-};
-
-export const formatRupiah = (num: number) => {
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    minimumFractionDigits: 0
-  }).format(num);
-};
-
-export const generateId = () => {
-  // Fallback sederhana jika crypto.randomUUID belum didukung browser lama
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return Date.now().toString(36) + Math.random().toString(36).substr(2);
 };

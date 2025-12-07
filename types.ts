@@ -4,14 +4,19 @@ export interface InventoryItem {
   partNumber: string;
   name: string;
   description: string;
-  quantity: number;
+  quantity: number; // Ini akan menampilkan STOK AHIR
   shelf: string;
   price: number;
   imageUrl: string;
   lastUpdated: number;
+  
+  // --- FIELD BARU UNTUK SINKRONISASI SHEET ---
+  initialStock: number; // Kolom 'Stok' (Stok Awal)
+  qtyIn: number;        // Kolom 'Masuk'
+  qtyOut: number;       // Kolom 'Keluar'
 }
 
-export type InventoryFormData = Omit<InventoryItem, 'id' | 'lastUpdated'>;
+export type InventoryFormData = Omit<InventoryItem, 'id' | 'lastUpdated' | 'initialStock' | 'qtyIn' | 'qtyOut'>;
 
 export interface CartItem extends InventoryItem {
   cartQuantity: number;
@@ -26,20 +31,18 @@ export interface Order {
   timestamp: number;
 }
 
-// --- TAMBAHAN BARU ---
 export interface StockHistory {
   id: string;
   itemId: string;
   partNumber: string;
   name: string;
-  type: 'in' | 'out'; // 'in' = Masuk (Restock), 'out' = Keluar (Terjual/Koreksi)
-  quantity: number;   // Jumlah perubahan (misal: 1, 5, 10)
-  previousStock: number; // Stok sebelum berubah
-  currentStock: number;  // Stok sesudah berubah
+  type: 'in' | 'out';
+  quantity: number;
+  previousStock: number;
+  currentStock: number;
   timestamp: number;
-  reason: string;     // Keterangan: "Restock Manual", "Order #...", "Barang Baru"
+  reason: string;
 }
-// ---------------------
 
 export interface Message {
   id: string;
