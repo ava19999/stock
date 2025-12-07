@@ -3,7 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
-  ArrowUpRight, ArrowDownRight, Clock, Edit, Trash2, MapPin, FileText,
+  ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin, FileText,
   LayoutGrid, List
 } from 'lucide-react';
 
@@ -59,11 +59,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const HistoryModal = () => {
     if (!showHistoryDetail) return null;
     const type = showHistoryDetail;
-    const filteredHistory = history.filter(h => h.type === type).slice(0, 20);
+    const filteredHistory = history
+      .filter(h => h.type === type)
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 100);
+
+    // Helper untuk memproses tampilan Resi dan Keterangan
+    const parseHistoryReason = (reason: string) => {
+        let resi = '-';
+        let keterangan = reason;
+
+        // 1. Ekstrak Resi jika ada format (Resi: XXX)
+        const resiMatch = reason.match(/\(Resi: (.*?)\)/);
+        if (resiMatch && resiMatch[1]) {
+            resi = resiMatch[1];
+            // Hapus bagian resi dari keterangan
+            keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, '');
+        }
+
+        // 2. Ubah "Cancel Order" menjadi "Retur"
+        if (keterangan.toLowerCase().includes('cancel order')) {
+            keterangan = 'Retur';
+        }
+
+        return { resi, keterangan };
+    };
 
     return (
-      <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
-        <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 duration-300">
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
+        <div className="bg-white w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 duration-300 flex flex-col max-h-[90vh]">
           <div className="p-4 border-b flex justify-between items-center bg-gray-50">
             <h3 className="font-bold text-gray-800 flex items-center gap-2">
               {type === 'in' ? <TrendingUp size={18} className="text-green-600"/> : <TrendingDown size={18} className="text-red-600"/>}
@@ -71,21 +95,78 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </h3>
             <button onClick={() => setShowHistoryDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm font-medium">Tutup</button>
           </div>
-          <div className="max-h-[60vh] overflow-y-auto p-0">
-            {filteredHistory.length === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Belum ada riwayat.</div> : (
-              <div className="divide-y divide-gray-100">
-                {filteredHistory.map((h) => (
-                  <div key={h.id} className="p-3 flex justify-between items-start hover:bg-gray-50">
-                    <div>
-                      <div className="font-medium text-gray-800 text-sm">{h.name}</div>
-                      <div className="text-[10px] text-gray-500 mt-0.5 flex items-center gap-1"><Clock size={10}/> {new Date(h.timestamp).toLocaleString('id-ID')}</div>
-                      <div className="text-[10px] text-gray-400 mt-0.5">{h.reason}</div>
-                    </div>
-                    <div className={`font-bold text-sm ${type==='in'?'text-green-600':'text-red-600'}`}>{type==='in' ? '+' : '-'}{h.quantity}</div>
-                  </div>
-                ))}
-              </div>
+          
+          <div className="overflow-auto flex-1 p-0">
+            {filteredHistory.length === 0 ? (
+                <div className="p-8 text-center text-gray-400 text-sm">Belum ada riwayat.</div>
+            ) : (
+                <table className="w-full text-left border-collapse">
+                    <thead className="bg-gray-100 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
+                        <tr>
+                            <th className="p-3 border-b border-gray-200 w-28">Tanggal</th>
+                            <th className="p-3 border-b border-gray-200 w-32">Resi</th>
+                            <th className="p-3 border-b border-gray-200 w-32">No. Part</th>
+                            <th className="p-3 border-b border-gray-200">Nama Barang</th>
+                            <th className="p-3 border-b border-gray-200 text-right w-20">Qty</th>
+                            <th className="p-3 border-b border-gray-200 text-right w-32">Harga</th>
+                            <th className="p-3 border-b border-gray-200 text-right w-32">Total</th>
+                            {/* HANYA TAMPILKAN KOLOM KETERANGAN JIKA RIWAYAT MASUK */}
+                            {type === 'in' && <th className="p-3 border-b border-gray-200 w-48">Keterangan</th>}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 text-sm">
+                        {filteredHistory.map((h) => {
+                            const item = items.find(i => i.id === h.itemId || i.partNumber === h.partNumber);
+                            const price = item ? item.price : 0;
+                            const { resi, keterangan } = parseHistoryReason(h.reason);
+                            const isRetur = keterangan === 'Retur';
+
+                            return (
+                                <tr key={h.id} className="hover:bg-blue-50 transition-colors">
+                                    <td className="p-3 text-gray-600 whitespace-nowrap align-top">
+                                        <div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div>
+                                        <div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div>
+                                    </td>
+                                    <td className="p-3 align-top">
+                                        <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${resi !== '-' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-400'}`}>
+                                            {resi}
+                                        </span>
+                                    </td>
+                                    <td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber}</td>
+                                    <td className="p-3 font-medium text-gray-800 max-w-[200px] align-top">
+                                        <div className="line-clamp-2">{h.name}</div>
+                                    </td>
+                                    <td className={`p-3 text-right font-bold align-top ${type==='in'?'text-green-600':'text-red-600'}`}>
+                                        {type==='in' ? '+' : '-'}{h.quantity}
+                                    </td>
+                                    <td className="p-3 text-right text-gray-600 font-mono align-top text-xs">
+                                        {formatRupiah(price)}
+                                    </td>
+                                    <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">
+                                        {formatRupiah(price * h.quantity)}
+                                    </td>
+                                    {/* HANYA TAMPILKAN ISI KETERANGAN JIKA RIWAYAT MASUK */}
+                                    {type === 'in' && (
+                                        <td className="p-3 align-top text-xs">
+                                            {isRetur ? (
+                                                <span className="inline-block px-2 py-1 bg-red-100 text-red-600 border border-red-200 rounded font-bold uppercase tracking-wider">
+                                                    RETUR
+                                                </span>
+                                            ) : (
+                                                <span className="text-gray-600">{keterangan}</span>
+                                            )}
+                                        </td>
+                                    )}
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
             )}
+          </div>
+          
+          <div className="p-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-500 text-right">
+             Menampilkan maks 100 transaksi terakhir
           </div>
         </div>
       </div>
@@ -142,7 +223,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
         {filteredItems.length === 0 ? <div className="p-8 text-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-200"><Package size={24} className="mx-auto mb-2 opacity-50"/><p className="text-xs">Tidak ada barang</p></div> : (
              viewMode === 'grid' ? (
-                // --- GRID VIEW (FONT DIPERBESAR) ---
+                // --- GRID VIEW ---
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
                    {filteredItems.map(item => (
                      <div key={item.id} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full hover:shadow-md transition-shadow group">
@@ -156,23 +237,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </div>
                         <div className="p-2.5 flex-1 flex flex-col">
                           <div className="mb-2">
-                            {/* NAMA BARANG: Text SM */}
                             <h3 className="font-bold text-gray-900 text-sm leading-tight line-clamp-2 min-h-[2.4em] mb-1">{item.name}</h3>
-                            
-                            {/* PART NUMBER: Text XS (Lebih besar dari sebelumnya) */}
                             <p className="text-xs text-gray-500 font-mono truncate bg-gray-50 inline-block px-1 rounded">{item.partNumber || '-'}</p>
-                            
-                            {/* DESKRIPSI: Text XS */}
                             <div className="mt-1.5 flex items-start gap-1.5">
                                 <FileText size={10} className="text-gray-400 mt-0.5 flex-shrink-0" />
                                 <p className="text-xs text-gray-600 leading-snug line-clamp-2 min-h-[2.5em]">{item.description || "-"}</p>
                             </div>
                           </div>
-                          
                           <div className="mt-auto pt-2 border-t border-gray-50 space-y-2">
                              <div className="flex justify-between items-end">
                                 <div className="text-sm font-bold text-blue-700 truncate">{formatCompactNumber(item.price)}</div>
-                                {/* LOKASI RAK: Text XS */}
                                 <div className="flex items-center text-xs text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200"><MapPin size={9} className="mr-0.5 text-gray-500"/>{item.shelf}</div>
                              </div>
                              <div className="grid grid-cols-2 gap-1.5">
@@ -185,7 +259,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                    ))}
                 </div>
              ) : (
-                // --- LIST VIEW (FONT DIPERBESAR) ---
+                // --- LIST VIEW ---
                 <div className="flex flex-col gap-2">
                     {filteredItems.map(item => (
                         <div key={item.id} className="bg-white rounded-lg p-3 border border-gray-100 shadow-sm flex items-center gap-3 hover:shadow-md transition-shadow">

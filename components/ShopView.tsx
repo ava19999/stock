@@ -1,8 +1,9 @@
 // FILE: src/components/ShopView.tsx
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { InventoryItem, CartItem } from '../types';
 import { ShoppingCart, Search, Plus, X, Tag, Car, Package, Camera, Loader2, Sparkles, Check, Move, ZoomIn, LayoutGrid, List } from 'lucide-react';
 import { formatRupiah, compressImage } from '../utils';
+import { analyzeInventoryImage } from '../services/geminiService'; // Import service AI
 
 // --- CROPPER (SAMA) ---
 interface ImageCropperProps { imageSrc: string; onConfirm: (croppedBase64: string) => void; onCancel: () => void; }
@@ -21,13 +22,52 @@ interface ShopViewProps { items: InventoryItem[]; cart: CartItem[]; isAdmin: boo
 export const ShopView: React.FC<ShopViewProps> = ({ items = [], cart = [], isAdmin, bannerUrl, onAddToCart, onRemoveFromCart, onCheckout, onUpdateBanner }) => {
   const [searchTerm, setSearchTerm] = useState(''); const [selectedCategory, setSelectedCategory] = useState('Semua'); const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isCartOpen, setIsCartOpen] = useState(false); const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false); const [isUploadingBanner, setIsUploadingBanner] = useState(false); const [tempBannerImg, setTempBannerImg] = useState<string | null>(null);
-  const [customerNameInput, setCustomerNameInput] = useState(''); const bannerInputRef = useRef<HTMLInputElement>(null); const safeItems = Array.isArray(items) ? items : [];
+  
+  // State untuk Checkout
+  const [customerNameInput, setCustomerNameInput] = useState(''); 
+  const [resiInput, setResiInput] = useState('');
+  const [isScanningResi, setIsScanningResi] = useState(false);
+  
+  const bannerInputRef = useRef<HTMLInputElement>(null); 
+  const resiInputRef = useRef<HTMLInputElement>(null);
+  const safeItems = Array.isArray(items) ? items : [];
 
   const carCategories = useMemo(() => { const categories = new Set<string>(); safeItems.forEach(item => { const desc = item.description || ''; const match = desc.match(/^\[(.*?)\]/); if (match && match[1]) categories.add(match[1]); }); return ['Semua', ...Array.from(categories).sort()]; }, [safeItems]);
   const filteredItems = useMemo(() => { return safeItems.filter(item => { const name = (item.name || '').toLowerCase(); const pn = (item.partNumber || '').toLowerCase(); const desc = (item.description || ''); const term = searchTerm.toLowerCase(); const matchesSearch = name.includes(term) || pn.includes(term); const matchesCategory = selectedCategory === 'Semua' ? true : desc.startsWith(`[${selectedCategory}]`); return (Number(item.quantity) || 0) > 0 && matchesSearch && matchesCategory; }); }, [safeItems, searchTerm, selectedCategory]);
   
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onloadend = () => { setTempBannerImg(reader.result as string); if (bannerInputRef.current) bannerInputRef.current.value = ''; }; reader.readAsDataURL(file); };
   const handleCropConfirm = async (base64: string) => { setTempBannerImg(null); setIsUploadingBanner(true); try { const compressed = await compressImage(base64); await onUpdateBanner(compressed); } catch (error) { console.error("Gagal upload banner", error); alert("Gagal memproses gambar banner"); } finally { setIsUploadingBanner(false); } };
+  
+  // --- HANDLER SCAN RESI ---
+  const handleResiScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsScanningResi(true);
+    try {
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+            const base64 = reader.result as string;
+            const compressed = await compressImage(base64);
+            
+            // Menggunakan AI Service yang ada untuk analisis
+            // Note: Prompt aslinya untuk inventaris, tapi kita coba manfaatkan outputnya
+            const result = await analyzeInventoryImage(compressed);
+            
+            if (result.suggestedName) setCustomerNameInput(result.suggestedName);
+            // Menggunakan deskripsi atau part number yang terdeteksi sebagai resi (logika sederhana)
+            if (result.suggestedDescription) setResiInput(result.suggestedDescription.slice(0, 30));
+        };
+        reader.readAsDataURL(file);
+    } catch (error) {
+        console.error(error);
+        alert("Gagal scan resi");
+    } finally {
+        setIsScanningResi(false);
+        if (resiInputRef.current) resiInputRef.current.value = '';
+    }
+  };
+
   const cartTotal = cart.reduce((sum, item) => sum + ((item.price || 0) * item.cartQuantity), 0); const cartItemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
 
   return (
@@ -94,8 +134,78 @@ export const ShopView: React.FC<ShopViewProps> = ({ items = [], cart = [], isAdm
       )}
 
       <button onClick={() => setIsCartOpen(true)} className="fixed bottom-20 right-4 sm:bottom-8 sm:right-8 bg-gray-900 text-white p-4 rounded-full shadow-xl hover:bg-blue-600 hover:scale-105 active:scale-95 transition-all z-40 flex items-center justify-center group"><ShoppingCart size={24} />{cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-white shadow-sm">{cartItemCount}</span>}</button>
+      
+      {/* CART MODAL */}
       {isCartOpen && (<div className="fixed inset-0 z-[60] flex justify-end"><div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setIsCartOpen(false)}></div><div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right"><div className="px-5 py-4 border-b flex justify-between items-center bg-white"><h2 className="text-lg font-bold">Keranjang</h2><button onClick={() => setIsCartOpen(false)}><X size={20}/></button></div><div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">{cart.map(item => (<div key={item.id} className="flex gap-3 bg-white p-3 rounded-xl shadow-sm border border-gray-100"><div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">{item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer"/> : <div className="h-full flex items-center justify-center"><Package size={20}/></div>}</div><div className="flex-1 flex flex-col justify-between"><h4 className="text-sm font-bold line-clamp-1">{item.name}</h4><div className="flex justify-between items-center mt-2"><span className="text-sm font-bold text-blue-600">{formatRupiah(item.price)}</span><div className="flex gap-2 items-center bg-gray-50 px-2 py-1 rounded"><span className="text-xs font-bold">x {item.cartQuantity}</span><button onClick={() => onRemoveFromCart(item.id)} className="text-red-500"><X size={14}/></button></div></div></div></div>))}{cart.length === 0 && <div className="flex flex-col items-center justify-center h-64 text-gray-400"><ShoppingCart size={48} className="mb-2 opacity-20"/><p>Keranjang kosong</p></div>}</div><div className="p-5 border-t bg-white safe-area-bottom"><div className="flex justify-between mb-4"><span className="font-bold">Total</span><span className="font-extrabold text-xl">{formatRupiah(cartTotal)}</span></div><button onClick={() => { setIsCartOpen(false); setIsCheckoutModalOpen(true); }} disabled={cart.length===0} className="w-full bg-gray-900 text-white py-3.5 rounded-xl font-bold hover:bg-black disabled:opacity-50">Lanjut Bayar</button></div></div></div>)}
-      {isCheckoutModalOpen && (<div className="fixed inset-0 z-[70] flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsCheckoutModalOpen(false)}></div><div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm relative overflow-hidden animate-in zoom-in-95"><div className="bg-gray-50 px-6 py-4 border-b"><h3 className="text-lg font-bold">Konfirmasi</h3></div><form onSubmit={(e) => { e.preventDefault(); if(customerNameInput.trim()) { onCheckout(customerNameInput); setIsCheckoutModalOpen(false); setCustomerNameInput(''); } }} className="p-6"><div className="space-y-4"><div><label className="text-xs font-bold text-gray-500 uppercase">Nama</label><input type="text" required autoFocus value={customerNameInput} onChange={(e) => setCustomerNameInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Nama Anda..." /></div><div className="bg-blue-50 p-4 rounded-xl text-blue-900 font-bold flex justify-between text-sm"><span>Total</span><span>{formatRupiah(cartTotal)}</span></div></div><div className="mt-6 grid grid-cols-2 gap-3"><button type="button" onClick={() => setIsCheckoutModalOpen(false)} className="py-3 bg-gray-100 font-bold rounded-xl">Batal</button><button type="submit" disabled={!customerNameInput.trim()} className="py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50">Kirim</button></div></form></div></div>)}
+      
+      {/* CHECKOUT MODAL (DIMODIFIKASI) */}
+      {isCheckoutModalOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsCheckoutModalOpen(false)}></div>
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm relative overflow-hidden animate-in zoom-in-95">
+                <div className="bg-gray-50 px-6 py-4 border-b">
+                    <h3 className="text-lg font-bold">Konfirmasi</h3>
+                </div>
+                <form onSubmit={(e) => { 
+                    e.preventDefault(); 
+                    if(customerNameInput.trim()) { 
+                        // Menggabungkan resi ke nama jika ada, atau handle sesuai kebutuhan backend
+                        const checkoutName = resiInput.trim() ? `${customerNameInput} (Resi: ${resiInput})` : customerNameInput;
+                        onCheckout(checkoutName); 
+                        setIsCheckoutModalOpen(false); 
+                        setCustomerNameInput(''); 
+                        setResiInput('');
+                    } 
+                }} className="p-6">
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase">Nama</label>
+                            <input type="text" required autoFocus value={customerNameInput} onChange={(e) => setCustomerNameInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Nama Anda..." />
+                        </div>
+                        
+                        {/* INPUT RESI */}
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase">No. Resi</label>
+                            <input 
+                                type="text" 
+                                value={resiInput} 
+                                onChange={(e) => setResiInput(e.target.value)} 
+                                className="w-full p-3 border rounded-xl mt-1" 
+                                placeholder="Nomor Resi..." 
+                            />
+                        </div>
+
+                        {/* TOMBOL SCAN */}
+                        <div className="flex justify-center">
+                            <button 
+                                type="button" 
+                                onClick={() => resiInputRef.current?.click()}
+                                disabled={isScanningResi}
+                                className="flex items-center gap-2 text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg text-sm font-bold transition-colors w-full justify-center"
+                            >
+                                {isScanningResi ? <Loader2 className="animate-spin" size={16}/> : <Camera size={16}/>}
+                                {isScanningResi ? 'Menganalisis...' : 'Scan Resi Otomatis'}
+                            </button>
+                            <input 
+                                type="file" 
+                                ref={resiInputRef} 
+                                className="hidden" 
+                                accept="image/*" 
+                                onChange={handleResiScan} 
+                            />
+                        </div>
+
+                        {/* TOTAL REMOVED AS REQUESTED */}
+                    </div>
+                    
+                    <div className="mt-6 grid grid-cols-2 gap-3">
+                        <button type="button" onClick={() => setIsCheckoutModalOpen(false)} className="py-3 bg-gray-100 font-bold rounded-xl">Batal</button>
+                        <button type="submit" disabled={!customerNameInput.trim()} className="py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50">Kirim</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
     </div>
   );
 };

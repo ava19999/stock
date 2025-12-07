@@ -262,28 +262,40 @@ const AppContent: React.FC = () => {
       if (!order) return;
 
       if (newStatus === 'cancelled' && order.status !== 'cancelled') {
-          setItems(prevItems => {
-              const updatedItems = prevItems.map(item => {
-                  const orderItem = order.items.find(oi => oi.id === item.id);
-                  if (orderItem) {
-                      const restoreQty = orderItem.cartQuantity;
-                      const newItem = { ...item };
-                      newItem.qtyOut = Math.max(0, (newItem.qtyOut || 0) - restoreQty);
-                      newItem.quantity = newItem.quantity + restoreQty;
-                      updateInventoryInSheet(newItem);
-                      addHistory({
-                          id: generateId(), itemId: newItem.id, partNumber: newItem.partNumber, name: newItem.name,
-                          type: 'in', quantity: restoreQty,
-                          previousStock: newItem.quantity - restoreQty, currentStock: newItem.quantity,
-                          timestamp: Date.now(), reason: `Cancel Order #${orderId.slice(0,6)}`
-                      });
-                      return newItem;
-                  }
-                  return item;
-              });
-              localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedItems));
-              return updatedItems;
+          // --- FIX: Memisahkan Update State dan Side Effect (Add History) ---
+          const itemsToUpdate: InventoryItem[] = [];
+          const historyToAdd: StockHistory[] = [];
+
+          const newItems = items.map(item => {
+              const orderItem = order.items.find(oi => oi.id === item.id);
+              if (orderItem) {
+                  const restoreQty = orderItem.cartQuantity;
+                  const newItem = { ...item };
+                  newItem.qtyOut = Math.max(0, (newItem.qtyOut || 0) - restoreQty);
+                  newItem.quantity = newItem.quantity + restoreQty;
+                  
+                  // Kumpulkan data untuk side effect
+                  itemsToUpdate.push(newItem);
+                  historyToAdd.push({
+                      id: generateId(), itemId: newItem.id, partNumber: newItem.partNumber, name: newItem.name,
+                      type: 'in', quantity: restoreQty,
+                      previousStock: newItem.quantity - restoreQty, currentStock: newItem.quantity,
+                      timestamp: Date.now(), reason: `Cancel Order #${orderId.slice(0,6)} (${order.customerName})`
+                  });
+
+                  return newItem;
+              }
+              return item;
           });
+
+          // 1. Update State Items
+          setItems(newItems);
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newItems));
+
+          // 2. Jalankan Side Effect (Update Sheet & Add History) di luar map
+          itemsToUpdate.forEach(item => updateInventoryInSheet(item));
+          historyToAdd.forEach(record => addHistory(record));
+
           showToast('Pesanan dibatalkan, stok dikembalikan.');
       }
 
