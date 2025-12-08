@@ -1,17 +1,24 @@
+// FILE: src/services/supabaseService.ts
 import { supabase } from '../lib/supabase';
 import { InventoryItem, InventoryFormData, Order, StockHistory, ChatSession, Message } from '../types';
 
 // --- INVENTORY SERVICES ---
 
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
-  const { data, error } = await supabase.from('inventory').select('*');
+  // UPDATE: Ditambahkan .range(0, 9999) untuk mengambil sampai 10.000 barang
+  const { data, error } = await supabase
+    .from('inventory')
+    .select('*')
+    .range(0, 9999);
+
   if (error) {
     console.error('Error fetching inventory:', error);
     return [];
   }
+  
   // Mapping snake_case (Supabase) ke camelCase (App)
   return data.map((item: any) => ({
-    id: item.id, // UUID dari supabase
+    id: item.id,
     partNumber: item.part_number,
     name: item.name,
     description: item.description,
@@ -53,7 +60,7 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
 };
 
 export const updateInventory = async (item: InventoryItem): Promise<boolean> => {
-  // Kita cari berdasarkan part_number atau ID
+  // Update berdasarkan part_number (karena kita pakai itu sebagai kunci unik di logika app)
   const { error } = await supabase.from('inventory').update({
     name: item.name,
     description: item.description,
@@ -88,7 +95,13 @@ export const deleteInventory = async (partNumber: string): Promise<boolean> => {
 // --- ORDER SERVICES ---
 
 export const fetchOrders = async (): Promise<Order[]> => {
-  const { data, error } = await supabase.from('orders').select('*').order('timestamp', { ascending: false });
+  // UPDATE: Ditambahkan range juga agar bisa melihat banyak pesanan lama
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .order('timestamp', { ascending: false })
+    .range(0, 4999); // Ambil 5000 pesanan terakhir
+
   if (error) {
     console.error('Error fetching orders:', error);
     return [];
@@ -128,7 +141,13 @@ export const updateOrderStatusService = async (orderId: string, status: string):
 // --- HISTORY SERVICES ---
 
 export const fetchHistory = async (): Promise<StockHistory[]> => {
-  const { data, error } = await supabase.from('stock_history').select('*').order('timestamp', { ascending: false });
+  // UPDATE: Ditambahkan range agar riwayat tidak mentok di 1000
+  const { data, error } = await supabase
+    .from('stock_history')
+    .select('*')
+    .order('timestamp', { ascending: false })
+    .range(0, 4999); // Ambil 5000 riwayat terakhir
+
   if (error) return [];
   return data.map((h: any) => ({
     id: h.id,
@@ -164,7 +183,12 @@ export const addHistoryLog = async (history: StockHistory): Promise<boolean> => 
 // --- CHAT SERVICES ---
 
 export const fetchChatSessions = async (): Promise<ChatSession[]> => {
-  const { data, error } = await supabase.from('chat_sessions').select('*');
+  // Chat mungkin tidak perlu range besar kecuali sangat aktif, default 1000 cukup, tapi kita set 2000
+  const { data, error } = await supabase
+    .from('chat_sessions')
+    .select('*')
+    .range(0, 1999);
+
   if (error) return [];
   return data.map((c: any) => ({
     customerId: c.customer_id,
