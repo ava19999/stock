@@ -1,5 +1,5 @@
 // FILE: src/components/Dashboard.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
 import { fetchInventoryPaginated, fetchInventoryStats } from '../services/supabaseService';
 import { 
@@ -9,7 +9,6 @@ import {
 } from 'lucide-react';
 
 interface DashboardProps {
-  // Items tidak lagi wajib dari props karena Dashboard ambil sendiri
   items: InventoryItem[]; 
   orders: Order[];
   history: StockHistory[];
@@ -40,7 +39,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // --- FETCH DATA (SERVER SIDE) ---
   const loadData = useCallback(async () => {
     setLoading(true);
-    // Fetch Barang per Halaman
     const { data, count } = await fetchInventoryPaginated(page, 50, searchTerm);
     setLocalItems(data);
     setTotalCount(count);
@@ -49,10 +47,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [page, searchTerm]);
 
   const loadStats = useCallback(async () => {
-    // 1. Fetch Stats Inventory (Ringan)
     const invStats = await fetchInventoryStats();
     
-    // 2. Hitung History Hari Ini (Dari props history yang sudah ada)
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const todayIn = history
@@ -65,32 +61,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setStats({ ...invStats, todayIn, todayOut });
   }, [history]);
 
-  // Efek saat Page/Search berubah
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { loadStats(); }, [loadStats]);
 
-  // Efek awal untuk stats
-  useEffect(() => {
-    loadStats();
-  }, [loadStats]);
-
-  // Debounce Search (Agar tidak reload setiap ketik 1 huruf)
   useEffect(() => {
     const timer = setTimeout(() => {
-        setPage(1); // Reset ke halaman 1 saat search berubah
+        setPage(1);
         loadData();
     }, 500);
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-
   const formatRupiah = (num: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num || 0);
-  const formatCompactNumber = (num: number) => {
+  
+  // UPDATE: Fungsi format angka pintar (Bisa mata uang, bisa angka biasa)
+  const formatCompactNumber = (num: number, isCurrency = true) => {
     const n = num || 0;
     if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'M';
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'jt';
-    return formatRupiah(n);
+    
+    // Jika mata uang: Pakai formatRupiah (ada Rp)
+    // Jika bukan: Pakai format angka biasa (ada titik ribuan, tanpa Rp)
+    return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID').format(n);
   };
 
   const parseHistoryReason = (reason: string) => {
@@ -190,12 +182,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group">
             <div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Package size={32} className="text-blue-600" /></div>
             <div className="flex items-center gap-1.5 text-gray-500 mb-1"><Package size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Item</span></div>
-            <div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalItems)}</div>
+            {/* UPDATE: Gunakan formatCompactNumber(..., false) agar TIDAK ada Rp */}
+            <div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalItems, false)}</div>
         </div>
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group">
             <div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Layers size={32} className="text-purple-600" /></div>
             <div className="flex items-center gap-1.5 text-gray-500 mb-1"><Layers size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Stok</span></div>
-            <div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalStock)}</div>
+            {/* UPDATE: Gunakan formatCompactNumber(..., false) agar TIDAK ada Rp */}
+            <div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalStock, false)}</div>
         </div>
         <button onClick={() => setShowHistoryDetail('in')} className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 text-left active:scale-95 transition-transform relative overflow-hidden hover:border-green-200">
             <div className="absolute right-2 top-2"><div className="bg-green-50 text-green-600 p-0.5 rounded-full"><ArrowUpRight size={10}/></div></div>
@@ -210,6 +204,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="min-w-[160px] snap-start bg-gradient-to-r from-gray-900 to-gray-800 p-3 rounded-xl shadow-lg text-white flex flex-col justify-between h-20 relative overflow-hidden">
              <div className="absolute right-0 top-0 p-2 opacity-10"><Wallet size={40} /></div>
             <div className="flex items-center gap-1.5 text-gray-300 mb-1"><Wallet size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Nilai Aset</span></div>
+            {/* ASET TETAP PAKAI RP (Default true) */}
             <div className="text-lg font-bold tracking-tight text-white truncate" title={formatRupiah(stats.totalAsset)}>{formatCompactNumber(stats.totalAsset)}</div>
         </div>
       </div>
