@@ -68,9 +68,9 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
   }
 };
 
-// PENTING: Limit dinaikkan agar referensi global lebih lengkap jika diperlukan komponen lain
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
-    const res = await fetchInventoryPaginated(1, 2000, '');
+    // Kita naikkan limitnya agar aman, tapi history tidak lagi bergantung pada ini
+    const res = await fetchInventoryPaginated(1, 1000, '');
     return res.data;
 };
 
@@ -241,7 +241,9 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
       quantity: Number(h.quantity) || 0,
       previousStock: Number(h.previous_stock) || 0,
       currentStock: Number(h.current_stock) || 0,
-      price: Number(h.price) || 0, // [BARU] Ambil harga dari DB
+      // MAPPING BARU
+      price: Number(h.price) || 0, 
+      totalPrice: Number(h.total_price) || 0,
       timestamp: h.timestamp,
       reason: h.reason || ''
     }));
@@ -259,7 +261,9 @@ export const addHistoryLog = async (history: StockHistory): Promise<boolean> => 
       quantity: history.quantity,
       previous_stock: history.previousStock,
       current_stock: history.currentStock,
-      price: history.price, // [BARU] Simpan harga ke DB
+      // FIELD BARU
+      price: history.price,
+      total_price: history.totalPrice,
       timestamp: history.timestamp,
       reason: history.reason
     }]);

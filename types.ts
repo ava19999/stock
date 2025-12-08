@@ -4,18 +4,18 @@ export interface InventoryItem {
   partNumber: string;
   name: string;
   description: string;
-  quantity: number; // Stok Akhir (Calculated)
+  quantity: number; 
   shelf: string;
-  price: number;    // Harga Jual
+  price: number;     // Harga Jual Saat Ini
   costPrice: number; // Harga Modal
-  ecommerce: string; // Link/Nama E-commerce
+  ecommerce: string;
   imageUrl: string;
   lastUpdated: number;
   
   // Field Stok untuk Kalkulasi
-  initialStock: number; // Stok Awal
-  qtyIn: number;        // Penambahan
-  qtyOut: number;       // Pengurangan
+  initialStock: number;
+  qtyIn: number;
+  qtyOut: number;
 }
 
 export type InventoryFormData = Omit<InventoryItem, 'id' | 'lastUpdated'>;
@@ -42,7 +42,8 @@ export interface StockHistory {
   quantity: number;
   previousStock: number;
   currentStock: number;
-  price: number; // [BARU] Harga satuan saat transaksi terjadi
+  price: number;       // [BARU] Harga Satuan (Statis)
+  totalPrice: number;  // [BARU] Total Harga (Statis)
   timestamp: number;
   reason: string;
 }

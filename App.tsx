@@ -126,7 +126,6 @@ const AppContent: React.FC = () => {
       setLoading(true);
       const newQuantity = Number(data.quantity) || 0;
       const ecommerceInfo = data.ecommerce ? ` (Via: ${data.ecommerce})` : '';
-      // AMBIL HARGA DARI FORM DATA
       const currentPrice = Number(data.price) || 0;
 
       if (editItem) {
@@ -147,16 +146,20 @@ const AppContent: React.FC = () => {
                   addNewHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
                       type: 'in', quantity: diff, previousStock: oldQty, currentStock: newQuantity,
-                      price: currentPrice, // SIMPAN HARGA
-                      timestamp: Date.now(), reason: `Restock Manual${ecommerceInfo}` 
+                      price: currentPrice,
+                      totalPrice: currentPrice * diff,
+                      timestamp: Date.now(), 
+                      reason: `Restock Manual${ecommerceInfo}` 
                   });
               } else {
                   const absDiff = Math.abs(diff);
                   addNewHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
                       type: 'out', quantity: absDiff, previousStock: oldQty, currentStock: newQuantity,
-                      price: currentPrice, // SIMPAN HARGA
-                      timestamp: Date.now(), reason: 'Koreksi Stok Manual'
+                      price: currentPrice,
+                      totalPrice: currentPrice * absDiff,
+                      timestamp: Date.now(), 
+                      reason: 'Koreksi Stok Manual'
                   });
               }
           }
@@ -175,8 +178,10 @@ const AppContent: React.FC = () => {
           addNewHistory({ 
               id: generateId(), itemId: data.partNumber, partNumber: data.partNumber, name: data.name, 
               type: 'in', quantity: newQuantity, previousStock: 0, currentStock: newQuantity, 
-              price: currentPrice, // SIMPAN HARGA
-              timestamp: Date.now(), reason: `Barang Baru${ecommerceInfo}` 
+              price: currentPrice,
+              totalPrice: currentPrice * newQuantity,
+              timestamp: Date.now(), 
+              reason: `Barang Baru${ecommerceInfo}` 
           });
           
           const success = await addInventory(data);
@@ -246,7 +251,8 @@ const AppContent: React.FC = () => {
                       type: 'out', quantity: qtySold, 
                       previousStock: itemToUpdate.quantity + qtySold, 
                       currentStock: itemToUpdate.quantity,
-                      price: itemToUpdate.price, // SIMPAN HARGA
+                      price: itemToUpdate.price, 
+                      totalPrice: itemToUpdate.price * qtySold,
                       timestamp: Date.now(), reason: `Order #${newOrder.id.slice(0,6)} (${name})`
                   });
               }
@@ -281,7 +287,8 @@ const AppContent: React.FC = () => {
                       id: generateId(), itemId: itemToUpdate.id, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name,
                       type: 'in', quantity: restoreQty,
                       previousStock: itemToUpdate.quantity - restoreQty, currentStock: itemToUpdate.quantity,
-                      price: itemToUpdate.price, // SIMPAN HARGA
+                      price: itemToUpdate.price,
+                      totalPrice: itemToUpdate.price * restoreQty,
                       timestamp: Date.now(), reason: `Cancel Order #${orderId.slice(0,6)} (${order.customerName})`
                   });
               }

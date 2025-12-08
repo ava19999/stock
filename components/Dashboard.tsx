@@ -113,7 +113,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         {filteredHistory.map((h) => {
                             // MENGGUNAKAN HARGA DARI DB HISTORY
                             const price = h.price || 0; 
-                            const total = price * (Number(h.quantity) || 0);
+                            const total = h.totalPrice || (price * (Number(h.quantity) || 0));
                             const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
                             
                             return (
@@ -168,7 +168,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             {itemHistory.map(h => {
                                 const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
                                 const price = h.price || 0;
-                                const total = price * (Number(h.quantity) || 0);
+                                const total = h.totalPrice || (price * (Number(h.quantity) || 0));
 
                                 return (
                                     <tr key={h.id} className="hover:bg-gray-50 transition-colors">
