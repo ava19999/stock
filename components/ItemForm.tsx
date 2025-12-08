@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
 import { analyzeInventoryImage, generateDescription } from '../services/geminiService';
 import { compressImage } from '../utils';
-import { Camera, Upload, Sparkles, X, Save, Loader2, DollarSign, Box } from 'lucide-react';
+import { Camera, Upload, Sparkles, X, Save, Loader2, Box } from 'lucide-react';
 
 interface ItemFormProps {
   initialData?: InventoryItem;
@@ -17,14 +17,14 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
     name: '',
     description: '',
     price: 0,
-    costPrice: 0, // NEW
+    costPrice: 0,
     quantity: 0,
-    initialStock: 0, // NEW
-    qtyIn: 0, // NEW
-    qtyOut: 0, // NEW
+    initialStock: 0,
+    qtyIn: 0,
+    qtyOut: 0,
     shelf: '',
     imageUrl: '',
-    ecommerce: '', // NEW
+    ecommerce: '',
   });
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -57,7 +57,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
     const keluar = Number(formData.qtyOut) || 0;
     const akhir = awal + masuk - keluar;
     
-    // Hanya update jika nilai kalkulasi berbeda (untuk menghindari loop render tak perlu)
     if (akhir !== formData.quantity) {
         setFormData(prev => ({ ...prev, quantity: akhir }));
     }
@@ -198,12 +197,13 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
               <input type="text" name="name" required value={formData.name} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" placeholder="Nama sparepart..." />
             </div>
 
-            {/* HARGA */}
+            {/* HARGA (UPDATED: Ganti icon $ jadi Rp) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl border border-gray-100">
                 <div>
                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Harga Modal (IDR)</label>
                     <div className="relative">
-                    <span className="absolute left-3 top-2 text-gray-400 text-xs"><DollarSign size={14}/></span>
+                    {/* DULU: DollarSign, SEKARANG: Rp */}
+                    <span className="absolute left-3 top-2 text-gray-500 text-xs font-bold">Rp</span>
                     <input type="number" name="costPrice" min="0" value={formData.costPrice} onChange={handleChange} className="w-full pl-8 pr-4 py-2 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="0" />
                     </div>
                 </div>
