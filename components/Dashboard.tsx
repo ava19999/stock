@@ -4,7 +4,7 @@ import { InventoryItem, Order, StockHistory } from '../types';
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
   ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin, FileText,
-  LayoutGrid, List
+  LayoutGrid, List, ShoppingBag, History, X
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -22,6 +22,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showHistoryDetail, setShowHistoryDetail] = useState<'in' | 'out' | null>(null);
+  const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null); // STATE BARU UNTUK MODAL ITEM
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   const stats = useMemo(() => {
@@ -56,6 +57,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return formatRupiah(num);
   };
 
+  // --- HELPER PARSING ---
+  const parseHistoryReason = (reason: string) => {
+      let resi = '-';
+      let ecommerce = '-';
+      let keterangan = reason;
+
+      const resiMatch = keterangan.match(/\(Resi: (.*?)\)/);
+      if (resiMatch && resiMatch[1]) {
+          resi = resiMatch[1];
+          keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, '');
+      }
+
+      const viaMatch = keterangan.match(/\(Via: (.*?)\)/);
+      if (viaMatch && viaMatch[1]) {
+          ecommerce = viaMatch[1];
+          keterangan = keterangan.replace(/\s*\(Via:.*?\)/, '');
+      }
+
+      if (keterangan.toLowerCase().includes('cancel order')) {
+          keterangan = 'Retur';
+      }
+
+      return { resi, ecommerce, keterangan };
+  };
+
+  // --- MODAL RIWAYAT GLOBAL (MASUK/KELUAR) ---
   const HistoryModal = () => {
     if (!showHistoryDetail) return null;
     const type = showHistoryDetail;
@@ -63,27 +90,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       .filter(h => h.type === type)
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, 100);
-
-    // Helper untuk memproses tampilan Resi dan Keterangan
-    const parseHistoryReason = (reason: string) => {
-        let resi = '-';
-        let keterangan = reason;
-
-        // 1. Ekstrak Resi jika ada format (Resi: XXX)
-        const resiMatch = reason.match(/\(Resi: (.*?)\)/);
-        if (resiMatch && resiMatch[1]) {
-            resi = resiMatch[1];
-            // Hapus bagian resi dari keterangan
-            keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, '');
-        }
-
-        // 2. Ubah "Cancel Order" menjadi "Retur"
-        if (keterangan.toLowerCase().includes('cancel order')) {
-            keterangan = 'Retur';
-        }
-
-        return { resi, keterangan };
-    };
 
     return (
       <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
@@ -105,12 +111,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <tr>
                             <th className="p-3 border-b border-gray-200 w-28">Tanggal</th>
                             <th className="p-3 border-b border-gray-200 w-32">Resi</th>
+                            <th className="p-3 border-b border-gray-200 w-32">E-Commerce</th>
                             <th className="p-3 border-b border-gray-200 w-32">No. Part</th>
                             <th className="p-3 border-b border-gray-200">Nama Barang</th>
                             <th className="p-3 border-b border-gray-200 text-right w-20">Qty</th>
                             <th className="p-3 border-b border-gray-200 text-right w-32">Harga</th>
                             <th className="p-3 border-b border-gray-200 text-right w-32">Total</th>
-                            {/* HANYA TAMPILKAN KOLOM KETERANGAN JIKA RIWAYAT MASUK */}
                             {type === 'in' && <th className="p-3 border-b border-gray-200 w-48">Keterangan</th>}
                         </tr>
                     </thead>
@@ -118,7 +124,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         {filteredHistory.map((h) => {
                             const item = items.find(i => i.id === h.itemId || i.partNumber === h.partNumber);
                             const price = item ? item.price : 0;
-                            const { resi, keterangan } = parseHistoryReason(h.reason);
+                            const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
                             const isRetur = keterangan === 'Retur';
 
                             return (
@@ -128,8 +134,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         <div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div>
                                     </td>
                                     <td className="p-3 align-top">
-                                        <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${resi !== '-' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-400'}`}>
+                                        <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${resi !== '-' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-300'}`}>
                                             {resi}
+                                        </span>
+                                    </td>
+                                    <td className="p-3 align-top">
+                                        <span className={`inline-block px-2 py-1 rounded text-xs font-medium flex items-center gap-1 w-fit ${ecommerce !== '-' ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'text-gray-300'}`}>
+                                            {ecommerce !== '-' && <ShoppingBag size={10} />}
+                                            {ecommerce}
                                         </span>
                                     </td>
                                     <td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber}</td>
@@ -145,7 +157,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">
                                         {formatRupiah(price * h.quantity)}
                                     </td>
-                                    {/* HANYA TAMPILKAN ISI KETERANGAN JIKA RIWAYAT MASUK */}
                                     {type === 'in' && (
                                         <td className="p-3 align-top text-xs">
                                             {isRetur ? (
@@ -164,10 +175,95 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </table>
             )}
           </div>
-          
-          <div className="p-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-500 text-right">
-             Menampilkan maks 100 transaksi terakhir
-          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // --- MODAL RIWAYAT PER ITEM (BARU) ---
+  const ItemHistoryModal = () => {
+    if (!selectedItemHistory) return null;
+    
+    // Filter history hanya untuk item ini
+    const itemHistory = history
+        .filter(h => h.itemId === selectedItemHistory.id || h.partNumber === selectedItemHistory.partNumber)
+        .sort((a, b) => b.timestamp - a.timestamp);
+
+    return (
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+        <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b flex justify-between items-start bg-gray-50">
+                <div>
+                    <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+                        <History size={20} className="text-blue-600"/>
+                        Riwayat Transaksi Barang
+                    </h3>
+                    <p className="text-sm text-gray-500 mt-1 line-clamp-1">{selectedItemHistory.name}</p>
+                    <div className="flex gap-2 mt-2">
+                        <span className="text-xs bg-gray-200 px-2 py-0.5 rounded text-gray-700 font-mono">{selectedItemHistory.partNumber}</span>
+                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">Sisa Stok: {selectedItemHistory.quantity}</span>
+                    </div>
+                </div>
+                <button onClick={() => setSelectedItemHistory(null)} className="p-1 hover:bg-gray-200 rounded-full transition-colors"><X size={24} className="text-gray-500"/></button>
+            </div>
+
+            <div className="overflow-auto flex-1 p-0">
+                {itemHistory.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                        <History size={48} className="opacity-20 mb-3"/>
+                        <p>Belum ada riwayat transaksi untuk barang ini</p>
+                    </div>
+                ) : (
+                    <table className="w-full text-left border-collapse">
+                        <thead className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10">
+                            <tr>
+                                <th className="p-3 border-b border-gray-200 w-32">Tanggal</th>
+                                <th className="p-3 border-b border-gray-200 w-24 text-center">Tipe</th>
+                                <th className="p-3 border-b border-gray-200 w-20 text-right">Jml</th>
+                                <th className="p-3 border-b border-gray-200 text-right w-24">Stok Akhir</th>
+                                <th className="p-3 border-b border-gray-200">Keterangan / Resi</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 text-sm">
+                            {itemHistory.map(h => {
+                                const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
+                                return (
+                                    <tr key={h.id} className="hover:bg-gray-50 transition-colors">
+                                        <td className="p-3 align-top text-gray-600">
+                                            <div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div>
+                                            <div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div>
+                                        </td>
+                                        <td className="p-3 align-top text-center">
+                                            <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${h.type === 'in' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                {h.type === 'in' ? 'Masuk' : 'Keluar'}
+                                            </span>
+                                        </td>
+                                        <td className={`p-3 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>
+                                            {h.type === 'in' ? '+' : '-'}{h.quantity}
+                                        </td>
+                                        <td className="p-3 align-top text-right font-mono text-gray-600">
+                                            {h.currentStock}
+                                        </td>
+                                        <td className="p-3 align-top text-gray-700">
+                                            <div className="font-medium text-xs mb-1">{keterangan}</div>
+                                            {resi !== '-' && (
+                                                <div className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] border border-blue-100 mr-1">
+                                                    Resi: {resi}
+                                                </div>
+                                            )}
+                                            {ecommerce !== '-' && (
+                                                <div className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-100">
+                                                    <ShoppingBag size={8}/> {ecommerce}
+                                                </div>
+                                            )}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                )}
+            </div>
         </div>
       </div>
     );
@@ -176,6 +272,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   return (
     <div className="space-y-4 pb-24">
       <HistoryModal />
+      <ItemHistoryModal />
 
       {/* STATS */}
       <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide snap-x md:grid md:grid-cols-5 md:gap-4 md:overflow-visible md:mx-0 md:px-0 md:pb-0">
@@ -227,13 +324,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
                    {filteredItems.map(item => (
                      <div key={item.id} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full hover:shadow-md transition-shadow group">
-                        <div className="relative aspect-[4/3] bg-gray-50 overflow-hidden border-b border-gray-50">
+                        {/* UPDATE ONCLICK IMAGE */}
+                        <div 
+                            className="relative aspect-[4/3] bg-gray-50 overflow-hidden border-b border-gray-50 cursor-pointer group-hover:opacity-90 transition-opacity"
+                            onClick={() => setSelectedItemHistory(item)}
+                            title="Klik untuk lihat riwayat"
+                        >
                           {item.imageUrl ? (
                             <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}/>
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-gray-300"><Package size={20} /></div>
                           )}
                           <div className="absolute top-1.5 left-1.5"><span className={`text-[8px] font-bold px-1 py-0.5 rounded shadow-sm border ${item.quantity < 5 ? 'bg-red-500 text-white border-red-600' : 'bg-white/90 text-gray-700 backdrop-blur-sm border-gray-200'}`}>{item.quantity} Unit</span></div>
+                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                              <span className="bg-white/90 text-gray-800 text-[10px] font-bold px-2 py-1 rounded-full shadow-sm flex items-center gap-1"><History size={10}/> Riwayat</span>
+                          </div>
                         </div>
                         <div className="p-2.5 flex-1 flex flex-col">
                           <div className="mb-2">
@@ -262,8 +367,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 // --- LIST VIEW ---
                 <div className="flex flex-col gap-2">
                     {filteredItems.map(item => (
-                        <div key={item.id} className="bg-white rounded-lg p-3 border border-gray-100 shadow-sm flex items-center gap-3 hover:shadow-md transition-shadow">
-                            <div className="w-14 h-14 flex-shrink-0 bg-gray-50 rounded-md overflow-hidden border border-gray-100 relative">
+                        <div key={item.id} className="bg-white rounded-lg p-3 border border-gray-100 shadow-sm flex items-center gap-3 hover:shadow-md transition-shadow group">
+                            {/* UPDATE ONCLICK IMAGE */}
+                            <div 
+                                className="w-14 h-14 flex-shrink-0 bg-gray-50 rounded-md overflow-hidden border border-gray-100 relative cursor-pointer group-hover:ring-2 group-hover:ring-blue-200 transition-all"
+                                onClick={() => setSelectedItemHistory(item)}
+                                title="Lihat Riwayat"
+                            >
                                 {item.imageUrl ? (
                                     <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}/>
                                 ) : (

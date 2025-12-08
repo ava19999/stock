@@ -1,8 +1,6 @@
 // FILE: src/services/googleSheetService.ts
 import { InventoryItem, InventoryFormData } from '../types';
 
-// Pastikan Google Apps Script Anda memetakan nama kolom ini:
-// partNumber, name, description, price, stok (awal), masuk, keluar, stokAhir, shelf, imageUrl
 const API_URL = 'https://script.google.com/macros/s/AKfycbzsDozdZKtZw-Duhg1-A_A_6vTQgm1y0sGw1iN-2ecgLdBOLkviJsqkEAdacmgx17Cv/exec';
 
 export const fetchInventoryFromSheet = async (): Promise<InventoryItem[]> => {
@@ -19,18 +17,19 @@ export const fetchInventoryFromSheet = async (): Promise<InventoryItem[]> => {
         name: item.name,
         description: item.description,
         price: Number(item.price) || 0,
+        // Mapping kolom baru (Pastikan di Sheet Anda ada kolomnya atau API handle ini)
+        costPrice: Number(item.costPrice) || 0, 
+        ecommerce: item.ecommerce || '',
+        
         shelf: item.shelf,
         imageUrl: item.imageUrl || '',
         lastUpdated: Date.now(),
 
-        // --- MAPPING LOGIKA BARU ---
-        // 'quantity' di App sekarang = Stok Ahir di Sheet
-        quantity: Number(item.stokAhir) || 0, 
-        
-        // Simpan state kolom lainnya untuk perhitungan
-        initialStock: Number(item.stok) || 0,   // Kolom D (Stok Awal)
-        qtyIn: Number(item.masuk) || 0,         // Kolom G (Masuk)
-        qtyOut: Number(item.keluar) || 0        // Kolom H (Keluar)
+        // Mapping Stok Lengkap
+        quantity: Number(item.stokAhir) || 0, // Stok Akhir
+        initialStock: Number(item.stok) || 0, // Stok Awal
+        qtyIn: Number(item.masuk) || 0,       // Penambahan
+        qtyOut: Number(item.keluar) || 0      // Pengurangan
       }));
     }
     return [];
@@ -42,16 +41,19 @@ export const fetchInventoryFromSheet = async (): Promise<InventoryItem[]> => {
 
 export const addInventoryToSheet = async (item: InventoryFormData): Promise<boolean> => {
   try {
-    // Saat tambah barang baru, quantity yang diinput masuk ke 'Masuk' atau 'Stok Awal'
-    // Disini kita masukkan ke 'Stok' (Awal) agar bersih
+    // Saat tambah baru, kita asumsikan quantity masuk ke Stok Awal
+    // Dan user mungkin input detail lain
     const payload = JSON.stringify({
       action: 'add',
       payload: {
           ...item,
-          stok: item.quantity, // Masuk ke kolom Stok Awal
-          masuk: 0,
-          keluar: 0,
-          stokAhir: item.quantity // Stok Ahir awal
+          stok: item.initialStock || item.quantity, 
+          masuk: item.qtyIn || 0,
+          keluar: item.qtyOut || 0,
+          stokAhir: item.quantity,
+          // Field baru
+          costPrice: item.costPrice,
+          ecommerce: item.ecommerce
       }
     });
 
@@ -70,7 +72,6 @@ export const addInventoryToSheet = async (item: InventoryFormData): Promise<bool
 
 export const updateInventoryInSheet = async (item: InventoryItem): Promise<boolean> => {
   try {
-    // Kirim data lengkap termasuk perubahan Masuk/Keluar
     const payload = JSON.stringify({
       action: 'update',
       payload: {
@@ -81,11 +82,15 @@ export const updateInventoryInSheet = async (item: InventoryItem): Promise<boole
           shelf: item.shelf,
           imageUrl: item.imageUrl,
           
-          // Kirim angka counter yang sudah diupdate App
+          // Update Stok Lengkap
           stok: item.initialStock,
           masuk: item.qtyIn,
           keluar: item.qtyOut,
-          stokAhir: item.quantity // Kirim juga stok ahir hasil hitungan App agar sync cepat
+          stokAhir: item.quantity,
+
+          // Field baru
+          costPrice: item.costPrice,
+          ecommerce: item.ecommerce
       }
     });
 

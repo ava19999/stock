@@ -1,7 +1,7 @@
 // FILE: src/components/OrderManagement.tsx
 import React, { useState, useMemo, useEffect } from 'react';
 import { Order, OrderStatus } from '../types';
-import { Clock, CheckCircle, Package, Truck, ClipboardList, RotateCcw, Edit3 } from 'lucide-react';
+import { Clock, CheckCircle, Package, Truck, ClipboardList, RotateCcw, Edit3, ShoppingBag } from 'lucide-react';
 import { formatRupiah } from '../utils';
 
 interface OrderManagementProps {
@@ -58,22 +58,34 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders, onUpda
     }
   };
 
-  // Helper untuk menampilkan teks status (Cancelled -> RETUR)
   const getStatusLabel = (status: OrderStatus) => {
       if (status === 'cancelled') return 'RETUR';
       return status;
   };
 
-  const getResiOrId = (order: Order) => {
-      const match = order.customerName.match(/\(Resi: (.*?)\)/);
-      if (match && match[1]) {
-          return { text: match[1], isResi: true };
-      }
-      return { text: `#${order.id.slice(0, 8)}`, isResi: false };
-  };
+  // --- LOGIKA EKSTRAKSI DATA BARU ---
+  const getOrderDetails = (order: Order) => {
+      let cleanName = order.customerName;
+      let resiText = `#${order.id.slice(0, 8)}`;
+      let isResi = false;
+      let ecommerce = '-';
 
-  const getCleanName = (name: string) => {
-      return name.replace(/\s*\(Resi:.*?\)/, '');
+      // 1. Ekstrak Resi
+      const resiMatch = cleanName.match(/\(Resi: (.*?)\)/);
+      if (resiMatch && resiMatch[1]) {
+          resiText = resiMatch[1];
+          isResi = true;
+          cleanName = cleanName.replace(/\s*\(Resi:.*?\)/, '');
+      }
+
+      // 2. Ekstrak E-Commerce
+      const viaMatch = cleanName.match(/\(Via: (.*?)\)/);
+      if (viaMatch && viaMatch[1]) {
+          ecommerce = viaMatch[1];
+          cleanName = cleanName.replace(/\s*\(Via:.*?\)/, '');
+      }
+
+      return { cleanName, resiText, isResi, ecommerce };
   };
 
   const formatDate = (ts: number) => {
@@ -119,12 +131,13 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders, onUpda
       
       {/* Table View */}
       <div className="flex-1 overflow-x-auto p-4 bg-gray-50">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden min-w-[1000px]">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden min-w-[1200px]">
             <table className="w-full text-left border-collapse">
                 <thead className="bg-gray-50 text-xs font-bold text-gray-600 uppercase tracking-wider border-b border-gray-200">
                     <tr>
                         <th className="p-4 w-32">Tanggal</th>
                         <th className="p-4 w-32">Resi / ID</th>
+                        <th className="p-4 w-32">E-Commerce</th> {/* KOLOM BARU */}
                         <th className="p-4 w-40">Pelanggan</th>
                         <th className="p-4 w-32">No. Part</th>
                         <th className="p-4">Nama Barang</th>
@@ -132,7 +145,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders, onUpda
                         <th className="p-4 text-right w-32">Harga</th>
                         <th className="p-4 text-right w-32">Total</th>
                         <th className="p-4 text-center w-32">Status</th>
-                        {/* Header Berubah Sesuai Tab */}
                         <th className="p-4 text-center w-48">
                             {activeTab === 'history' ? 'Keterangan' : 'Aksi'}
                         </th>
@@ -141,15 +153,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders, onUpda
                 <tbody className="divide-y divide-gray-100 text-sm">
                     {filteredOrders.length === 0 ? (
                         <tr>
-                            <td colSpan={10} className="p-12 text-center text-gray-400">
+                            <td colSpan={11} className="p-12 text-center text-gray-400">
                                 <ClipboardList size={48} className="opacity-20 mx-auto mb-3" />
                                 <p className="font-medium">Tidak ada data pesanan</p>
                             </td>
                         </tr>
                     ) : (
                         filteredOrders.map(order => {
-                            const { text: resi, isResi } = getResiOrId(order);
-                            const cleanName = isResi ? getCleanName(order.customerName) : order.customerName;
+                            const { cleanName, resiText, isResi, ecommerce } = getOrderDetails(order);
                             const dt = formatDate(order.timestamp);
 
                             return order.items.map((item, index) => (
@@ -163,8 +174,19 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders, onUpda
                                             </td>
                                             <td rowSpan={order.items.length} className="p-4 align-top border-r border-gray-100 font-mono text-xs bg-white group-hover:bg-blue-50/30">
                                                 <span className={`block px-2 py-1 rounded w-fit ${isResi ? 'bg-blue-50 text-blue-700 font-bold border border-blue-100' : 'text-gray-500 bg-gray-50'}`}>
-                                                    {resi}
+                                                    {resiText}
                                                 </span>
+                                            </td>
+                                            {/* KOLOM E-COMMERCE */}
+                                            <td rowSpan={order.items.length} className="p-4 align-top border-r border-gray-100 font-medium bg-white group-hover:bg-blue-50/30 text-gray-600">
+                                                {ecommerce !== '-' ? (
+                                                   <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-orange-50 text-orange-700 border border-orange-100 w-fit">
+                                                      <ShoppingBag size={12} />
+                                                      <span className="text-xs font-bold">{ecommerce}</span>
+                                                   </div>
+                                                ) : (
+                                                   <span className="text-gray-300">-</span>
+                                                )}
                                             </td>
                                             <td rowSpan={order.items.length} className="p-4 align-top border-r border-gray-100 font-medium text-gray-900 bg-white group-hover:bg-blue-50/30">
                                                 {cleanName}
@@ -191,9 +213,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders, onUpda
                                             </td>
                                             <td rowSpan={order.items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
                                                 
-                                                {/* Logic Tampilan Berdasarkan Tab */}
                                                 {activeTab === 'history' ? (
-                                                    // Tampilan KETERANGAN (Editable)
                                                     <div className="relative group/note">
                                                         <textarea 
                                                             className="w-full text-xs p-2 border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none resize-none min-h-[60px] transition-all"
@@ -206,7 +226,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders, onUpda
                                                         </div>
                                                     </div>
                                                 ) : (
-                                                    // Tampilan AKSI (Tombol)
                                                     <div className="flex flex-col gap-2">
                                                         {order.status === 'pending' && (
                                                             <>

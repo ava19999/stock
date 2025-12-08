@@ -10,7 +10,7 @@ import { CustomerOrderView } from './components/CustomerOrderView';
 import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
 import { fetchInventoryFromSheet, addInventoryToSheet, updateInventoryInSheet, deleteInventoryFromSheet } from './services/googleSheetService';
 import { generateId } from './utils';
-import { Home, MessageSquare, Package, ShieldCheck, User, CheckCircle, XCircle, ClipboardList, LogOut, ArrowRight, CloudLightning, RefreshCw, KeyRound, ShoppingCart, Car } from 'lucide-react';
+import { Home, MessageSquare, Package, ShieldCheck, User, CheckCircle, XCircle, ClipboardList, LogOut, ArrowRight, CloudLightning, RefreshCw, KeyRound, ShoppingCart, Car, ScanBarcode } from 'lucide-react';
 
 const LOCAL_STORAGE_KEY = 'stockmaster_v11_live_api';
 const ORDERS_STORAGE_KEY = 'stockmaster_orders_db_v2';
@@ -20,7 +20,8 @@ const CUSTOMER_ID_KEY = 'stockmaster_my_customer_id';
 
 const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 
-type ActiveView = 'shop' | 'chat' | 'inventory' | 'orders';
+// Tambahkan 'scan' ke ActiveView
+type ActiveView = 'shop' | 'chat' | 'inventory' | 'orders' | 'scan';
 
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
@@ -31,6 +32,17 @@ const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 
     </div>
   );
 };
+
+// Placeholder untuk Scan Resi View
+const ScanResiView = () => (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] text-gray-400">
+        <div className="bg-gray-100 p-6 rounded-full mb-4">
+            <ScanBarcode size={64} className="opacity-40"/>
+        </div>
+        <h2 className="text-xl font-bold text-gray-700">Fitur Scan Resi</h2>
+        <p className="text-sm">Segera Hadir</p>
+    </div>
+);
 
 const AppContent: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -123,6 +135,10 @@ const AppContent: React.FC = () => {
       setLoading(true);
       const newQuantity = Number(data.quantity) || 0;
 
+      // --- LOGIKA UNTUK FORMAT ALASAN RIWAYAT ---
+      // Menambahkan info E-commerce ke dalam string reason agar terbaca di Dashboard
+      const ecommerceInfo = data.ecommerce ? ` (Via: ${data.ecommerce})` : '';
+
       if (editItem) {
           const oldQty = Number(editItem.quantity) || 0;
           const diff = newQuantity - oldQty;
@@ -134,7 +150,8 @@ const AppContent: React.FC = () => {
                   addHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
                       type: 'in', quantity: diff, previousStock: oldQty, currentStock: newQuantity,
-                      timestamp: Date.now(), reason: 'Restock Manual'
+                      timestamp: Date.now(), 
+                      reason: `Restock Manual${ecommerceInfo}` 
                   });
               } else {
                   const absDiff = Math.abs(diff);
@@ -142,7 +159,8 @@ const AppContent: React.FC = () => {
                   addHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
                       type: 'out', quantity: absDiff, previousStock: oldQty, currentStock: newQuantity,
-                      timestamp: Date.now(), reason: 'Koreksi Stok Manual'
+                      timestamp: Date.now(), 
+                      reason: 'Koreksi Stok Manual'
                   });
               }
               updatedItem.quantity = newQuantity;
@@ -154,8 +172,16 @@ const AppContent: React.FC = () => {
               if (success) { showToast('Data diupdate!'); setItems(prev => prev.map(i => i.id === editItem.id ? updatedItem : i)); }
           }
       } else {
+          // BARANG BARU
           if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number ada!', 'error'); setLoading(false); return; }
-          addHistory({ id: generateId(), itemId: data.partNumber, partNumber: data.partNumber, name: data.name, type: 'in', quantity: newQuantity, previousStock: 0, currentStock: newQuantity, timestamp: Date.now(), reason: 'Barang Baru' });
+          
+          addHistory({ 
+              id: generateId(), itemId: data.partNumber, partNumber: data.partNumber, name: data.name, 
+              type: 'in', quantity: newQuantity, previousStock: 0, currentStock: newQuantity, 
+              timestamp: Date.now(), 
+              reason: `Barang Baru${ecommerceInfo}` 
+          });
+          
           const success = await addInventoryToSheet(data);
           if (success) {
               showToast('Terkirim ke Sheet!');
@@ -169,21 +195,22 @@ const AppContent: React.FC = () => {
   const handleUpdateBanner = async (base64: string) => {
       const bannerPayload: InventoryItem = {
           id: BANNER_PART_NUMBER, partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', description: 'DO NOT DELETE - System Configuration',
-          price: 0, quantity: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, shelf: 'SYSTEM', imageUrl: base64, lastUpdated: Date.now()
+          price: 0, costPrice: 0, ecommerce: '', quantity: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, shelf: 'SYSTEM', imageUrl: base64, lastUpdated: Date.now()
       };
 
       let success = false;
       if (bannerUrl) {
            success = await updateInventoryInSheet(bannerPayload);
       } else {
-           const formData: InventoryFormData = { partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', description: 'DO NOT DELETE - System Configuration', price: 0, quantity: 0, shelf: 'SYSTEM', imageUrl: base64 };
+           const formData: InventoryFormData = { partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', description: 'DO NOT DELETE - System Configuration', price: 0, costPrice: 0, ecommerce: '', quantity: 0, shelf: 'SYSTEM', imageUrl: base64, initialStock: 0, qtyIn: 0, qtyOut: 0 };
            success = await addInventoryToSheet(formData);
       }
 
       if (success) {
           setBannerUrl(base64); showToast('Banner diperbarui!'); setTimeout(refreshData, 5000); 
       } else {
-          const formData: InventoryFormData = { partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', description: 'DO NOT DELETE - System Configuration', price: 0, quantity: 0, shelf: 'SYSTEM', imageUrl: base64 };
+           // Retry with add
+           const formData: InventoryFormData = { partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', description: 'DO NOT DELETE - System Configuration', price: 0, costPrice: 0, ecommerce: '', quantity: 0, shelf: 'SYSTEM', imageUrl: base64, initialStock: 0, qtyIn: 0, qtyOut: 0 };
            const retrySuccess = await addInventoryToSheet(formData);
            if (retrySuccess) { setBannerUrl(base64); showToast('Banner dibuat!'); setTimeout(refreshData, 5000); } 
            else { showToast('Gagal update banner', 'error'); }
@@ -262,7 +289,6 @@ const AppContent: React.FC = () => {
       if (!order) return;
 
       if (newStatus === 'cancelled' && order.status !== 'cancelled') {
-          // --- FIX: Memisahkan Update State dan Side Effect (Add History) ---
           const itemsToUpdate: InventoryItem[] = [];
           const historyToAdd: StockHistory[] = [];
 
@@ -274,7 +300,6 @@ const AppContent: React.FC = () => {
                   newItem.qtyOut = Math.max(0, (newItem.qtyOut || 0) - restoreQty);
                   newItem.quantity = newItem.quantity + restoreQty;
                   
-                  // Kumpulkan data untuk side effect
                   itemsToUpdate.push(newItem);
                   historyToAdd.push({
                       id: generateId(), itemId: newItem.id, partNumber: newItem.partNumber, name: newItem.name,
@@ -288,11 +313,9 @@ const AppContent: React.FC = () => {
               return item;
           });
 
-          // 1. Update State Items
           setItems(newItems);
           localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newItems));
 
-          // 2. Jalankan Side Effect (Update Sheet & Add History) di luar map
           itemsToUpdate.forEach(item => updateInventoryInSheet(item));
           historyToAdd.forEach(record => addHistory(record));
 
@@ -335,7 +358,6 @@ const AppContent: React.FC = () => {
                 <div className="relative z-10">
                     <div className="flex justify-center mb-6"><div className="bg-white p-4 rounded-2xl shadow-lg ring-1 ring-gray-100"><Car size={40} className="text-blue-600" strokeWidth={1.5} /></div></div>
                     
-                    {/* --- BRANDING LOGIN SCREEN --- */}
                     <div className="text-center mb-8">
                         <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight mb-1">BJW</h1>
                         <p className="text-gray-700 text-lg font-bold uppercase tracking-wider mb-1">Autopart</p>
@@ -374,7 +396,10 @@ const AppContent: React.FC = () => {
               <button onClick={() => { refreshData(); showToast('Data direfresh'); }} className="p-2 text-gray-400 hover:bg-gray-100 hover:text-blue-600 rounded-full transition-colors" title="Refresh Data"><RefreshCw size={20} /></button>
               {isAdmin ? (
                   <>
-                    <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><ShoppingCart size={18}/> Belanja</button>
+                    <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><ShoppingCart size={18}/> Beranda</button>
+                    {/* BUTTON SCAN RESI DITAMBAHKAN DISINI */}
+                    <button onClick={() => setActiveView('scan')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='scan'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><ScanBarcode size={18}/> Scan Resi</button>
+                    
                     <button onClick={() => setActiveView('inventory')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='inventory'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><Package size={18}/> Gudang</button>
                     <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><ClipboardList size={18}/> Pesanan {pendingOrdersCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{pendingOrdersCount}</span>}</button>
                     <button onClick={() => setActiveView('chat')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='chat'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><MessageSquare size={18}/> Chat {unreadChatCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{unreadChatCount}</span>}</button>
@@ -393,6 +418,7 @@ const AppContent: React.FC = () => {
 
       <main className="flex-1 max-w-7xl mx-auto w-full p-4 pb-24 md:pb-10">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} bannerUrl={bannerUrl} onUpdateBanner={handleUpdateBanner} onAddToCart={addToCart} onRemoveFromCart={(id)=>setCart(c=>c.filter(x=>x.id!==id))} onCheckout={doCheckout} />}
+        {activeView === 'scan' && <ScanResiView />}
         {activeView === 'chat' && <div className="max-w-2xl mx-auto h-[calc(100vh-140px)]"><ChatView isAdmin={isAdmin} currentCustomerId={isAdmin ? 'ADMIN' : myCustomerId} chatSessions={chatSessions} onSendMessage={handleSendMessage} onMarkAsRead={(cid)=>setChatSessions(prev=>prev.map(s=>s.customerId===cid?{...s, [isAdmin?'unreadAdminCount':'unreadUserCount']:0}:s))} /></div>}
         {activeView === 'inventory' && isAdmin && (
             isEditing 
@@ -403,10 +429,14 @@ const AppContent: React.FC = () => {
       </main>
 
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pb-safe z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-        <div className={`grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'} h-16`}>
+        {/* UPDATE GRID COLS UNTUK MOBILE */}
+        <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-3'} h-16`}>
             {isAdmin ? (
                 <>
-                    <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><ShoppingCart size={22} className={activeView==='shop'?'fill-purple-100':''} /><span className="text-[10px] font-medium">Belanja</span></button>
+                    <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><ShoppingCart size={22} className={activeView==='shop'?'fill-purple-100':''} /><span className="text-[10px] font-medium">Beranda</span></button>
+                    {/* BUTTON SCAN MOBILE */}
+                    <button onClick={()=>setActiveView('scan')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='scan'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><ScanBarcode size={22} className={activeView==='scan'?'text-purple-600':''} /><span className="text-[10px] font-medium">Scan</span></button>
+                    
                     <button onClick={()=>setActiveView('inventory')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='inventory'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><Package size={22} className={activeView==='inventory'?'fill-purple-100':''} /><span className="text-[10px] font-medium">Gudang</span></button>
                     <button onClick={()=>setActiveView('orders')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='orders'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><div className="relative"><ClipboardList size={22} className={activeView==='orders'?'fill-purple-100':''} />{pendingOrdersCount>0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}</div><span className="text-[10px] font-medium">Pesanan</span></button>
                     <button onClick={()=>setActiveView('chat')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='chat'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><div className="relative"><MessageSquare size={22} className={activeView==='chat'?'fill-purple-100':''} />{unreadChatCount>0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}</div><span className="text-[10px] font-medium">Chat</span></button>
@@ -414,8 +444,6 @@ const AppContent: React.FC = () => {
             ) : (
                 <>
                     <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}><Home size={22} className={activeView==='shop'?'fill-blue-100':''} /><span className="text-[10px] font-medium">Belanja</span></button>
-                    
-                    {/* BAGIAN YANG SEBELUMNYA ERROR SUDAH DIPERBAIKI DI SINI */}
                     <button onClick={()=>setActiveView('orders')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='orders'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}>
                         <div className="relative">
                             <ClipboardList size={22} className={activeView==='orders'?'fill-blue-100':''} />
@@ -423,7 +451,6 @@ const AppContent: React.FC = () => {
                         </div>
                         <span className="text-[10px] font-medium">Pesanan</span>
                     </button>
-                    
                     <button onClick={()=>setActiveView('chat')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='chat'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}><MessageSquare size={22} className={activeView==='chat'?'fill-blue-100':''} /><span className="text-[10px] font-medium">Chat</span></button>
                 </>
             )}

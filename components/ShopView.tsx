@@ -1,11 +1,10 @@
 // FILE: src/components/ShopView.tsx
 import React, { useState, useMemo, useRef } from 'react';
 import { InventoryItem, CartItem } from '../types';
-import { ShoppingCart, Search, Plus, X, Tag, Car, Package, Camera, Loader2, Sparkles, Check, Move, ZoomIn, LayoutGrid, List } from 'lucide-react';
+import { ShoppingCart, Search, Plus, X, Tag, Car, Package, Camera, Loader2, Sparkles, LayoutGrid, List, Check, ZoomIn, Move } from 'lucide-react';
 import { formatRupiah, compressImage } from '../utils';
-import { analyzeInventoryImage } from '../services/geminiService'; // Import service AI
 
-// --- CROPPER (SAMA) ---
+// --- CROPPER ---
 interface ImageCropperProps { imageSrc: string; onConfirm: (croppedBase64: string) => void; onCancel: () => void; }
 const ImageCropper: React.FC<ImageCropperProps> = ({ imageSrc, onConfirm, onCancel }) => {
   const [zoom, setZoom] = useState(1); const [crop, setCrop] = useState({ x: 0, y: 0 }); const [isDragging, setIsDragging] = useState(false); const [dragStart, setDragStart] = useState({ x: 0, y: 0 }); const imgRef = useRef<HTMLImageElement>(null); const containerRef = useRef<HTMLDivElement>(null); const ASPECT_RATIO = 32 / 9;
@@ -26,10 +25,9 @@ export const ShopView: React.FC<ShopViewProps> = ({ items = [], cart = [], isAdm
   // State untuk Checkout
   const [customerNameInput, setCustomerNameInput] = useState(''); 
   const [resiInput, setResiInput] = useState('');
-  const [isScanningResi, setIsScanningResi] = useState(false);
+  const [ecommerceInput, setEcommerceInput] = useState(''); // NEW: E-Commerce Input
   
   const bannerInputRef = useRef<HTMLInputElement>(null); 
-  const resiInputRef = useRef<HTMLInputElement>(null);
   const safeItems = Array.isArray(items) ? items : [];
 
   const carCategories = useMemo(() => { const categories = new Set<string>(); safeItems.forEach(item => { const desc = item.description || ''; const match = desc.match(/^\[(.*?)\]/); if (match && match[1]) categories.add(match[1]); }); return ['Semua', ...Array.from(categories).sort()]; }, [safeItems]);
@@ -38,36 +36,6 @@ export const ShopView: React.FC<ShopViewProps> = ({ items = [], cart = [], isAdm
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onloadend = () => { setTempBannerImg(reader.result as string); if (bannerInputRef.current) bannerInputRef.current.value = ''; }; reader.readAsDataURL(file); };
   const handleCropConfirm = async (base64: string) => { setTempBannerImg(null); setIsUploadingBanner(true); try { const compressed = await compressImage(base64); await onUpdateBanner(compressed); } catch (error) { console.error("Gagal upload banner", error); alert("Gagal memproses gambar banner"); } finally { setIsUploadingBanner(false); } };
   
-  // --- HANDLER SCAN RESI ---
-  const handleResiScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsScanningResi(true);
-    try {
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-            const base64 = reader.result as string;
-            const compressed = await compressImage(base64);
-            
-            // Menggunakan AI Service yang ada untuk analisis
-            // Note: Prompt aslinya untuk inventaris, tapi kita coba manfaatkan outputnya
-            const result = await analyzeInventoryImage(compressed);
-            
-            if (result.suggestedName) setCustomerNameInput(result.suggestedName);
-            // Menggunakan deskripsi atau part number yang terdeteksi sebagai resi (logika sederhana)
-            if (result.suggestedDescription) setResiInput(result.suggestedDescription.slice(0, 30));
-        };
-        reader.readAsDataURL(file);
-    } catch (error) {
-        console.error(error);
-        alert("Gagal scan resi");
-    } finally {
-        setIsScanningResi(false);
-        if (resiInputRef.current) resiInputRef.current.value = '';
-    }
-  };
-
   const cartTotal = cart.reduce((sum, item) => sum + ((item.price || 0) * item.cartQuantity), 0); const cartItemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
 
   return (
@@ -138,7 +106,7 @@ export const ShopView: React.FC<ShopViewProps> = ({ items = [], cart = [], isAdm
       {/* CART MODAL */}
       {isCartOpen && (<div className="fixed inset-0 z-[60] flex justify-end"><div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setIsCartOpen(false)}></div><div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right"><div className="px-5 py-4 border-b flex justify-between items-center bg-white"><h2 className="text-lg font-bold">Keranjang</h2><button onClick={() => setIsCartOpen(false)}><X size={20}/></button></div><div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">{cart.map(item => (<div key={item.id} className="flex gap-3 bg-white p-3 rounded-xl shadow-sm border border-gray-100"><div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">{item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer"/> : <div className="h-full flex items-center justify-center"><Package size={20}/></div>}</div><div className="flex-1 flex flex-col justify-between"><h4 className="text-sm font-bold line-clamp-1">{item.name}</h4><div className="flex justify-between items-center mt-2"><span className="text-sm font-bold text-blue-600">{formatRupiah(item.price)}</span><div className="flex gap-2 items-center bg-gray-50 px-2 py-1 rounded"><span className="text-xs font-bold">x {item.cartQuantity}</span><button onClick={() => onRemoveFromCart(item.id)} className="text-red-500"><X size={14}/></button></div></div></div></div>))}{cart.length === 0 && <div className="flex flex-col items-center justify-center h-64 text-gray-400"><ShoppingCart size={48} className="mb-2 opacity-20"/><p>Keranjang kosong</p></div>}</div><div className="p-5 border-t bg-white safe-area-bottom"><div className="flex justify-between mb-4"><span className="font-bold">Total</span><span className="font-extrabold text-xl">{formatRupiah(cartTotal)}</span></div><button onClick={() => { setIsCartOpen(false); setIsCheckoutModalOpen(true); }} disabled={cart.length===0} className="w-full bg-gray-900 text-white py-3.5 rounded-xl font-bold hover:bg-black disabled:opacity-50">Lanjut Bayar</button></div></div></div>)}
       
-      {/* CHECKOUT MODAL (DIMODIFIKASI) */}
+      {/* CHECKOUT MODAL (UPDATED) */}
       {isCheckoutModalOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsCheckoutModalOpen(false)}></div>
@@ -149,12 +117,16 @@ export const ShopView: React.FC<ShopViewProps> = ({ items = [], cart = [], isAdm
                 <form onSubmit={(e) => { 
                     e.preventDefault(); 
                     if(customerNameInput.trim()) { 
-                        // Menggabungkan resi ke nama jika ada, atau handle sesuai kebutuhan backend
-                        const checkoutName = resiInput.trim() ? `${customerNameInput} (Resi: ${resiInput})` : customerNameInput;
-                        onCheckout(checkoutName); 
+                        // Gabungkan info ke nama agar tersimpan di sheet
+                        let finalName = customerNameInput;
+                        if(resiInput.trim()) finalName += ` (Resi: ${resiInput})`;
+                        if(ecommerceInput.trim()) finalName += ` (Via: ${ecommerceInput})`;
+
+                        onCheckout(finalName); 
                         setIsCheckoutModalOpen(false); 
                         setCustomerNameInput(''); 
                         setResiInput('');
+                        setEcommerceInput('');
                     } 
                 }} className="p-6">
                     <div className="space-y-4">
@@ -175,27 +147,19 @@ export const ShopView: React.FC<ShopViewProps> = ({ items = [], cart = [], isAdm
                             />
                         </div>
 
-                        {/* TOMBOL SCAN */}
-                        <div className="flex justify-center">
-                            <button 
-                                type="button" 
-                                onClick={() => resiInputRef.current?.click()}
-                                disabled={isScanningResi}
-                                className="flex items-center gap-2 text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg text-sm font-bold transition-colors w-full justify-center"
-                            >
-                                {isScanningResi ? <Loader2 className="animate-spin" size={16}/> : <Camera size={16}/>}
-                                {isScanningResi ? 'Menganalisis...' : 'Scan Resi Otomatis'}
-                            </button>
+                        {/* INPUT E-COMMERCE (BARU) */}
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase">E-Commerce / Marketplace</label>
                             <input 
-                                type="file" 
-                                ref={resiInputRef} 
-                                className="hidden" 
-                                accept="image/*" 
-                                onChange={handleResiScan} 
+                                type="text" 
+                                value={ecommerceInput} 
+                                onChange={(e) => setEcommerceInput(e.target.value)} 
+                                className="w-full p-3 border rounded-xl mt-1" 
+                                placeholder="Contoh: Shopee, Tokopedia..." 
                             />
                         </div>
 
-                        {/* TOTAL REMOVED AS REQUESTED */}
+                        {/* TOMBOL SCAN DIHAPUS SESUAI PERMINTAAN */}
                     </div>
                     
                     <div className="mt-6 grid grid-cols-2 gap-3">

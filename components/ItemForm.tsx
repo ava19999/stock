@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
 import { analyzeInventoryImage, generateDescription } from '../services/geminiService';
 import { compressImage } from '../utils';
-import { Camera, Upload, Sparkles, X, Save, Loader2 } from 'lucide-react';
+import { Camera, Upload, Sparkles, X, Save, Loader2, DollarSign, Box } from 'lucide-react';
 
 interface ItemFormProps {
   initialData?: InventoryItem;
@@ -17,9 +17,14 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
     name: '',
     description: '',
     price: 0,
+    costPrice: 0, // NEW
     quantity: 0,
+    initialStock: 0, // NEW
+    qtyIn: 0, // NEW
+    qtyOut: 0, // NEW
     shelf: '',
     imageUrl: '',
+    ecommerce: '', // NEW
   });
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -33,13 +38,30 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
         name: initialData.name,
         description: initialData.description,
         price: initialData.price,
-        // Tampilkan Stok Ahir agar user tahu stok saat ini
+        costPrice: initialData.costPrice || 0,
         quantity: initialData.quantity, 
+        initialStock: initialData.initialStock || 0,
+        qtyIn: initialData.qtyIn || 0,
+        qtyOut: initialData.qtyOut || 0,
         shelf: initialData.shelf,
         imageUrl: initialData.imageUrl,
+        ecommerce: initialData.ecommerce || ''
       });
     }
   }, [initialData]);
+
+  // Efek samping untuk menghitung Stok Akhir otomatis
+  useEffect(() => {
+    const awal = Number(formData.initialStock) || 0;
+    const masuk = Number(formData.qtyIn) || 0;
+    const keluar = Number(formData.qtyOut) || 0;
+    const akhir = awal + masuk - keluar;
+    
+    // Hanya update jika nilai kalkulasi berbeda (untuk menghindari loop render tak perlu)
+    if (akhir !== formData.quantity) {
+        setFormData(prev => ({ ...prev, quantity: akhir }));
+    }
+  }, [formData.initialStock, formData.qtyIn, formData.qtyOut]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -48,7 +70,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
 
     if (name === 'shelf') {
         processedValue = value.toUpperCase().replace(/-/g, ' ');
-    } else if (name === 'price' || name === 'quantity') {
+    } else if (['price', 'costPrice', 'initialStock', 'qtyIn', 'qtyOut'].includes(name)) {
         processedValue = parseFloat(value) || 0;
     }
 
@@ -114,7 +136,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-lg border border-gray-200 max-w-3xl mx-auto overflow-hidden animate-in zoom-in-95 duration-200">
+    <div className="bg-white rounded-xl shadow-lg border border-gray-200 max-w-4xl mx-auto overflow-hidden animate-in zoom-in-95 duration-200">
       <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
         <h2 className="text-xl font-bold text-gray-800">
           {initialData ? 'Edit Barang' : 'Tambah Barang Baru'}
@@ -125,11 +147,12 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
       </div>
 
       <form onSubmit={handleSubmit} className="p-6 space-y-6">
-        <div className="flex flex-col md:flex-row gap-6">
-          <div className="w-full md:w-1/3 space-y-3">
+        <div className="flex flex-col lg:flex-row gap-8">
+          {/* KOLOM KIRI: GAMBAR */}
+          <div className="w-full lg:w-1/3 space-y-3">
              <label className="block text-sm font-medium text-gray-700 mb-1">Foto Barang</label>
              <div 
-               className="relative aspect-square w-full rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 transition-colors flex flex-col items-center justify-center cursor-pointer overflow-hidden group"
+               className="relative aspect-square w-full rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 transition-colors flex flex-col items-center justify-center cursor-pointer overflow-hidden group"
                onClick={() => fileInputRef.current?.click()}
              >
                 {formData.imageUrl ? (
@@ -156,7 +179,8 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
              <p className="text-xs text-gray-500 text-center">Upload foto untuk auto-isi data via AI</p>
           </div>
 
-          <div className="w-full md:w-2/3 space-y-4">
+          {/* KOLOM KANAN: FORM DATA */}
+          <div className="w-full lg:w-2/3 space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">No. Part</label>
@@ -165,35 +189,70 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Lokasi Rak</label>
                 <input type="text" name="shelf" required value={formData.shelf} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none uppercase" placeholder="Contoh: RAK A01" />
-                <p className="text-xs text-gray-400 mt-1">Format: HURUF BESAR (tanpa strip)</p>
+                <p className="text-[10px] text-gray-400 mt-1">Format: HURUF BESAR (tanpa strip)</p>
               </div>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Nama Barang</label>
-              <input type="text" name="name" required value={formData.name} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" placeholder="Contoh: Filter Oli Honda Jazz..." />
+              <input type="text" name="name" required value={formData.name} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" placeholder="Nama sparepart..." />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Harga (IDR)</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2 text-gray-500">Rp</span>
-                  <input type="number" name="price" min="0" required value={formData.price} onChange={handleChange} className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" placeholder="0" />
+            {/* HARGA */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl border border-gray-100">
+                <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Harga Modal (IDR)</label>
+                    <div className="relative">
+                    <span className="absolute left-3 top-2 text-gray-400 text-xs"><DollarSign size={14}/></span>
+                    <input type="number" name="costPrice" min="0" value={formData.costPrice} onChange={handleChange} className="w-full pl-8 pr-4 py-2 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="0" />
+                    </div>
                 </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Jumlah Stok {initialData && "(Stok Akhir)"}</label>
-                <input type="number" name="quantity" min="0" required value={formData.quantity} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" placeholder="0" />
-              </div>
+                <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Harga Jual (IDR)</label>
+                    <div className="relative">
+                    <span className="absolute left-3 top-2 text-blue-600 text-xs font-bold">Rp</span>
+                    <input type="number" name="price" min="0" required value={formData.price} onChange={handleChange} className="w-full pl-8 pr-4 py-2 bg-white border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold text-gray-900" placeholder="0" />
+                    </div>
+                </div>
             </div>
 
-            <div>
-              <div className="flex justify-between items-center mb-1">
-                <label className="block text-sm font-medium text-gray-700">Deskripsi</label>
-                <button type="button" onClick={handleGenerateDescription} disabled={!formData.name || isGeneratingDesc} className="text-xs flex items-center text-blue-600 hover:text-blue-800 disabled:opacity-50 disabled:cursor-not-allowed">{isGeneratingDesc ? <Loader2 size={12} className="animate-spin mr-1"/> : <Sparkles size={12} className="mr-1"/>} Generate Deskripsi AI</button>
-              </div>
-              <textarea name="description" rows={3} value={formData.description} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none" placeholder="Deskripsi detail barang..." />
+            {/* MANAJEMEN STOK */}
+            <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                <label className="block text-sm font-bold text-blue-800 mb-3 flex items-center gap-2"><Box size={16}/> Manajemen Stok</label>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Stok Awal</label>
+                        <input type="number" name="initialStock" min="0" value={formData.initialStock} onChange={handleChange} className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm text-center" />
+                    </div>
+                    <div>
+                        <label className="block text-[10px] font-bold text-green-600 uppercase mb-1">Penambahan</label>
+                        <input type="number" name="qtyIn" min="0" value={formData.qtyIn} onChange={handleChange} className="w-full px-3 py-2 bg-white border border-green-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none text-sm text-center text-green-700 font-bold" />
+                    </div>
+                    <div>
+                        <label className="block text-[10px] font-bold text-red-600 uppercase mb-1">Pengurangan</label>
+                        <input type="number" name="qtyOut" min="0" value={formData.qtyOut} onChange={handleChange} className="w-full px-3 py-2 bg-white border border-red-300 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-sm text-center text-red-700 font-bold" />
+                    </div>
+                    <div className="relative">
+                        <label className="block text-[10px] font-bold text-blue-800 uppercase mb-1">Stok Akhir</label>
+                        <input type="number" readOnly value={formData.quantity} className="w-full px-3 py-2 bg-blue-100 border border-blue-200 rounded-lg text-sm text-center font-extrabold text-blue-900 cursor-not-allowed" />
+                    </div>
+                </div>
+            </div>
+
+            {/* DESKRIPSI & E-COMMERCE */}
+            <div className="space-y-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">E-Commerce Link / Nama Toko</label>
+                    <input type="text" name="ecommerce" value={formData.ecommerce} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Misal: Tokopedia - Jaya Abadi" />
+                </div>
+
+                <div>
+                    <div className="flex justify-between items-center mb-1">
+                        <label className="block text-sm font-medium text-gray-700">Deskripsi</label>
+                        <button type="button" onClick={handleGenerateDescription} disabled={!formData.name || isGeneratingDesc} className="text-xs flex items-center text-blue-600 hover:text-blue-800 disabled:opacity-50 disabled:cursor-not-allowed">{isGeneratingDesc ? <Loader2 size={12} className="animate-spin mr-1"/> : <Sparkles size={12} className="mr-1"/>} Generate Deskripsi AI</button>
+                    </div>
+                    <textarea name="description" rows={3} value={formData.description} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none" placeholder="Deskripsi detail barang..." />
+                </div>
             </div>
           </div>
         </div>

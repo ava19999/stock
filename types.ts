@@ -4,19 +4,22 @@ export interface InventoryItem {
   partNumber: string;
   name: string;
   description: string;
-  quantity: number; // Ini akan menampilkan STOK AHIR
+  quantity: number; // Stok Akhir (Calculated)
   shelf: string;
-  price: number;
+  price: number;    // Harga Jual
+  costPrice: number; // NEW: Harga Modal
+  ecommerce: string; // NEW: Link/Nama E-commerce
   imageUrl: string;
   lastUpdated: number;
   
-  // --- FIELD BARU UNTUK SINKRONISASI SHEET ---
-  initialStock: number; // Kolom 'Stok' (Stok Awal)
-  qtyIn: number;        // Kolom 'Masuk'
-  qtyOut: number;       // Kolom 'Keluar'
+  // Field Stok untuk Kalkulasi
+  initialStock: number; // Stok Awal
+  qtyIn: number;        // Penambahan
+  qtyOut: number;       // Pengurangan
 }
 
-export type InventoryFormData = Omit<InventoryItem, 'id' | 'lastUpdated' | 'initialStock' | 'qtyIn' | 'qtyOut'>;
+// Update ini agar form bisa mengakses field stok dan field baru
+export type InventoryFormData = Omit<InventoryItem, 'id' | 'lastUpdated'>;
 
 export interface CartItem extends InventoryItem {
   cartQuantity: number;
@@ -60,4 +63,10 @@ export interface ChatSession {
   lastTimestamp: number;
   unreadAdminCount: number;
   unreadUserCount: number;
+}
+
+export interface AIAnalysisResult {
+  suggestedName?: string;
+  suggestedDescription?: string;
+  suggestedShelfCategory?: string;
 }
