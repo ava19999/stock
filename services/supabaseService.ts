@@ -4,12 +4,11 @@ import { InventoryItem, InventoryFormData, Order, StockHistory, ChatSession } fr
 
 // --- INVENTORY SERVICES (OPTIMIZED) ---
 
-// 1. Fetch Ringan untuk Statistik (Hanya ambil angka, tanpa gambar/deskripsi)
 export const fetchInventoryStats = async () => {
   try {
     const { data, error } = await supabase
       .from('inventory')
-      .select('price, quantity'); // Cuma ambil kolom penting
+      .select('price, quantity');
 
     if (error) return { totalItems: 0, totalStock: 0, totalAsset: 0 };
 
@@ -23,7 +22,6 @@ export const fetchInventoryStats = async () => {
   }
 };
 
-// 2. Fetch dengan Pagination & Search (Data Utama)
 export const fetchInventoryPaginated = async (page: number = 1, limit: number = 50, search: string = '') => {
   try {
     const from = (page - 1) * limit;
@@ -31,15 +29,25 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
 
     let query = supabase
       .from('inventory')
-      .select('*', { count: 'exact' }) // Minta total jumlah data juga
-      .order('last_updated', { ascending: false }) // Urutkan dari yang terbaru diedit
-      .range(from, to);
+      .select('*', { count: 'exact' })
+      .order('last_updated', { ascending: false }); // Urutkan dari yang terbaru diedit
 
-    // Jika ada pencarian, filter di server (bukan di browser)
+    // --- LOGIKA PENCARIAN BARU (SMART SEARCH) ---
     if (search) {
-      // Cari di nama ATAU part_number
-      query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%`);
+      // 1. Pecah pencarian menjadi kata-kata (misal: "honda jazz" -> ["honda", "jazz"])
+      const terms = search.trim().split(/\s+/);
+      
+      // 2. Loop setiap kata
+      terms.forEach(term => {
+        // Pastikan kata tersebut ada di (Nama ATAU PartNumber ATAU Deskripsi)
+        // Ini menciptakan logika AND antar kata, tapi OR antar kolom
+        // Contoh: (name ada "honda" OR part ada "honda") AND (name ada "jazz" OR part ada "jazz")
+        query = query.or(`name.ilike.%${term}%,part_number.ilike.%${term}%,description.ilike.%${term}%`);
+      });
     }
+
+    // Terapkan pagination setelah filter
+    query = query.range(from, to);
 
     const { data, count, error } = await query;
 
@@ -72,7 +80,6 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
   }
 };
 
-// --- (Fungsi Add, Update, Delete TETAP SAMA seperti sebelumnya) ---
 export const addInventory = async (item: InventoryFormData): Promise<boolean> => {
   try {
     const { error } = await supabase.from('inventory').insert([{
@@ -122,6 +129,7 @@ export const deleteInventory = async (partNumber: string): Promise<boolean> => {
 };
 
 // --- ORDER SERVICES ---
+
 export const fetchOrders = async (): Promise<Order[]> => {
   try {
     const { data, error } = await supabase
@@ -165,13 +173,14 @@ export const updateOrderStatusService = async (orderId: string, status: string):
 };
 
 // --- HISTORY SERVICES ---
+
 export const fetchHistory = async (): Promise<StockHistory[]> => {
   try {
     const { data, error } = await supabase
       .from('stock_history')
       .select('*')
       .order('timestamp', { ascending: false })
-      .range(0, 100); // Batasi history awal 100 saja biar cepat
+      .range(0, 4999);
 
     if (error || !data) return [];
     
@@ -209,9 +218,10 @@ export const addHistoryLog = async (history: StockHistory): Promise<boolean> => 
 };
 
 // --- CHAT SERVICES ---
+
 export const fetchChatSessions = async (): Promise<ChatSession[]> => {
   try {
-    const { data, error } = await supabase.from('chat_sessions').select('*').range(0, 100);
+    const { data, error } = await supabase.from('chat_sessions').select('*').range(0, 1999);
     if (error || !data) return [];
     return data.map((c: any) => ({
       customerId: c.customer_id,
@@ -240,7 +250,7 @@ export const saveChatSession = async (session: ChatSession): Promise<boolean> =>
   } catch { return false; }
 };
 
-// Agar App.tsx tidak error karena fungsi lama hilang (backward compatibility)
+// Fallback untuk kompatibilitas
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
     const res = await fetchInventoryPaginated(1, 50, '');
     return res.data;
