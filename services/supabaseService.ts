@@ -58,7 +58,7 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
       shelf: item.shelf || '',
       imageUrl: item.image_url || '',
       ecommerce: item.ecommerce || '',
-      lastUpdated: item.last_updated
+      lastUpdated: Number(item.last_updated) || Date.now() // Pastikan dibaca sebagai number
     }));
 
     return { data: mappedData, count: count || 0 };
@@ -69,8 +69,8 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
 };
 
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
-    // Kita naikkan limitnya agar aman, tapi history tidak lagi bergantung pada ini
-    const res = await fetchInventoryPaginated(1, 1000, '');
+    // Ambil 2000 item agar history bisa mengenali harga barang lama
+    const res = await fetchInventoryPaginated(1, 2000, '');
     return res.data;
 };
 
@@ -117,7 +117,7 @@ export const fetchShopItems = async (page: number = 1, limit: number = 20, searc
       shelf: item.shelf || '',
       imageUrl: item.image_url || '',
       ecommerce: item.ecommerce || '',
-      lastUpdated: item.last_updated
+      lastUpdated: Number(item.last_updated) || Date.now()
     }));
 
     return { data: mappedData, count: count || 0 };
@@ -143,10 +143,12 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
       shelf: item.shelf,
       image_url: item.imageUrl,
       ecommerce: item.ecommerce,
-      last_updated: new Date().toISOString()
+      // PERBAIKAN: Gunakan Date.now() (Angka) agar sesuai dengan tipe bigint di database
+      last_updated: Date.now() 
     }]);
+    if (error) console.error("Add Error:", error);
     return !error;
-  } catch { return false; }
+  } catch (e) { console.error(e); return false; }
 };
 
 export const updateInventory = async (item: InventoryItem): Promise<boolean> => {
@@ -163,10 +165,12 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
       shelf: item.shelf,
       image_url: item.imageUrl,
       ecommerce: item.ecommerce,
-      last_updated: new Date().toISOString()
+      // PERBAIKAN: Gunakan Date.now() (Angka)
+      last_updated: Date.now()
     }).eq('part_number', item.partNumber);
+    if (error) console.error("Update Error:", error);
     return !error;
-  } catch { return false; }
+  } catch (e) { console.error(e); return false; }
 };
 
 export const deleteInventory = async (partNumber: string): Promise<boolean> => {
@@ -191,10 +195,10 @@ export const fetchOrders = async (): Promise<Order[]> => {
     return data.map((o: any) => ({
       id: o.id,
       customerName: o.customer_name || 'Guest',
-      items: o.items || [],
+      items: o.items || [], // JSONB otomatis jadi object array
       totalAmount: Number(o.total_amount) || 0,
       status: o.status,
-      timestamp: o.timestamp
+      timestamp: Number(o.timestamp)
     }));
   } catch { return []; }
 };
@@ -204,7 +208,7 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
     const { error } = await supabase.from('orders').insert([{
       id: order.id,
       customer_name: order.customerName,
-      items: order.items,
+      items: order.items, // JSONB
       total_amount: order.totalAmount,
       status: order.status,
       timestamp: order.timestamp
@@ -220,7 +224,7 @@ export const updateOrderStatusService = async (orderId: string, status: string):
   } catch { return false; }
 };
 
-// --- HISTORY SERVICES (UPDATED) ---
+// --- HISTORY SERVICES ---
 
 export const fetchHistory = async (): Promise<StockHistory[]> => {
   try {
@@ -241,10 +245,9 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
       quantity: Number(h.quantity) || 0,
       previousStock: Number(h.previous_stock) || 0,
       currentStock: Number(h.current_stock) || 0,
-      // MAPPING BARU
       price: Number(h.price) || 0, 
       totalPrice: Number(h.total_price) || 0,
-      timestamp: h.timestamp,
+      timestamp: Number(h.timestamp),
       reason: h.reason || ''
     }));
   } catch { return []; }
@@ -261,7 +264,6 @@ export const addHistoryLog = async (history: StockHistory): Promise<boolean> => 
       quantity: history.quantity,
       previous_stock: history.previousStock,
       current_stock: history.currentStock,
-      // FIELD BARU
       price: history.price,
       total_price: history.totalPrice,
       timestamp: history.timestamp,
