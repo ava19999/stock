@@ -10,6 +10,11 @@ export default defineConfig(({ mode }) => {
         host: '0.0.0.0',
       },
       plugins: [react()],
+      // --- TAMBAHKAN BAGIAN INI ---
+      build: {
+        chunkSizeWarningLimit: 1000, // Naikkan batas peringatan menjadi 1000 kB (1 MB)
+      },
+      // ---------------------------
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
