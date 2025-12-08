@@ -195,7 +195,7 @@ export const fetchOrders = async (): Promise<Order[]> => {
       .from('orders')
       .select('*')
       .order('timestamp', { ascending: false })
-      .range(0, 4999); // Ambil 5000 pesanan terakhir (cukup aman untuk history)
+      .range(0, 4999); // Ambil 5000 pesanan terakhir
 
     if (error || !data) return [];
 
@@ -250,6 +250,12 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
       name: h.name,
       type: h.type,
       quantity: Number(h.quantity) || 0,
+      
+      // --- UPDATED: Mapping Harga ---
+      price: Number(h.price) || 0,
+      totalPrice: Number(h.total_price) || 0,
+      // ----------------------------
+      
       previousStock: Number(h.previous_stock) || 0,
       currentStock: Number(h.current_stock) || 0,
       timestamp: h.timestamp,
@@ -267,6 +273,12 @@ export const addHistoryLog = async (history: StockHistory): Promise<boolean> => 
       name: history.name,
       type: history.type,
       quantity: history.quantity,
+      
+      // --- UPDATED: Insert Harga ---
+      price: history.price,
+      total_price: history.totalPrice,
+      // ----------------------------
+      
       previous_stock: history.previousStock,
       current_stock: history.currentStock,
       timestamp: history.timestamp,
