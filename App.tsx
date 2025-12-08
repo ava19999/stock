@@ -8,19 +8,19 @@ import { ChatView } from './components/ChatView';
 import { OrderManagement } from './components/OrderManagement';
 import { CustomerOrderView } from './components/CustomerOrderView';
 import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
-import { fetchInventoryFromSheet, addInventoryToSheet, updateInventoryInSheet, deleteInventoryFromSheet } from './services/googleSheetService';
+// GANTI IMPORT SERVICE KE SUPABASE
+import { 
+  fetchInventory, addInventory, updateInventory, deleteInventory,
+  fetchOrders, saveOrder, updateOrderStatusService,
+  fetchHistory, addHistoryLog,
+  fetchChatSessions, saveChatSession
+} from './services/supabaseService';
 import { generateId } from './utils';
 import { Home, MessageSquare, Package, ShieldCheck, User, CheckCircle, XCircle, ClipboardList, LogOut, ArrowRight, CloudLightning, RefreshCw, KeyRound, ShoppingCart, Car, ScanBarcode } from 'lucide-react';
 
-const LOCAL_STORAGE_KEY = 'stockmaster_v11_live_api';
-const ORDERS_STORAGE_KEY = 'stockmaster_orders_db_v2';
-const CHAT_STORAGE_KEY = 'stockmaster_chat_db_v2';
-const HISTORY_STORAGE_KEY = 'stockmaster_history_db_v1';
 const CUSTOMER_ID_KEY = 'stockmaster_my_customer_id';
-
 const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 
-// Tambahkan 'scan' ke ActiveView
 type ActiveView = 'shop' | 'chat' | 'inventory' | 'orders' | 'scan';
 
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
@@ -33,7 +33,6 @@ const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 
   );
 };
 
-// Placeholder untuk Scan Resi View
 const ScanResiView = () => (
     <div className="flex flex-col items-center justify-center min-h-[60vh] text-gray-400">
         <div className="bg-gray-100 p-6 rounded-full mb-4">
@@ -58,8 +57,8 @@ const AppContent: React.FC = () => {
   const [activeView, setActiveView] = useState<ActiveView>('shop');
   
   const [bannerUrl, setBannerUrl] = useState<string>('');
-  
   const [myCustomerId, setMyCustomerId] = useState<string>('');
+  
   const [isEditing, setIsEditing] = useState(false);
   const [editItem, setEditItem] = useState<InventoryItem | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -67,55 +66,58 @@ const AppContent: React.FC = () => {
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => setToast({msg, type});
 
+  // --- INITIAL LOAD DATA FROM SUPABASE ---
   useEffect(() => {
-    const ord = localStorage.getItem(ORDERS_STORAGE_KEY);
-    if (ord) try { setOrders(JSON.parse(ord) || []); } catch { setOrders([]); }
-    
-    const chat = localStorage.getItem(CHAT_STORAGE_KEY);
-    if (chat) try { setChatSessions(JSON.parse(chat) || []); } catch { setChatSessions([]); }
-
-    const hist = localStorage.getItem(HISTORY_STORAGE_KEY);
-    if (hist) try { setHistory(JSON.parse(hist) || []); } catch { setHistory([]); }
-    
     let cId = localStorage.getItem(CUSTOMER_ID_KEY);
     if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
     setMyCustomerId(cId);
-  }, []);
 
-  const addHistory = (newRecord: StockHistory) => {
-      setHistory(prev => {
-          const updated = [newRecord, ...prev];
-          localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(updated));
-          return updated;
-      });
-  };
+    // Initial Fetch saat aplikasi dimuat
+    refreshData();
+  }, []);
 
   const refreshData = async () => {
     setLoading(true);
     try {
-        const data = await fetchInventoryFromSheet();
-        if (data.length > 0) {
-            const bannerItem = data.find(i => i.partNumber === BANNER_PART_NUMBER);
-            if (bannerItem) {
-                setBannerUrl(bannerItem.imageUrl);
-            }
-            const realInventory = data.filter(i => i.partNumber !== BANNER_PART_NUMBER);
-            setItems(realInventory);
-            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(realInventory));
-        } else {
-            const local = localStorage.getItem(LOCAL_STORAGE_KEY);
-            if (local) setItems(JSON.parse(local) || []);
-            else setItems([]);
-        }
-    } catch (e) { console.error(e); setItems([]); }
+        // 1. Fetch Inventory
+        const inventoryData = await fetchInventory();
+        const bannerItem = inventoryData.find(i => i.partNumber === BANNER_PART_NUMBER);
+        if (bannerItem) setBannerUrl(bannerItem.imageUrl);
+        setItems(inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER));
+
+        // 2. Fetch Orders
+        const ordersData = await fetchOrders();
+        setOrders(ordersData);
+
+        // 3. Fetch History
+        const historyData = await fetchHistory();
+        setHistory(historyData);
+
+        // 4. Fetch Chat
+        const chatData = await fetchChatSessions();
+        setChatSessions(chatData);
+
+    } catch (e) { 
+        console.error("Gagal memuat data:", e); 
+        showToast("Gagal memuat data dari server", 'error');
+    }
     setLoading(false);
+  };
+
+  // Helper untuk update history lokal & server
+  const addNewHistory = async (newRecord: StockHistory) => {
+      // Update Server
+      await addHistoryLog(newRecord);
+      // Update Lokal
+      setHistory(prev => [newRecord, ...prev]);
   };
 
   const handleGlobalLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (loginName.toLowerCase() === 'ava' && loginPass === '9193') {
         setIsAdmin(true); setIsAuthenticated(true); setActiveView('inventory');
-        setMyCustomerId('ADMIN-AVA'); showToast('Login Admin Berhasil'); refreshData();
+        setMyCustomerId('ADMIN-AVA'); showToast('Login Admin Berhasil'); 
+        refreshData(); // Refresh data saat login admin untuk memastikan data terbaru
     } else if (loginName.trim() !== '') {
         loginAsCustomer(loginName);
     } else {
@@ -126,7 +128,7 @@ const AppContent: React.FC = () => {
   const loginAsCustomer = (name: string) => {
       setIsAdmin(false); setIsAuthenticated(true); setActiveView('shop');
       localStorage.setItem('stockmaster_customer_name', name); 
-      showToast(`Selamat Datang, ${name}!`); refreshData();
+      showToast(`Selamat Datang, ${name}!`);
   };
 
   const handleLogout = () => { setIsAuthenticated(false); setIsAdmin(false); setLoginName(''); setLoginPass(''); };
@@ -134,20 +136,30 @@ const AppContent: React.FC = () => {
   const handleSaveItem = async (data: InventoryFormData) => {
       setLoading(true);
       const newQuantity = Number(data.quantity) || 0;
-
-      // --- LOGIKA UNTUK FORMAT ALASAN RIWAYAT ---
-      // Menambahkan info E-commerce ke dalam string reason agar terbaca di Dashboard
       const ecommerceInfo = data.ecommerce ? ` (Via: ${data.ecommerce})` : '';
 
       if (editItem) {
           const oldQty = Number(editItem.quantity) || 0;
           const diff = newQuantity - oldQty;
-          let updatedItem = { ...editItem, ...data, id: editItem.id, lastUpdated: Date.now() };
+          
+          // Construct item updated
+          // Note: Kita gunakan ID dari editItem karena Supabase butuh ID/PartNumber yang konsisten
+          let updatedItem: InventoryItem = { 
+              ...editItem, 
+              ...data, 
+              // Pastikan field stok terupdate
+              quantity: newQuantity,
+              initialStock: data.initialStock || 0,
+              qtyIn: data.qtyIn || 0,
+              qtyOut: data.qtyOut || 0,
+              lastUpdated: Date.now() 
+          };
 
+          // Logic History
           if (diff !== 0) {
               if (diff > 0) {
-                  updatedItem.qtyIn = (updatedItem.qtyIn || 0) + diff;
-                  addHistory({
+                  // updatedItem.qtyIn = (updatedItem.qtyIn || 0) + diff; // Ini sudah dihandle form, tapi jika mau auto-calc bisa di sini
+                  addNewHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
                       type: 'in', quantity: diff, previousStock: oldQty, currentStock: newQuantity,
                       timestamp: Date.now(), 
@@ -155,76 +167,80 @@ const AppContent: React.FC = () => {
                   });
               } else {
                   const absDiff = Math.abs(diff);
-                  updatedItem.qtyOut = (updatedItem.qtyOut || 0) + absDiff;
-                  addHistory({
+                  // updatedItem.qtyOut = (updatedItem.qtyOut || 0) + absDiff;
+                  addNewHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
                       type: 'out', quantity: absDiff, previousStock: oldQty, currentStock: newQuantity,
                       timestamp: Date.now(), 
                       reason: 'Koreksi Stok Manual'
                   });
               }
-              updatedItem.quantity = newQuantity;
-              const success = await updateInventoryInSheet(updatedItem);
-              if (success) { showToast('Update & History tercatat!'); setItems(prev => prev.map(i => i.id === editItem.id ? updatedItem : i)); } 
-              else showToast('Gagal update', 'error');
-          } else {
-              const success = await updateInventoryInSheet(updatedItem);
-              if (success) { showToast('Data diupdate!'); setItems(prev => prev.map(i => i.id === editItem.id ? updatedItem : i)); }
           }
+          
+          // Save to Supabase
+          const success = await updateInventory(updatedItem);
+          if (success) { 
+              showToast('Update berhasil!'); 
+              setItems(prev => prev.map(i => i.id === editItem.id ? updatedItem : i)); 
+          } else {
+              showToast('Gagal update', 'error');
+          }
+
       } else {
           // BARANG BARU
           if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number ada!', 'error'); setLoading(false); return; }
           
-          addHistory({ 
+          addNewHistory({ 
               id: generateId(), itemId: data.partNumber, partNumber: data.partNumber, name: data.name, 
               type: 'in', quantity: newQuantity, previousStock: 0, currentStock: newQuantity, 
               timestamp: Date.now(), 
               reason: `Barang Baru${ecommerceInfo}` 
           });
           
-          const success = await addInventoryToSheet(data);
+          const success = await addInventory(data);
           if (success) {
-              showToast('Terkirim ke Sheet!');
-              const newItem: InventoryItem = { ...data, id: data.partNumber, lastUpdated: Date.now(), imageUrl: '', initialStock: newQuantity, qtyIn: 0, qtyOut: 0 };
-              setItems(prev => [newItem, ...prev]); setTimeout(refreshData, 2000); 
-          } else showToast('Gagal kirim', 'error');
+              showToast('Tersimpan di Database!');
+              // Refresh full data agar mendapat ID dari supabase, atau buat objek sementara
+              refreshData(); 
+          } else {
+              showToast('Gagal simpan', 'error');
+          }
       }
       setIsEditing(false); setEditItem(null); setLoading(false);
   };
 
   const handleUpdateBanner = async (base64: string) => {
-      const bannerPayload: InventoryItem = {
-          id: BANNER_PART_NUMBER, partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', description: 'DO NOT DELETE - System Configuration',
-          price: 0, costPrice: 0, ecommerce: '', quantity: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, shelf: 'SYSTEM', imageUrl: base64, lastUpdated: Date.now()
+      const bannerData: any = { // Pakai any sementara agar compatible dengan InventoryItem/FormData
+          partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', description: 'DO NOT DELETE',
+          price: 0, costPrice: 0, ecommerce: '', quantity: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, shelf: 'SYSTEM', imageUrl: base64
       };
 
       let success = false;
       if (bannerUrl) {
-           success = await updateInventoryInSheet(bannerPayload);
+           success = await updateInventory(bannerData);
       } else {
-           const formData: InventoryFormData = { partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', description: 'DO NOT DELETE - System Configuration', price: 0, costPrice: 0, ecommerce: '', quantity: 0, shelf: 'SYSTEM', imageUrl: base64, initialStock: 0, qtyIn: 0, qtyOut: 0 };
-           success = await addInventoryToSheet(formData);
+           success = await addInventory(bannerData);
       }
 
       if (success) {
-          setBannerUrl(base64); showToast('Banner diperbarui!'); setTimeout(refreshData, 5000); 
+          setBannerUrl(base64); showToast('Banner diperbarui!'); 
       } else {
-           // Retry with add
-           const formData: InventoryFormData = { partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', description: 'DO NOT DELETE - System Configuration', price: 0, costPrice: 0, ecommerce: '', quantity: 0, shelf: 'SYSTEM', imageUrl: base64, initialStock: 0, qtyIn: 0, qtyOut: 0 };
-           const retrySuccess = await addInventoryToSheet(formData);
-           if (retrySuccess) { setBannerUrl(base64); showToast('Banner dibuat!'); setTimeout(refreshData, 5000); } 
-           else { showToast('Gagal update banner', 'error'); }
+          showToast('Gagal update banner', 'error'); 
       }
   };
   
   const handleDelete = async (id: string) => {
-      if(confirm('Hapus dari Google Sheet?')) {
+      const itemToDelete = items.find(i => i.id === id);
+      if (!itemToDelete) return;
+
+      if(confirm('Hapus Permanen dari Database?')) {
           setLoading(true);
-          const itemToDelete = items.find(i => i.id === id);
-          if (itemToDelete) {
-              const success = await deleteInventoryFromSheet(itemToDelete.partNumber);
-              if (success) { showToast('Dihapus'); setItems(prev => prev.filter(i => i.id !== id)); } 
-              else showToast('Gagal hapus', 'error');
+          const success = await deleteInventory(itemToDelete.partNumber);
+          if (success) { 
+              showToast('Dihapus'); 
+              setItems(prev => prev.filter(i => i.id !== id)); 
+          } else {
+              showToast('Gagal hapus', 'error');
           }
           setLoading(false);
       }
@@ -250,102 +266,132 @@ const AppContent: React.FC = () => {
       };
       
       setLoading(true);
-      const updatedItemsList = [...items];
-
-      for (const cartItem of cart) {
-          const idx = updatedItemsList.findIndex(i => i.id === cartItem.id);
-          if (idx > -1) {
-              const itemToUpdate = { ...updatedItemsList[idx] };
-              const qtySold = cartItem.cartQuantity;
-
-              itemToUpdate.qtyOut = (itemToUpdate.qtyOut || 0) + qtySold;
-              itemToUpdate.quantity = Math.max(0, itemToUpdate.quantity - qtySold);
-
-              updatedItemsList[idx] = itemToUpdate;
-              updateInventoryInSheet(itemToUpdate).catch(err => console.error("Gagal update stok checkout", err));
-
-              addHistory({
-                  id: generateId(), itemId: cartItem.id, partNumber: cartItem.partNumber, name: cartItem.name,
-                  type: 'out', quantity: qtySold, 
-                  previousStock: itemToUpdate.quantity + qtySold, 
-                  currentStock: itemToUpdate.quantity,
-                  timestamp: Date.now(), reason: `Order #${newOrder.id.slice(0,6)} (${name})`
-              });
-          }
-      }
-
-      setItems(updatedItemsList);
-      setOrders([newOrder, ...orders]);
-      setCart([]);
-      localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify([newOrder, ...orders]));
       
+      // 1. Simpan Order ke Supabase
+      const orderSuccess = await saveOrder(newOrder);
+      
+      if (orderSuccess) {
+          // 2. Update Stok & History untuk setiap item
+          const updatedItemsList = [...items];
+          for (const cartItem of cart) {
+              const idx = updatedItemsList.findIndex(i => i.id === cartItem.id);
+              if (idx > -1) {
+                  const itemToUpdate = { ...updatedItemsList[idx] };
+                  const qtySold = cartItem.cartQuantity;
+
+                  itemToUpdate.qtyOut = (itemToUpdate.qtyOut || 0) + qtySold;
+                  itemToUpdate.quantity = Math.max(0, itemToUpdate.quantity - qtySold);
+
+                  // Update State Lokal
+                  updatedItemsList[idx] = itemToUpdate;
+                  
+                  // Update DB
+                  await updateInventory(itemToUpdate);
+                  await addNewHistory({
+                      id: generateId(), itemId: cartItem.id, partNumber: cartItem.partNumber, name: cartItem.name,
+                      type: 'out', quantity: qtySold, 
+                      previousStock: itemToUpdate.quantity + qtySold, 
+                      currentStock: itemToUpdate.quantity,
+                      timestamp: Date.now(), reason: `Order #${newOrder.id.slice(0,6)} (${name})`
+                  });
+              }
+          }
+
+          setItems(updatedItemsList);
+          setOrders([newOrder, ...orders]);
+          setCart([]);
+          setActiveView('orders');
+          showToast('Pesanan dibuat, stok terpotong!');
+      } else {
+          showToast('Gagal membuat pesanan', 'error');
+      }
       setLoading(false);
-      setActiveView('orders');
-      showToast('Pesanan dibuat, stok terpotong!');
   };
 
-  const handleUpdateStatus = (orderId: string, newStatus: OrderStatus) => {
+  const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
 
-      if (newStatus === 'cancelled' && order.status !== 'cancelled') {
-          const itemsToUpdate: InventoryItem[] = [];
-          const historyToAdd: StockHistory[] = [];
+      const success = await updateOrderStatusService(orderId, newStatus);
+      if (!success) { showToast('Gagal update status', 'error'); return; }
 
-          const newItems = items.map(item => {
-              const orderItem = order.items.find(oi => oi.id === item.id);
-              if (orderItem) {
+      // Logic Pembatalan (Restock kembali)
+      if (newStatus === 'cancelled' && order.status !== 'cancelled') {
+          const newItems = [...items];
+          
+          for (const orderItem of order.items) {
+              const idx = newItems.findIndex(i => i.id === orderItem.id);
+              if (idx > -1) {
                   const restoreQty = orderItem.cartQuantity;
-                  const newItem = { ...item };
-                  newItem.qtyOut = Math.max(0, (newItem.qtyOut || 0) - restoreQty);
-                  newItem.quantity = newItem.quantity + restoreQty;
+                  const itemToUpdate = { ...newItems[idx] };
                   
-                  itemsToUpdate.push(newItem);
-                  historyToAdd.push({
-                      id: generateId(), itemId: newItem.id, partNumber: newItem.partNumber, name: newItem.name,
+                  itemToUpdate.qtyOut = Math.max(0, (itemToUpdate.qtyOut || 0) - restoreQty);
+                  itemToUpdate.quantity = itemToUpdate.quantity + restoreQty;
+                  
+                  newItems[idx] = itemToUpdate;
+
+                  await updateInventory(itemToUpdate);
+                  await addNewHistory({
+                      id: generateId(), itemId: itemToUpdate.id, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name,
                       type: 'in', quantity: restoreQty,
-                      previousStock: newItem.quantity - restoreQty, currentStock: newItem.quantity,
+                      previousStock: itemToUpdate.quantity - restoreQty, currentStock: itemToUpdate.quantity,
                       timestamp: Date.now(), reason: `Cancel Order #${orderId.slice(0,6)} (${order.customerName})`
                   });
-
-                  return newItem;
               }
-              return item;
-          });
-
+          }
           setItems(newItems);
-          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newItems));
-
-          itemsToUpdate.forEach(item => updateInventoryInSheet(item));
-          historyToAdd.forEach(record => addHistory(record));
-
           showToast('Pesanan dibatalkan, stok dikembalikan.');
       }
 
-      const updatedOrders = orders.map(x => x.id === orderId ? { ...x, status: newStatus } : x);
-      setOrders(updatedOrders);
-      localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(updatedOrders));
+      // Update Order State Lokal
+      setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
   };
 
-  const handleSendMessage = (customerId: string, text: string, sender: 'user' | 'admin') => {
+  const handleSendMessage = async (customerId: string, text: string, sender: 'user' | 'admin') => {
     const newMessage: Message = { id: Date.now().toString(), sender, text, timestamp: Date.now(), read: false };
-    setChatSessions(prev => {
-        const idx = prev.findIndex(s => s.customerId === customerId);
-        if (idx > -1) {
-            const updated = [...prev]; updated[idx].messages.push(newMessage); updated[idx].lastMessage = text; updated[idx].lastTimestamp = Date.now();
-            sender === 'user' ? updated[idx].unreadAdminCount++ : updated[idx].unreadUserCount++;
-            return updated;
-        } else {
-            return [...prev, { customerId, customerName: loginName || `Guest ${customerId.slice(-4)}`, messages: [newMessage], lastMessage: text, lastTimestamp: Date.now(), unreadAdminCount: sender==='user'?1:0, unreadUserCount: sender==='admin'?1:0 }];
-        }
-    });
+    
+    // Cari sesi lokal atau buat baru sementara
+    let currentSession = chatSessions.find(s => s.customerId === customerId);
+    let isNew = false;
+
+    if (!currentSession) {
+        currentSession = { 
+            customerId, 
+            customerName: loginName || `Guest ${customerId.slice(-4)}`, 
+            messages: [], 
+            lastMessage: '', 
+            lastTimestamp: Date.now(), 
+            unreadAdminCount: 0, 
+            unreadUserCount: 0 
+        };
+        isNew = true;
+    }
+
+    const updatedSession: ChatSession = {
+        ...currentSession,
+        messages: [...currentSession.messages, newMessage],
+        lastMessage: text,
+        lastTimestamp: Date.now(),
+        unreadAdminCount: sender === 'user' ? (currentSession.unreadAdminCount || 0) + 1 : (currentSession.unreadAdminCount || 0),
+        unreadUserCount: sender === 'admin' ? (currentSession.unreadUserCount || 0) + 1 : (currentSession.unreadUserCount || 0)
+    };
+
+    // Update Lokal
+    if (isNew) {
+        setChatSessions(prev => [...prev, updatedSession]);
+    } else {
+        setChatSessions(prev => prev.map(s => s.customerId === customerId ? updatedSession : s));
+    }
+
+    // Save to Supabase
+    await saveChatSession(updatedSession);
   };
 
-  const safeOrders = Array.isArray(orders) ? orders : [];
-  const safeChats = Array.isArray(chatSessions) ? chatSessions : [];
-  const pendingOrdersCount = safeOrders.filter(o => o.status === 'pending').length;
-  const myPendingOrdersCount = safeOrders.filter(o => o.customerName === loginName && o.status === 'pending').length;
-  const unreadChatCount = safeChats.reduce((sum, s) => sum + (s.unreadAdminCount || 0), 0);
+  const pendingOrdersCount = orders.filter(o => o.status === 'pending').length;
+  const myPendingOrdersCount = orders.filter(o => o.customerName === loginName && o.status === 'pending').length;
+  const unreadChatCount = chatSessions.reduce((sum, s) => sum + (s.unreadAdminCount || 0), 0);
+
+  if (loading && items.length === 0) return <div className="flex flex-col h-screen items-center justify-center bg-white font-sans text-gray-600 space-y-6"><div className="relative"><div className="w-16 h-16 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin"></div><div className="absolute inset-0 flex items-center justify-center"><CloudLightning size={20} className="text-blue-600 animate-pulse" /></div></div><div className="text-center space-y-1"><p className="font-medium text-gray-900">Menghubungkan Database</p><p className="text-xs text-gray-400">Sinkronisasi Supabase...</p></div></div>;
 
   if (!isAuthenticated) {
       return (
@@ -376,8 +422,6 @@ const AppContent: React.FC = () => {
       );
   }
 
-  if (loading) return <div className="flex flex-col h-screen items-center justify-center bg-white font-sans text-gray-600 space-y-6"><div className="relative"><div className="w-16 h-16 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin"></div><div className="absolute inset-0 flex items-center justify-center"><CloudLightning size={20} className="text-blue-600 animate-pulse" /></div></div><div className="text-center space-y-1"><p className="font-medium text-gray-900">Menghubungkan Database</p><p className="text-xs text-gray-400">Sinkronisasi Google Sheet...</p></div></div>;
-
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
@@ -397,9 +441,7 @@ const AppContent: React.FC = () => {
               {isAdmin ? (
                   <>
                     <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><ShoppingCart size={18}/> Beranda</button>
-                    {/* BUTTON SCAN RESI DITAMBAHKAN DISINI */}
                     <button onClick={() => setActiveView('scan')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='scan'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><ScanBarcode size={18}/> Scan Resi</button>
-                    
                     <button onClick={() => setActiveView('inventory')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='inventory'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><Package size={18}/> Gudang</button>
                     <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><ClipboardList size={18}/> Pesanan {pendingOrdersCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{pendingOrdersCount}</span>}</button>
                     <button onClick={() => setActiveView('chat')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='chat'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><MessageSquare size={18}/> Chat {unreadChatCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{unreadChatCount}</span>}</button>
