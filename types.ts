@@ -41,12 +41,6 @@ export interface StockHistory {
   name: string;
   type: 'in' | 'out';
   quantity: number;
-  
-  // --- UPDATED: Kolom Harga ---
-  price: number;
-  totalPrice: number;
-  // ----------------------------
-
   previousStock: number;
   currentStock: number;
   timestamp: number;

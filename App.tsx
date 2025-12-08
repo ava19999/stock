@@ -136,7 +136,6 @@ const AppContent: React.FC = () => {
   const handleSaveItem = async (data: InventoryFormData) => {
       setLoading(true);
       const newQuantity = Number(data.quantity) || 0;
-      const currentPrice = Number(data.price) || 0; // Ambil harga saat ini
       const ecommerceInfo = data.ecommerce ? ` (Via: ${data.ecommerce})` : '';
 
       if (editItem) {
@@ -159,17 +158,10 @@ const AppContent: React.FC = () => {
           // Logic History
           if (diff !== 0) {
               if (diff > 0) {
-                  // updatedItem.qtyIn = (updatedItem.qtyIn || 0) + diff; 
+                  // updatedItem.qtyIn = (updatedItem.qtyIn || 0) + diff; // Ini sudah dihandle form, tapi jika mau auto-calc bisa di sini
                   addNewHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
-                      type: 'in', quantity: diff, 
-                      
-                      // --- UPDATED ---
-                      price: currentPrice,
-                      totalPrice: currentPrice * diff,
-                      // ---------------
-                      
-                      previousStock: oldQty, currentStock: newQuantity,
+                      type: 'in', quantity: diff, previousStock: oldQty, currentStock: newQuantity,
                       timestamp: Date.now(), 
                       reason: `Restock Manual${ecommerceInfo}` 
                   });
@@ -178,14 +170,7 @@ const AppContent: React.FC = () => {
                   // updatedItem.qtyOut = (updatedItem.qtyOut || 0) + absDiff;
                   addNewHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
-                      type: 'out', quantity: absDiff, 
-                      
-                      // --- UPDATED ---
-                      price: currentPrice,
-                      totalPrice: currentPrice * absDiff,
-                      // ---------------
-                      
-                      previousStock: oldQty, currentStock: newQuantity,
+                      type: 'out', quantity: absDiff, previousStock: oldQty, currentStock: newQuantity,
                       timestamp: Date.now(), 
                       reason: 'Koreksi Stok Manual'
                   });
@@ -207,14 +192,7 @@ const AppContent: React.FC = () => {
           
           addNewHistory({ 
               id: generateId(), itemId: data.partNumber, partNumber: data.partNumber, name: data.name, 
-              type: 'in', quantity: newQuantity, 
-              
-              // --- UPDATED ---
-              price: currentPrice,
-              totalPrice: currentPrice * newQuantity,
-              // ---------------
-              
-              previousStock: 0, currentStock: newQuantity, 
+              type: 'in', quantity: newQuantity, previousStock: 0, currentStock: newQuantity, 
               timestamp: Date.now(), 
               reason: `Barang Baru${ecommerceInfo}` 
           });
@@ -300,7 +278,6 @@ const AppContent: React.FC = () => {
               if (idx > -1) {
                   const itemToUpdate = { ...updatedItemsList[idx] };
                   const qtySold = cartItem.cartQuantity;
-                  const currentPrice = Number(itemToUpdate.price) || 0;
 
                   itemToUpdate.qtyOut = (itemToUpdate.qtyOut || 0) + qtySold;
                   itemToUpdate.quantity = Math.max(0, itemToUpdate.quantity - qtySold);
@@ -313,12 +290,6 @@ const AppContent: React.FC = () => {
                   await addNewHistory({
                       id: generateId(), itemId: cartItem.id, partNumber: cartItem.partNumber, name: cartItem.name,
                       type: 'out', quantity: qtySold, 
-                      
-                      // --- UPDATED ---
-                      price: currentPrice,
-                      totalPrice: currentPrice * qtySold,
-                      // ---------------
-
                       previousStock: itemToUpdate.quantity + qtySold, 
                       currentStock: itemToUpdate.quantity,
                       timestamp: Date.now(), reason: `Order #${newOrder.id.slice(0,6)} (${name})`
@@ -353,7 +324,6 @@ const AppContent: React.FC = () => {
               if (idx > -1) {
                   const restoreQty = orderItem.cartQuantity;
                   const itemToUpdate = { ...newItems[idx] };
-                  const currentPrice = Number(itemToUpdate.price) || 0;
                   
                   itemToUpdate.qtyOut = Math.max(0, (itemToUpdate.qtyOut || 0) - restoreQty);
                   itemToUpdate.quantity = itemToUpdate.quantity + restoreQty;
@@ -364,12 +334,6 @@ const AppContent: React.FC = () => {
                   await addNewHistory({
                       id: generateId(), itemId: itemToUpdate.id, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name,
                       type: 'in', quantity: restoreQty,
-                      
-                      // --- UPDATED ---
-                      price: currentPrice,
-                      totalPrice: currentPrice * restoreQty,
-                      // ---------------
-
                       previousStock: itemToUpdate.quantity - restoreQty, currentStock: itemToUpdate.quantity,
                       timestamp: Date.now(), reason: `Cancel Order #${orderId.slice(0,6)} (${order.customerName})`
                   });
