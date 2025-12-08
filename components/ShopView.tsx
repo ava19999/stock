@@ -1,10 +1,11 @@
 // FILE: src/components/ShopView.tsx
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { InventoryItem, CartItem } from '../types';
-import { ShoppingCart, Search, Plus, X, Tag, Car, Package, Camera, Loader2, Sparkles, LayoutGrid, List, Check, ZoomIn, Move } from 'lucide-react';
+import { fetchShopItems } from '../services/supabaseService'; // Import fungsi baru
+import { ShoppingCart, Search, Plus, X, Tag, Car, Package, Camera, Loader2, Sparkles, LayoutGrid, List, Check, ZoomIn, Move, ChevronLeft, ChevronRight, ShoppingBag } from 'lucide-react';
 import { formatRupiah, compressImage } from '../utils';
 
-// --- CROPPER ---
+// --- CROPPER (TETAP SAMA) ---
 interface ImageCropperProps { imageSrc: string; onConfirm: (croppedBase64: string) => void; onCancel: () => void; }
 const ImageCropper: React.FC<ImageCropperProps> = ({ imageSrc, onConfirm, onCancel }) => {
   const [zoom, setZoom] = useState(1); const [crop, setCrop] = useState({ x: 0, y: 0 }); const [isDragging, setIsDragging] = useState(false); const [dragStart, setDragStart] = useState({ x: 0, y: 0 }); const imgRef = useRef<HTMLImageElement>(null); const containerRef = useRef<HTMLDivElement>(null); const ASPECT_RATIO = 32 / 9;
@@ -18,51 +19,99 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ imageSrc, onConfirm, onCanc
 // --- MAIN COMPONENT ---
 interface ShopViewProps { items: InventoryItem[]; cart: CartItem[]; isAdmin: boolean; bannerUrl: string; onAddToCart: (item: InventoryItem) => void; onRemoveFromCart: (itemId: string) => void; onCheckout: (customerName: string) => void; onUpdateBanner: (base64: string) => Promise<void>; }
 
-export const ShopView: React.FC<ShopViewProps> = ({ items = [], cart = [], isAdmin, bannerUrl, onAddToCart, onRemoveFromCart, onCheckout, onUpdateBanner }) => {
-  const [searchTerm, setSearchTerm] = useState(''); const [selectedCategory, setSelectedCategory] = useState('Semua'); const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [isCartOpen, setIsCartOpen] = useState(false); const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false); const [isUploadingBanner, setIsUploadingBanner] = useState(false); const [tempBannerImg, setTempBannerImg] = useState<string | null>(null);
+export const ShopView: React.FC<ShopViewProps> = ({ cart = [], isAdmin, bannerUrl, onAddToCart, onRemoveFromCart, onCheckout, onUpdateBanner }) => {
+  // State Data Mandiri (Tidak tergantung App.tsx agar bisa filter server-side)
+  const [shopItems, setShopItems] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   
-  // State untuk Checkout
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('Semua');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  
+  const [isCartOpen, setIsCartOpen] = useState(false); 
+  const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false); 
+  const [isUploadingBanner, setIsUploadingBanner] = useState(false); 
+  const [tempBannerImg, setTempBannerImg] = useState<string | null>(null);
+  
+  // Checkout States
   const [customerNameInput, setCustomerNameInput] = useState(''); 
   const [resiInput, setResiInput] = useState('');
-  const [ecommerceInput, setEcommerceInput] = useState(''); // NEW: E-Commerce Input
+  const [ecommerceInput, setEcommerceInput] = useState('');
   
   const bannerInputRef = useRef<HTMLInputElement>(null); 
-  const safeItems = Array.isArray(items) ? items : [];
 
-  const carCategories = useMemo(() => { const categories = new Set<string>(); safeItems.forEach(item => { const desc = item.description || ''; const match = desc.match(/^\[(.*?)\]/); if (match && match[1]) categories.add(match[1]); }); return ['Semua', ...Array.from(categories).sort()]; }, [safeItems]);
-  const filteredItems = useMemo(() => { return safeItems.filter(item => { const name = (item.name || '').toLowerCase(); const pn = (item.partNumber || '').toLowerCase(); const desc = (item.description || ''); const term = searchTerm.toLowerCase(); const matchesSearch = name.includes(term) || pn.includes(term); const matchesCategory = selectedCategory === 'Semua' ? true : desc.startsWith(`[${selectedCategory}]`); return (Number(item.quantity) || 0) > 0 && matchesSearch && matchesCategory; }); }, [safeItems, searchTerm, selectedCategory]);
-  
+  // --- FETCH DATA SHOP (Server Side) ---
+  const loadShopData = useCallback(async () => {
+    setLoading(true);
+    // Fetch 20 item per halaman, filter stock>0 & price>0
+    const { data, count } = await fetchShopItems(page, 20, searchTerm, selectedCategory);
+    setShopItems(data);
+    setTotalPages(Math.ceil(count / 20));
+    setLoading(false);
+  }, [page, searchTerm, selectedCategory]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+        setPage(1); // Reset page saat search/category berubah
+        loadShopData();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm, selectedCategory]);
+
+  useEffect(() => {
+    loadShopData();
+  }, [page]); // Reload saat ganti halaman
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onloadend = () => { setTempBannerImg(reader.result as string); if (bannerInputRef.current) bannerInputRef.current.value = ''; }; reader.readAsDataURL(file); };
   const handleCropConfirm = async (base64: string) => { setTempBannerImg(null); setIsUploadingBanner(true); try { const compressed = await compressImage(base64); await onUpdateBanner(compressed); } catch (error) { console.error("Gagal upload banner", error); alert("Gagal memproses gambar banner"); } finally { setIsUploadingBanner(false); } };
   
-  const cartTotal = cart.reduce((sum, item) => sum + ((item.price || 0) * item.cartQuantity), 0); const cartItemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
+  const cartTotal = cart.reduce((sum, item) => sum + ((item.price || 0) * item.cartQuantity), 0); 
+  const cartItemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
+
+  // Kategori hardcoded untuk sementara (atau bisa fetch dari DB jika ada tabel kategori)
+  const carCategories = ['Semua', 'Honda', 'Toyota', 'Suzuki', 'Nissan', 'Daihatsu', 'Mitsubishi', 'Wuling', 'Mazda'];
 
   return (
     <div className="relative min-h-full pb-20">
       {tempBannerImg && <ImageCropper imageSrc={tempBannerImg} onConfirm={handleCropConfirm} onCancel={() => setTempBannerImg(null)} />}
+      
+      {/* BANNER */}
       <div className="relative w-full aspect-[21/9] md:aspect-[32/9] bg-gray-900 rounded-2xl overflow-hidden shadow-lg mb-6 group select-none">
           {bannerUrl ? <img src={bannerUrl} alt="Promo Banner" className="w-full h-full object-cover" referrerPolicy="no-referrer"/> : <div className="w-full h-full bg-gradient-to-r from-blue-900 to-purple-900 flex flex-col items-center justify-center text-white p-6 text-center"><Sparkles className="mb-3 text-yellow-400 opacity-80" size={32} /><h2 className="text-xl md:text-3xl font-bold mb-1">Promo Spesial Hari Ini</h2><p className="text-blue-200 text-xs md:text-sm">Temukan sparepart terbaik untuk mobil Anda</p></div>}
           {isAdmin && (<div className="absolute top-3 right-3 z-10"><button onClick={() => bannerInputRef.current?.click()} disabled={isUploadingBanner} className="bg-white/90 backdrop-blur text-gray-800 px-3 py-2 rounded-lg text-xs font-bold shadow-md hover:bg-white flex items-center gap-2 transition-all active:scale-95">{isUploadingBanner ? <Loader2 size={14} className="animate-spin"/> : <Camera size={14}/>}{isUploadingBanner ? 'Upload...' : 'Ganti Banner'}</button><input type="file" ref={bannerInputRef} className="hidden" accept="image/*" onChange={handleFileSelect} /></div>)}
-          {isUploadingBanner && <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20"><div className="bg-white p-3 rounded-xl flex items-center gap-3"><Loader2 className="animate-spin text-blue-600" size={20} /><span className="text-xs font-bold text-gray-700">Mengupdate Banner...</span></div></div>}
       </div>
 
+      {/* FILTER BAR */}
       <div className="sticky top-[64px] z-30 bg-gray-50/95 backdrop-blur-sm pt-2 pb-2 -mx-2 px-2 md:mx-0 md:px-0 space-y-3 border-b border-gray-200/50">
         <div className="flex gap-2">
             <div className="relative w-full group"><div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none"><Search size={18} className="text-gray-400 group-focus-within:text-blue-600 transition-colors" /></div><input type="text" placeholder="Cari sparepart..." className="pl-10 pr-4 py-3 w-full bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm transition-all" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/></div>
             <div className="bg-white rounded-xl p-1 flex shadow-sm border border-gray-200"><button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={18}/></button><button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><List size={18}/></button></div>
         </div>
-        {carCategories.length > 1 && (<div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar scroll-smooth">{carCategories.map(cat => (<button key={cat} onClick={() => setSelectedCategory(cat)} className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition-all whitespace-nowrap ${selectedCategory === cat ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:text-blue-600'}`}>{cat === 'Semua' ? 'Semua Mobil' : cat}</button>))}</div>)}
+        <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar scroll-smooth">
+            {carCategories.map(cat => (
+                <button key={cat} onClick={() => setSelectedCategory(cat)} className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition-all whitespace-nowrap ${selectedCategory === cat ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:text-blue-600'}`}>
+                    {cat === 'Semua' ? 'Semua Mobil' : cat}
+                </button>
+            ))}
+        </div>
       </div>
 
-      {filteredItems.length === 0 ? (<div className="flex flex-col items-center justify-center py-20 text-center text-gray-400"><Search size={48} className="opacity-20 mb-3" /><p>Tidak ditemukan</p></div>) : (
-        viewMode === 'grid' ? (
+      {/* ITEMS LIST */}
+      {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 text-blue-500"><Loader2 size={32} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat Produk...</p></div>
+      ) : shopItems.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center text-gray-400"><Search size={48} className="opacity-20 mb-3" /><p>Tidak ditemukan barang yang tersedia</p></div>
+      ) : (
+        <>
+        {viewMode === 'grid' ? (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-6 mt-4">
-                {filteredItems.map((item) => (
+                {shopItems.map((item) => (
                 <div key={item.id} className="group bg-white rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:shadow-lg border border-gray-100 overflow-hidden flex flex-col transition-all duration-300 transform hover:-translate-y-1">
                     <div className="aspect-square w-full bg-gray-50 relative overflow-hidden">
                         {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}} /> : <div className="w-full h-full flex flex-col items-center justify-center text-gray-300"><Car size={32}/><span className="text-[10px] mt-1">No Image</span></div>}
-                        <div className="absolute top-2 right-2 bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold text-gray-700 shadow-sm border border-gray-100">{item.quantity || 0} Unit</div>
+                        <div className="absolute top-2 right-2 bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold text-gray-700 shadow-sm border border-gray-100">{item.quantity} Unit</div>
                     </div>
                     <div className="p-3 flex-1 flex flex-col">
                         <div className="flex items-center gap-1.5 mb-1.5"><Tag size={10} className="text-blue-500" /><span className="text-xs font-mono text-gray-500 uppercase tracking-wider truncate">{item.partNumber || '-'}</span></div>
@@ -78,7 +127,7 @@ export const ShopView: React.FC<ShopViewProps> = ({ items = [], cart = [], isAdm
             </div>
         ) : (
             <div className="flex flex-col gap-3 mt-4">
-                {filteredItems.map((item) => (
+                {shopItems.map((item) => (
                     <div key={item.id} className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 flex gap-3 hover:shadow-md transition-shadow">
                          <div className="w-20 h-20 bg-gray-50 rounded-lg overflow-hidden flex-shrink-0 relative">
                             {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}} /> : <div className="w-full h-full flex items-center justify-center text-gray-300"><Car size={20}/></div>}
@@ -98,15 +147,38 @@ export const ShopView: React.FC<ShopViewProps> = ({ items = [], cart = [], isAdm
                     </div>
                 ))}
             </div>
-        )
+        )}
+
+        {/* PAGINATION */}
+        <div className="flex justify-between items-center mt-8 bg-white p-3 rounded-xl border border-gray-100 shadow-sm sticky bottom-20 md:bottom-4 z-20">
+            <button 
+                onClick={() => setPage(p => Math.max(1, p - 1))} 
+                disabled={page === 1}
+                className="flex items-center gap-1 text-xs font-bold px-4 py-2 rounded-lg hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+                <ChevronLeft size={16} /> Sebelumnya
+            </button>
+            <span className="text-xs font-medium text-gray-500">
+                Halaman <span className="font-bold text-gray-900">{page}</span> dari {totalPages || 1}
+            </span>
+            <button 
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))} 
+                disabled={page === totalPages || totalPages === 0}
+                className="flex items-center gap-1 text-xs font-bold px-4 py-2 rounded-lg hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+                Selanjutnya <ChevronRight size={16} />
+            </button>
+        </div>
+        </>
       )}
 
+      {/* FLOAT BUTTON */}
       <button onClick={() => setIsCartOpen(true)} className="fixed bottom-20 right-4 sm:bottom-8 sm:right-8 bg-gray-900 text-white p-4 rounded-full shadow-xl hover:bg-blue-600 hover:scale-105 active:scale-95 transition-all z-40 flex items-center justify-center group"><ShoppingCart size={24} />{cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-white shadow-sm">{cartItemCount}</span>}</button>
       
-      {/* CART MODAL */}
+      {/* CART MODAL (TETAP SAMA) */}
       {isCartOpen && (<div className="fixed inset-0 z-[60] flex justify-end"><div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setIsCartOpen(false)}></div><div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right"><div className="px-5 py-4 border-b flex justify-between items-center bg-white"><h2 className="text-lg font-bold">Keranjang</h2><button onClick={() => setIsCartOpen(false)}><X size={20}/></button></div><div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">{cart.map(item => (<div key={item.id} className="flex gap-3 bg-white p-3 rounded-xl shadow-sm border border-gray-100"><div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">{item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer"/> : <div className="h-full flex items-center justify-center"><Package size={20}/></div>}</div><div className="flex-1 flex flex-col justify-between"><h4 className="text-sm font-bold line-clamp-1">{item.name}</h4><div className="flex justify-between items-center mt-2"><span className="text-sm font-bold text-blue-600">{formatRupiah(item.price)}</span><div className="flex gap-2 items-center bg-gray-50 px-2 py-1 rounded"><span className="text-xs font-bold">x {item.cartQuantity}</span><button onClick={() => onRemoveFromCart(item.id)} className="text-red-500"><X size={14}/></button></div></div></div></div>))}{cart.length === 0 && <div className="flex flex-col items-center justify-center h-64 text-gray-400"><ShoppingCart size={48} className="mb-2 opacity-20"/><p>Keranjang kosong</p></div>}</div><div className="p-5 border-t bg-white safe-area-bottom"><div className="flex justify-between mb-4"><span className="font-bold">Total</span><span className="font-extrabold text-xl">{formatRupiah(cartTotal)}</span></div><button onClick={() => { setIsCartOpen(false); setIsCheckoutModalOpen(true); }} disabled={cart.length===0} className="w-full bg-gray-900 text-white py-3.5 rounded-xl font-bold hover:bg-black disabled:opacity-50">Lanjut Bayar</button></div></div></div>)}
       
-      {/* CHECKOUT MODAL (UPDATED) */}
+      {/* CHECKOUT MODAL (TETAP SAMA) */}
       {isCheckoutModalOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsCheckoutModalOpen(false)}></div>
@@ -117,11 +189,9 @@ export const ShopView: React.FC<ShopViewProps> = ({ items = [], cart = [], isAdm
                 <form onSubmit={(e) => { 
                     e.preventDefault(); 
                     if(customerNameInput.trim()) { 
-                        // Gabungkan info ke nama agar tersimpan di sheet
                         let finalName = customerNameInput;
                         if(resiInput.trim()) finalName += ` (Resi: ${resiInput})`;
                         if(ecommerceInput.trim()) finalName += ` (Via: ${ecommerceInput})`;
-
                         onCheckout(finalName); 
                         setIsCheckoutModalOpen(false); 
                         setCustomerNameInput(''); 
@@ -130,38 +200,10 @@ export const ShopView: React.FC<ShopViewProps> = ({ items = [], cart = [], isAdm
                     } 
                 }} className="p-6">
                     <div className="space-y-4">
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">Nama</label>
-                            <input type="text" required autoFocus value={customerNameInput} onChange={(e) => setCustomerNameInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Nama Anda..." />
-                        </div>
-                        
-                        {/* INPUT RESI */}
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">No. Resi</label>
-                            <input 
-                                type="text" 
-                                value={resiInput} 
-                                onChange={(e) => setResiInput(e.target.value)} 
-                                className="w-full p-3 border rounded-xl mt-1" 
-                                placeholder="Nomor Resi..." 
-                            />
-                        </div>
-
-                        {/* INPUT E-COMMERCE (BARU) */}
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">E-Commerce / Marketplace</label>
-                            <input 
-                                type="text" 
-                                value={ecommerceInput} 
-                                onChange={(e) => setEcommerceInput(e.target.value)} 
-                                className="w-full p-3 border rounded-xl mt-1" 
-                                placeholder="Contoh: Shopee, Tokopedia..." 
-                            />
-                        </div>
-
-                        {/* TOMBOL SCAN DIHAPUS SESUAI PERMINTAAN */}
+                        <div><label className="text-xs font-bold text-gray-500 uppercase">Nama</label><input type="text" required autoFocus value={customerNameInput} onChange={(e) => setCustomerNameInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Nama Anda..." /></div>
+                        <div><label className="text-xs font-bold text-gray-500 uppercase">No. Resi</label><input type="text" value={resiInput} onChange={(e) => setResiInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Nomor Resi..." /></div>
+                        <div><label className="text-xs font-bold text-gray-500 uppercase">E-Commerce</label><input type="text" value={ecommerceInput} onChange={(e) => setEcommerceInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Contoh: Shopee..." /></div>
                     </div>
-                    
                     <div className="mt-6 grid grid-cols-2 gap-3">
                         <button type="button" onClick={() => setIsCheckoutModalOpen(false)} className="py-3 bg-gray-100 font-bold rounded-xl">Batal</button>
                         <button type="submit" disabled={!customerNameInput.trim()} className="py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50">Kirim</button>

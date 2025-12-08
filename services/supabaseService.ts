@@ -46,6 +46,65 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
       });
     }
 
+export const fetchShopItems = async (page: number = 1, limit: number = 20, search: string = '', category: string = 'Semua') => {
+  try {
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    let query = supabase
+      .from('inventory')
+      .select('*', { count: 'exact' })
+      .gt('quantity', 0)  // FILTER: Hanya Stok > 0
+      .gt('price', 0)     // FILTER: Hanya Harga > 0
+      .order('name', { ascending: true }); // Urutkan nama A-Z untuk toko
+
+    // Filter Kategori (Jika bukan 'Semua')
+    if (category !== 'Semua') {
+       query = query.ilike('description', `%[${category}]%`);
+    }
+
+    // Pencarian Pintar
+    if (search) {
+      const terms = search.trim().split(/\s+/);
+      terms.forEach(term => {
+        query = query.or(`name.ilike.%${term}%,part_number.ilike.%${term}%,description.ilike.%${term}%`);
+      });
+    }
+
+    // Pagination
+    query = query.range(from, to);
+
+    const { data, count, error } = await query;
+
+    if (error) {
+      console.error('Error fetching shop items:', error.message);
+      return { data: [], count: 0 };
+    }
+
+    const mappedData = (data || []).map((item: any) => ({
+      id: item.id,
+      partNumber: item.part_number || '',
+      name: item.name || 'Tanpa Nama',
+      description: item.description || '',
+      price: Number(item.price) || 0,
+      costPrice: Number(item.cost_price) || 0,
+      quantity: Number(item.quantity) || 0,
+      initialStock: Number(item.initial_stock) || 0,
+      qtyIn: Number(item.qty_in) || 0,
+      qtyOut: Number(item.qty_out) || 0,
+      shelf: item.shelf || '',
+      imageUrl: item.image_url || '',
+      ecommerce: item.ecommerce || '',
+      lastUpdated: item.last_updated
+    }));
+
+    return { data: mappedData, count: count || 0 };
+  } catch (err) {
+    console.error(err);
+    return { data: [], count: 0 };
+  }
+};
+
     // Terapkan pagination setelah filter
     query = query.range(from, to);
 
