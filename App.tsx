@@ -8,7 +8,6 @@ import { ChatView } from './components/ChatView';
 import { OrderManagement } from './components/OrderManagement';
 import { CustomerOrderView } from './components/CustomerOrderView';
 import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
-// GANTI IMPORT SERVICE KE SUPABASE
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory,
   fetchOrders, saveOrder, updateOrderStatusService,
@@ -66,34 +65,27 @@ const AppContent: React.FC = () => {
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => setToast({msg, type});
 
-  // --- INITIAL LOAD DATA FROM SUPABASE ---
   useEffect(() => {
     let cId = localStorage.getItem(CUSTOMER_ID_KEY);
     if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
     setMyCustomerId(cId);
-
-    // Initial Fetch saat aplikasi dimuat
     refreshData();
   }, []);
 
   const refreshData = async () => {
     setLoading(true);
     try {
-        // 1. Fetch Inventory
         const inventoryData = await fetchInventory();
         const bannerItem = inventoryData.find(i => i.partNumber === BANNER_PART_NUMBER);
         if (bannerItem) setBannerUrl(bannerItem.imageUrl);
         setItems(inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER));
 
-        // 2. Fetch Orders
         const ordersData = await fetchOrders();
         setOrders(ordersData);
 
-        // 3. Fetch History
         const historyData = await fetchHistory();
         setHistory(historyData);
 
-        // 4. Fetch Chat
         const chatData = await fetchChatSessions();
         setChatSessions(chatData);
 
@@ -104,11 +96,8 @@ const AppContent: React.FC = () => {
     setLoading(false);
   };
 
-  // Helper untuk update history lokal & server
   const addNewHistory = async (newRecord: StockHistory) => {
-      // Update Server
       await addHistoryLog(newRecord);
-      // Update Lokal
       setHistory(prev => [newRecord, ...prev]);
   };
 
@@ -117,7 +106,7 @@ const AppContent: React.FC = () => {
     if (loginName.toLowerCase() === 'ava' && loginPass === '9193') {
         setIsAdmin(true); setIsAuthenticated(true); setActiveView('inventory');
         setMyCustomerId('ADMIN-AVA'); showToast('Login Admin Berhasil'); 
-        refreshData(); // Refresh data saat login admin untuk memastikan data terbaru
+        refreshData();
     } else if (loginName.trim() !== '') {
         loginAsCustomer(loginName);
     } else {
@@ -137,17 +126,15 @@ const AppContent: React.FC = () => {
       setLoading(true);
       const newQuantity = Number(data.quantity) || 0;
       const ecommerceInfo = data.ecommerce ? ` (Via: ${data.ecommerce})` : '';
+      // AMBIL HARGA DARI FORM DATA
+      const currentPrice = Number(data.price) || 0;
 
       if (editItem) {
           const oldQty = Number(editItem.quantity) || 0;
           const diff = newQuantity - oldQty;
           
-          // Construct item updated
-          // Note: Kita gunakan ID dari editItem karena Supabase butuh ID/PartNumber yang konsisten
           let updatedItem: InventoryItem = { 
-              ...editItem, 
-              ...data, 
-              // Pastikan field stok terupdate
+              ...editItem, ...data, 
               quantity: newQuantity,
               initialStock: data.initialStock || 0,
               qtyIn: data.qtyIn || 0,
@@ -155,29 +142,25 @@ const AppContent: React.FC = () => {
               lastUpdated: Date.now() 
           };
 
-          // Logic History
           if (diff !== 0) {
               if (diff > 0) {
-                  // updatedItem.qtyIn = (updatedItem.qtyIn || 0) + diff; // Ini sudah dihandle form, tapi jika mau auto-calc bisa di sini
                   addNewHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
                       type: 'in', quantity: diff, previousStock: oldQty, currentStock: newQuantity,
-                      timestamp: Date.now(), 
-                      reason: `Restock Manual${ecommerceInfo}` 
+                      price: currentPrice, // SIMPAN HARGA
+                      timestamp: Date.now(), reason: `Restock Manual${ecommerceInfo}` 
                   });
               } else {
                   const absDiff = Math.abs(diff);
-                  // updatedItem.qtyOut = (updatedItem.qtyOut || 0) + absDiff;
                   addNewHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
                       type: 'out', quantity: absDiff, previousStock: oldQty, currentStock: newQuantity,
-                      timestamp: Date.now(), 
-                      reason: 'Koreksi Stok Manual'
+                      price: currentPrice, // SIMPAN HARGA
+                      timestamp: Date.now(), reason: 'Koreksi Stok Manual'
                   });
               }
           }
           
-          // Save to Supabase
           const success = await updateInventory(updatedItem);
           if (success) { 
               showToast('Update berhasil!'); 
@@ -187,20 +170,18 @@ const AppContent: React.FC = () => {
           }
 
       } else {
-          // BARANG BARU
           if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number ada!', 'error'); setLoading(false); return; }
           
           addNewHistory({ 
               id: generateId(), itemId: data.partNumber, partNumber: data.partNumber, name: data.name, 
               type: 'in', quantity: newQuantity, previousStock: 0, currentStock: newQuantity, 
-              timestamp: Date.now(), 
-              reason: `Barang Baru${ecommerceInfo}` 
+              price: currentPrice, // SIMPAN HARGA
+              timestamp: Date.now(), reason: `Barang Baru${ecommerceInfo}` 
           });
           
           const success = await addInventory(data);
           if (success) {
               showToast('Tersimpan di Database!');
-              // Refresh full data agar mendapat ID dari supabase, atau buat objek sementara
               refreshData(); 
           } else {
               showToast('Gagal simpan', 'error');
@@ -210,38 +191,21 @@ const AppContent: React.FC = () => {
   };
 
   const handleUpdateBanner = async (base64: string) => {
-      const bannerData: any = { // Pakai any sementara agar compatible dengan InventoryItem/FormData
+      const bannerData: any = {
           partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', description: 'DO NOT DELETE',
           price: 0, costPrice: 0, ecommerce: '', quantity: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, shelf: 'SYSTEM', imageUrl: base64
       };
-
-      let success = false;
-      if (bannerUrl) {
-           success = await updateInventory(bannerData);
-      } else {
-           success = await addInventory(bannerData);
-      }
-
-      if (success) {
-          setBannerUrl(base64); showToast('Banner diperbarui!'); 
-      } else {
-          showToast('Gagal update banner', 'error'); 
-      }
+      let success = await (bannerUrl ? updateInventory(bannerData) : addInventory(bannerData));
+      if (success) { setBannerUrl(base64); showToast('Banner diperbarui!'); } else { showToast('Gagal update banner', 'error'); }
   };
   
   const handleDelete = async (id: string) => {
       const itemToDelete = items.find(i => i.id === id);
       if (!itemToDelete) return;
-
       if(confirm('Hapus Permanen dari Database?')) {
           setLoading(true);
           const success = await deleteInventory(itemToDelete.partNumber);
-          if (success) { 
-              showToast('Dihapus'); 
-              setItems(prev => prev.filter(i => i.id !== id)); 
-          } else {
-              showToast('Gagal hapus', 'error');
-          }
+          if (success) { showToast('Dihapus'); setItems(prev => prev.filter(i => i.id !== id)); } else { showToast('Gagal hapus', 'error'); }
           setLoading(false);
       }
   }
@@ -255,10 +219,7 @@ const AppContent: React.FC = () => {
   };
 
   const doCheckout = async (name: string) => {
-      if (name !== loginName && !isAdmin) {
-          setLoginName(name);
-          localStorage.setItem('stockmaster_customer_name', name);
-      }
+      if (name !== loginName && !isAdmin) { setLoginName(name); localStorage.setItem('stockmaster_customer_name', name); }
 
       const newOrder: Order = {
           id: generateId(), customerName: name, items: [...cart], 
@@ -266,42 +227,31 @@ const AppContent: React.FC = () => {
       };
       
       setLoading(true);
-      
-      // 1. Simpan Order ke Supabase
       const orderSuccess = await saveOrder(newOrder);
       
       if (orderSuccess) {
-          // 2. Update Stok & History untuk setiap item
           const updatedItemsList = [...items];
           for (const cartItem of cart) {
               const idx = updatedItemsList.findIndex(i => i.id === cartItem.id);
               if (idx > -1) {
                   const itemToUpdate = { ...updatedItemsList[idx] };
                   const qtySold = cartItem.cartQuantity;
-
                   itemToUpdate.qtyOut = (itemToUpdate.qtyOut || 0) + qtySold;
                   itemToUpdate.quantity = Math.max(0, itemToUpdate.quantity - qtySold);
-
-                  // Update State Lokal
                   updatedItemsList[idx] = itemToUpdate;
                   
-                  // Update DB
                   await updateInventory(itemToUpdate);
-                  await addNewHistory({
+                  addNewHistory({
                       id: generateId(), itemId: cartItem.id, partNumber: cartItem.partNumber, name: cartItem.name,
                       type: 'out', quantity: qtySold, 
                       previousStock: itemToUpdate.quantity + qtySold, 
                       currentStock: itemToUpdate.quantity,
+                      price: itemToUpdate.price, // SIMPAN HARGA
                       timestamp: Date.now(), reason: `Order #${newOrder.id.slice(0,6)} (${name})`
                   });
               }
           }
-
-          setItems(updatedItemsList);
-          setOrders([newOrder, ...orders]);
-          setCart([]);
-          setActiveView('orders');
-          showToast('Pesanan dibuat, stok terpotong!');
+          setItems(updatedItemsList); setOrders([newOrder, ...orders]); setCart([]); setActiveView('orders'); showToast('Pesanan dibuat, stok terpotong!');
       } else {
           showToast('Gagal membuat pesanan', 'error');
       }
@@ -315,75 +265,50 @@ const AppContent: React.FC = () => {
       const success = await updateOrderStatusService(orderId, newStatus);
       if (!success) { showToast('Gagal update status', 'error'); return; }
 
-      // Logic Pembatalan (Restock kembali)
       if (newStatus === 'cancelled' && order.status !== 'cancelled') {
           const newItems = [...items];
-          
           for (const orderItem of order.items) {
               const idx = newItems.findIndex(i => i.id === orderItem.id);
               if (idx > -1) {
                   const restoreQty = orderItem.cartQuantity;
                   const itemToUpdate = { ...newItems[idx] };
-                  
                   itemToUpdate.qtyOut = Math.max(0, (itemToUpdate.qtyOut || 0) - restoreQty);
                   itemToUpdate.quantity = itemToUpdate.quantity + restoreQty;
-                  
                   newItems[idx] = itemToUpdate;
 
                   await updateInventory(itemToUpdate);
-                  await addNewHistory({
+                  addNewHistory({
                       id: generateId(), itemId: itemToUpdate.id, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name,
                       type: 'in', quantity: restoreQty,
                       previousStock: itemToUpdate.quantity - restoreQty, currentStock: itemToUpdate.quantity,
+                      price: itemToUpdate.price, // SIMPAN HARGA
                       timestamp: Date.now(), reason: `Cancel Order #${orderId.slice(0,6)} (${order.customerName})`
                   });
               }
           }
-          setItems(newItems);
-          showToast('Pesanan dibatalkan, stok dikembalikan.');
+          setItems(newItems); showToast('Pesanan dibatalkan, stok dikembalikan.');
       }
-
-      // Update Order State Lokal
       setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
   };
 
   const handleSendMessage = async (customerId: string, text: string, sender: 'user' | 'admin') => {
     const newMessage: Message = { id: Date.now().toString(), sender, text, timestamp: Date.now(), read: false };
-    
-    // Cari sesi lokal atau buat baru sementara
     let currentSession = chatSessions.find(s => s.customerId === customerId);
     let isNew = false;
 
     if (!currentSession) {
-        currentSession = { 
-            customerId, 
-            customerName: loginName || `Guest ${customerId.slice(-4)}`, 
-            messages: [], 
-            lastMessage: '', 
-            lastTimestamp: Date.now(), 
-            unreadAdminCount: 0, 
-            unreadUserCount: 0 
-        };
+        currentSession = { customerId, customerName: loginName || `Guest ${customerId.slice(-4)}`, messages: [], lastMessage: '', lastTimestamp: Date.now(), unreadAdminCount: 0, unreadUserCount: 0 };
         isNew = true;
     }
 
     const updatedSession: ChatSession = {
-        ...currentSession,
-        messages: [...currentSession.messages, newMessage],
-        lastMessage: text,
-        lastTimestamp: Date.now(),
+        ...currentSession, messages: [...currentSession.messages, newMessage], lastMessage: text, lastTimestamp: Date.now(),
         unreadAdminCount: sender === 'user' ? (currentSession.unreadAdminCount || 0) + 1 : (currentSession.unreadAdminCount || 0),
         unreadUserCount: sender === 'admin' ? (currentSession.unreadUserCount || 0) + 1 : (currentSession.unreadUserCount || 0)
     };
 
-    // Update Lokal
-    if (isNew) {
-        setChatSessions(prev => [...prev, updatedSession]);
-    } else {
-        setChatSessions(prev => prev.map(s => s.customerId === customerId ? updatedSession : s));
-    }
-
-    // Save to Supabase
+    if (isNew) setChatSessions(prev => [...prev, updatedSession]);
+    else setChatSessions(prev => prev.map(s => s.customerId === customerId ? updatedSession : s));
     await saveChatSession(updatedSession);
   };
 
@@ -397,19 +322,12 @@ const AppContent: React.FC = () => {
       return (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 flex items-center justify-center p-4 font-sans">
             {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
-            
             <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl shadow-2xl w-full max-w-md border border-white/50 relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-blue-400/10 rounded-full blur-3xl -mr-10 -mt-10"></div>
                 <div className="absolute bottom-0 left-0 w-24 h-24 bg-purple-400/10 rounded-full blur-2xl -ml-5 -mb-5"></div>
                 <div className="relative z-10">
                     <div className="flex justify-center mb-6"><div className="bg-white p-4 rounded-2xl shadow-lg ring-1 ring-gray-100"><Car size={40} className="text-blue-600" strokeWidth={1.5} /></div></div>
-                    
-                    <div className="text-center mb-8">
-                        <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight mb-1">BJW</h1>
-                        <p className="text-gray-700 text-lg font-bold uppercase tracking-wider mb-1">Autopart</p>
-                        <p className="text-gray-500 text-sm">Sukucadang Mobil</p>
-                    </div>
-
+                    <div className="text-center mb-8"><h1 className="text-4xl font-extrabold text-gray-900 tracking-tight mb-1">BJW</h1><p className="text-gray-700 text-lg font-bold uppercase tracking-wider mb-1">Autopart</p><p className="text-gray-500 text-sm">Sukucadang Mobil</p></div>
                     <form onSubmit={handleGlobalLogin} className="space-y-5">
                         <div className="space-y-1.5"><label className="text-xs font-semibold text-gray-500 uppercase tracking-wider ml-1">Identitas</label><div className="relative group"><User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors" size={20} /><input type="text" value={loginName} onChange={(e) => setLoginName(e.target.value)} className="w-full pl-12 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all font-medium text-gray-800 placeholder:text-gray-400" placeholder="Nama Anda..." /></div></div>
                         <div className="space-y-1.5"><label className="text-xs font-semibold text-gray-500 uppercase tracking-wider ml-1">Kode Akses <span className="text-gray-300 font-normal">(Opsional)</span></label><div className="relative group"><KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors" size={20} /><input type="password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} className="w-full pl-12 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all font-medium text-gray-800 placeholder:text-gray-400" placeholder="Password Admin" /></div></div>
@@ -425,7 +343,6 @@ const AppContent: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
-      
       <div className="bg-white border-b px-4 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm backdrop-blur-md bg-white/90">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')}>
               <div className={`${isAdmin ? 'bg-purple-600' : 'bg-blue-600'} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform`}>{isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />}</div>
@@ -457,7 +374,6 @@ const AppContent: React.FC = () => {
               <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 text-gray-500 hover:bg-red-50 hover:text-red-600 rounded-lg transition-all" title="Keluar"><span className="text-xs font-semibold hidden lg:inline">{loginName}</span><LogOut size={20} /></button>
           </div>
       </div>
-
       <main className="flex-1 max-w-7xl mx-auto w-full p-4 pb-24 md:pb-10">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} bannerUrl={bannerUrl} onUpdateBanner={handleUpdateBanner} onAddToCart={addToCart} onRemoveFromCart={(id)=>setCart(c=>c.filter(x=>x.id!==id))} onCheckout={doCheckout} />}
         {activeView === 'scan' && <ScanResiView />}
@@ -469,16 +385,12 @@ const AppContent: React.FC = () => {
         )}
         {activeView === 'orders' && (isAdmin ? <OrderManagement orders={orders} onUpdateStatus={handleUpdateStatus} /> : <CustomerOrderView orders={orders} currentCustomerName={loginName} />)}
       </main>
-
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pb-safe z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-        {/* UPDATE GRID COLS UNTUK MOBILE */}
         <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-3'} h-16`}>
             {isAdmin ? (
                 <>
                     <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><ShoppingCart size={22} className={activeView==='shop'?'fill-purple-100':''} /><span className="text-[10px] font-medium">Beranda</span></button>
-                    {/* BUTTON SCAN MOBILE */}
                     <button onClick={()=>setActiveView('scan')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='scan'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><ScanBarcode size={22} className={activeView==='scan'?'text-purple-600':''} /><span className="text-[10px] font-medium">Scan</span></button>
-                    
                     <button onClick={()=>setActiveView('inventory')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='inventory'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><Package size={22} className={activeView==='inventory'?'fill-purple-100':''} /><span className="text-[10px] font-medium">Gudang</span></button>
                     <button onClick={()=>setActiveView('orders')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='orders'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><div className="relative"><ClipboardList size={22} className={activeView==='orders'?'fill-purple-100':''} />{pendingOrdersCount>0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}</div><span className="text-[10px] font-medium">Pesanan</span></button>
                     <button onClick={()=>setActiveView('chat')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='chat'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><div className="relative"><MessageSquare size={22} className={activeView==='chat'?'fill-purple-100':''} />{unreadChatCount>0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}</div><span className="text-[10px] font-medium">Chat</span></button>

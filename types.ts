@@ -7,8 +7,8 @@ export interface InventoryItem {
   quantity: number; // Stok Akhir (Calculated)
   shelf: string;
   price: number;    // Harga Jual
-  costPrice: number; // NEW: Harga Modal
-  ecommerce: string; // NEW: Link/Nama E-commerce
+  costPrice: number; // Harga Modal
+  ecommerce: string; // Link/Nama E-commerce
   imageUrl: string;
   lastUpdated: number;
   
@@ -18,7 +18,6 @@ export interface InventoryItem {
   qtyOut: number;       // Pengurangan
 }
 
-// Update ini agar form bisa mengakses field stok dan field baru
 export type InventoryFormData = Omit<InventoryItem, 'id' | 'lastUpdated'>;
 
 export interface CartItem extends InventoryItem {
@@ -43,6 +42,7 @@ export interface StockHistory {
   quantity: number;
   previousStock: number;
   currentStock: number;
+  price: number; // [BARU] Harga satuan saat transaksi terjadi
   timestamp: number;
   reason: string;
 }
