@@ -2,15 +2,13 @@
 import { supabase } from '../lib/supabase';
 import { InventoryItem, InventoryFormData, Order, StockHistory, ChatSession } from '../types';
 
-// --- INVENTORY SERVICES (OPTIMIZED) ---
+// --- INVENTORY SERVICES (GUDANG / DASHBOARD) ---
 
+// 1. STATISTIK RINGAN (Hanya ambil angka, agar loading dashboard cepat)
 export const fetchInventoryStats = async () => {
   try {
-    const { data, error } = await supabase
-      .from('inventory')
-      .select('price, quantity');
-
-    if (error) return { totalItems: 0, totalStock: 0, totalAsset: 0 };
+    const { data, error } = await supabase.from('inventory').select('price, quantity');
+    if (error || !data) return { totalItems: 0, totalStock: 0, totalAsset: 0 };
 
     const totalItems = data.length;
     const totalStock = data.reduce((acc, item) => acc + (Number(item.quantity) || 0), 0);
@@ -22,6 +20,7 @@ export const fetchInventoryStats = async () => {
   }
 };
 
+// 2. FETCH DATA DENGAN PAGINATION (50 Item per halaman)
 export const fetchInventoryPaginated = async (page: number = 1, limit: number = 50, search: string = '') => {
   try {
     const from = (page - 1) * limit;
@@ -30,40 +29,9 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
     let query = supabase
       .from('inventory')
       .select('*', { count: 'exact' })
-      .order('last_updated', { ascending: false }); // Urutkan dari yang terbaru diedit
+      .order('last_updated', { ascending: false });
 
-    // --- LOGIKA PENCARIAN BARU (SMART SEARCH) ---
-    if (search) {
-      // 1. Pecah pencarian menjadi kata-kata (misal: "honda jazz" -> ["honda", "jazz"])
-      const terms = search.trim().split(/\s+/);
-      
-      // 2. Loop setiap kata
-      terms.forEach(term => {
-        // Pastikan kata tersebut ada di (Nama ATAU PartNumber ATAU Deskripsi)
-        // Ini menciptakan logika AND antar kata, tapi OR antar kolom
-        // Contoh: (name ada "honda" OR part ada "honda") AND (name ada "jazz" OR part ada "jazz")
-        query = query.or(`name.ilike.%${term}%,part_number.ilike.%${term}%,description.ilike.%${term}%`);
-      });
-    }
-
-export const fetchShopItems = async (page: number = 1, limit: number = 20, search: string = '', category: string = 'Semua') => {
-  try {
-    const from = (page - 1) * limit;
-    const to = from + limit - 1;
-
-    let query = supabase
-      .from('inventory')
-      .select('*', { count: 'exact' })
-      .gt('quantity', 0)  // FILTER: Hanya Stok > 0
-      .gt('price', 0)     // FILTER: Hanya Harga > 0
-      .order('name', { ascending: true }); // Urutkan nama A-Z untuk toko
-
-    // Filter Kategori (Jika bukan 'Semua')
-    if (category !== 'Semua') {
-       query = query.ilike('description', `%[${category}]%`);
-    }
-
-    // Pencarian Pintar
+    // PENCARIAN PINTAR (Smart Search)
     if (search) {
       const terms = search.trim().split(/\s+/);
       terms.forEach(term => {
@@ -71,41 +39,7 @@ export const fetchShopItems = async (page: number = 1, limit: number = 20, searc
       });
     }
 
-    // Pagination
-    query = query.range(from, to);
-
-    const { data, count, error } = await query;
-
-    if (error) {
-      console.error('Error fetching shop items:', error.message);
-      return { data: [], count: 0 };
-    }
-
-    const mappedData = (data || []).map((item: any) => ({
-      id: item.id,
-      partNumber: item.part_number || '',
-      name: item.name || 'Tanpa Nama',
-      description: item.description || '',
-      price: Number(item.price) || 0,
-      costPrice: Number(item.cost_price) || 0,
-      quantity: Number(item.quantity) || 0,
-      initialStock: Number(item.initial_stock) || 0,
-      qtyIn: Number(item.qty_in) || 0,
-      qtyOut: Number(item.qty_out) || 0,
-      shelf: item.shelf || '',
-      imageUrl: item.image_url || '',
-      ecommerce: item.ecommerce || '',
-      lastUpdated: item.last_updated
-    }));
-
-    return { data: mappedData, count: count || 0 };
-  } catch (err) {
-    console.error(err);
-    return { data: [], count: 0 };
-  }
-};
-
-    // Terapkan pagination setelah filter
+    // BATASI HANYA 50 ITEM (Agar Enteng)
     query = query.range(from, to);
 
     const { data, count, error } = await query;
@@ -115,6 +49,7 @@ export const fetchShopItems = async (page: number = 1, limit: number = 20, searc
       return { data: [], count: 0 };
     }
 
+    // Mapping Data
     const mappedData = (data || []).map((item: any) => ({
       id: item.id,
       partNumber: item.part_number || '',
@@ -138,6 +73,71 @@ export const fetchShopItems = async (page: number = 1, limit: number = 20, searc
     return { data: [], count: 0 };
   }
 };
+
+// 3. FETCH SEMUA (Hanya untuk keperluan khusus/legacy, tidak dipakai di Dashboard utama)
+export const fetchInventory = async (): Promise<InventoryItem[]> => {
+    // Kita arahkan ke paginated page 1 agar tidak error jika ada komponen lain yang memanggil ini
+    const res = await fetchInventoryPaginated(1, 50, '');
+    return res.data;
+};
+
+// --- SHOP SERVICES (BERANDA / TOKO) ---
+
+export const fetchShopItems = async (page: number = 1, limit: number = 20, search: string = '', category: string = 'Semua') => {
+  try {
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    let query = supabase
+      .from('inventory')
+      .select('*', { count: 'exact' })
+      .gt('quantity', 0)  // Hanya Stok > 0
+      .gt('price', 0)     // Hanya Harga > 0
+      .order('name', { ascending: true });
+
+    if (category !== 'Semua') {
+       query = query.ilike('description', `%[${category}]%`);
+    }
+
+    if (search) {
+      const terms = search.trim().split(/\s+/);
+      terms.forEach(term => {
+        query = query.or(`name.ilike.%${term}%,part_number.ilike.%${term}%,description.ilike.%${term}%`);
+      });
+    }
+
+    query = query.range(from, to);
+
+    const { data, count, error } = await query;
+
+    if (error) {
+      return { data: [], count: 0 };
+    }
+
+    const mappedData = (data || []).map((item: any) => ({
+      id: item.id,
+      partNumber: item.part_number || '',
+      name: item.name || 'Tanpa Nama',
+      description: item.description || '',
+      price: Number(item.price) || 0,
+      costPrice: Number(item.cost_price) || 0,
+      quantity: Number(item.quantity) || 0,
+      initialStock: Number(item.initial_stock) || 0,
+      qtyIn: Number(item.qty_in) || 0,
+      qtyOut: Number(item.qty_out) || 0,
+      shelf: item.shelf || '',
+      imageUrl: item.image_url || '',
+      ecommerce: item.ecommerce || '',
+      lastUpdated: item.last_updated
+    }));
+
+    return { data: mappedData, count: count || 0 };
+  } catch (err) {
+    return { data: [], count: 0 };
+  }
+};
+
+// --- CRUD INVENTORY (ADD, UPDATE, DELETE) ---
 
 export const addInventory = async (item: InventoryFormData): Promise<boolean> => {
   try {
@@ -154,7 +154,7 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
       shelf: item.shelf,
       image_url: item.imageUrl,
       ecommerce: item.ecommerce,
-      last_updated: Date.now()
+      last_updated: new Date().toISOString()
     }]);
     return !error;
   } catch { return false; }
@@ -174,7 +174,7 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
       shelf: item.shelf,
       image_url: item.imageUrl,
       ecommerce: item.ecommerce,
-      last_updated: Date.now()
+      last_updated: new Date().toISOString()
     }).eq('part_number', item.partNumber);
     return !error;
   } catch { return false; }
@@ -195,7 +195,7 @@ export const fetchOrders = async (): Promise<Order[]> => {
       .from('orders')
       .select('*')
       .order('timestamp', { ascending: false })
-      .range(0, 4999);
+      .range(0, 4999); // Ambil 5000 pesanan terakhir (cukup aman untuk history)
 
     if (error || !data) return [];
 
@@ -307,10 +307,4 @@ export const saveChatSession = async (session: ChatSession): Promise<boolean> =>
     }]);
     return !error;
   } catch { return false; }
-};
-
-// Fallback untuk kompatibilitas
-export const fetchInventory = async (): Promise<InventoryItem[]> => {
-    const res = await fetchInventoryPaginated(1, 50, '');
-    return res.data;
 };
