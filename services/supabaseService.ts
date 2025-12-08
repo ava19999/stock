@@ -4,7 +4,6 @@ import { InventoryItem, InventoryFormData, Order, StockHistory, ChatSession } fr
 
 // --- INVENTORY SERVICES (GUDANG / DASHBOARD) ---
 
-// 1. STATISTIK RINGAN (Hanya ambil angka, agar loading dashboard cepat)
 export const fetchInventoryStats = async () => {
   try {
     const { data, error } = await supabase.from('inventory').select('price, quantity');
@@ -20,7 +19,6 @@ export const fetchInventoryStats = async () => {
   }
 };
 
-// 2. FETCH DATA DENGAN PAGINATION (50 Item per halaman)
 export const fetchInventoryPaginated = async (page: number = 1, limit: number = 50, search: string = '') => {
   try {
     const from = (page - 1) * limit;
@@ -31,7 +29,6 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
       .select('*', { count: 'exact' })
       .order('last_updated', { ascending: false });
 
-    // PENCARIAN PINTAR (Smart Search)
     if (search) {
       const terms = search.trim().split(/\s+/);
       terms.forEach(term => {
@@ -39,7 +36,6 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
       });
     }
 
-    // BATASI HANYA 50 ITEM (Agar Enteng)
     query = query.range(from, to);
 
     const { data, count, error } = await query;
@@ -49,7 +45,6 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
       return { data: [], count: 0 };
     }
 
-    // Mapping Data
     const mappedData = (data || []).map((item: any) => ({
       id: item.id,
       partNumber: item.part_number || '',
@@ -64,7 +59,8 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
       shelf: item.shelf || '',
       imageUrl: item.image_url || '',
       ecommerce: item.ecommerce || '',
-      lastUpdated: item.last_updated
+      // Konversi String ISO dari DB balik ke Number (agar konsisten)
+      lastUpdated: item.last_updated ? new Date(item.last_updated).getTime() : Date.now()
     }));
 
     return { data: mappedData, count: count || 0 };
@@ -74,9 +70,7 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
   }
 };
 
-// 3. FETCH SEMUA (Hanya untuk keperluan khusus/legacy, tidak dipakai di Dashboard utama)
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
-    // Kita arahkan ke paginated page 1 agar tidak error jika ada komponen lain yang memanggil ini
     const res = await fetchInventoryPaginated(1, 50, '');
     return res.data;
 };
@@ -91,8 +85,8 @@ export const fetchShopItems = async (page: number = 1, limit: number = 20, searc
     let query = supabase
       .from('inventory')
       .select('*', { count: 'exact' })
-      .gt('quantity', 0)  // Hanya Stok > 0
-      .gt('price', 0)     // Hanya Harga > 0
+      .gt('quantity', 0)
+      .gt('price', 0)
       .order('name', { ascending: true });
 
     if (category !== 'Semua') {
@@ -128,7 +122,8 @@ export const fetchShopItems = async (page: number = 1, limit: number = 20, searc
       shelf: item.shelf || '',
       imageUrl: item.image_url || '',
       ecommerce: item.ecommerce || '',
-      lastUpdated: item.last_updated
+      // Konversi balik ke Number
+      lastUpdated: item.last_updated ? new Date(item.last_updated).getTime() : Date.now()
     }));
 
     return { data: mappedData, count: count || 0 };
@@ -137,7 +132,7 @@ export const fetchShopItems = async (page: number = 1, limit: number = 20, searc
   }
 };
 
-// --- CRUD INVENTORY (ADD, UPDATE, DELETE) ---
+// --- CRUD INVENTORY ---
 
 export const addInventory = async (item: InventoryFormData): Promise<boolean> => {
   try {
@@ -154,6 +149,7 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
       shelf: item.shelf,
       image_url: item.imageUrl,
       ecommerce: item.ecommerce,
+      // Kirim sebagai ISO String
       last_updated: new Date().toISOString()
     }]);
     return !error;
@@ -174,6 +170,7 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
       shelf: item.shelf,
       image_url: item.imageUrl,
       ecommerce: item.ecommerce,
+      // Kirim sebagai ISO String
       last_updated: new Date().toISOString()
     }).eq('part_number', item.partNumber);
     return !error;
@@ -195,7 +192,7 @@ export const fetchOrders = async (): Promise<Order[]> => {
       .from('orders')
       .select('*')
       .order('timestamp', { ascending: false })
-      .range(0, 4999); // Ambil 5000 pesanan terakhir
+      .range(0, 4999);
 
     if (error || !data) return [];
 
@@ -205,7 +202,8 @@ export const fetchOrders = async (): Promise<Order[]> => {
       items: o.items || [],
       totalAmount: Number(o.total_amount) || 0,
       status: o.status,
-      timestamp: o.timestamp
+      // Cek apakah timestamp string (ISO) atau number, konversi ke number
+      timestamp: typeof o.timestamp === 'string' ? new Date(o.timestamp).getTime() : (o.timestamp || Date.now())
     }));
   } catch { return []; }
 };
@@ -218,7 +216,10 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
       items: order.items,
       total_amount: order.totalAmount,
       status: order.status,
-      timestamp: order.timestamp
+      // Pastikan formatnya sesuai dengan tipe kolom di DB Orders (jika masih bigint pakai number, jika sudah diubah pakai ISOString)
+      // Asumsi: Tabel orders masih bigint, gunakan order.timestamp. 
+      // JIKA tabel orders juga diubah ke timestamptz, ganti jadi: new Date(order.timestamp).toISOString()
+      timestamp: order.timestamp 
     }]);
     return !error;
   } catch { return false; }
@@ -231,7 +232,7 @@ export const updateOrderStatusService = async (orderId: string, status: string):
   } catch { return false; }
 };
 
-// --- HISTORY SERVICES ---
+// --- HISTORY SERVICES (INI YANG PENTING UNTUK RIWAYAT KELUAR) ---
 
 export const fetchHistory = async (): Promise<StockHistory[]> => {
   try {
@@ -251,14 +252,16 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
       type: h.type,
       quantity: Number(h.quantity) || 0,
       
-      // --- UPDATED: Mapping Harga ---
+      // Harga
       price: Number(h.price) || 0,
       totalPrice: Number(h.total_price) || 0,
-      // ----------------------------
       
       previousStock: Number(h.previous_stock) || 0,
       currentStock: Number(h.current_stock) || 0,
-      timestamp: h.timestamp,
+      
+      // PERBAIKAN: Konversi String dari DB kembali ke Number untuk Aplikasi
+      timestamp: h.timestamp ? new Date(h.timestamp).getTime() : Date.now(),
+      
       reason: h.reason || ''
     }));
   } catch { return []; }
@@ -274,18 +277,25 @@ export const addHistoryLog = async (history: StockHistory): Promise<boolean> => 
       type: history.type,
       quantity: history.quantity,
       
-      // --- UPDATED: Insert Harga ---
+      // Harga
       price: history.price,
       total_price: history.totalPrice,
-      // ----------------------------
       
       previous_stock: history.previousStock,
       current_stock: history.currentStock,
-      timestamp: history.timestamp,
+      
+      // PERBAIKAN: Ubah Number dari Aplikasi ke ISO String untuk Database
+      timestamp: new Date(history.timestamp).toISOString(),
+      
       reason: history.reason
     }]);
+    
+    if (error) console.error("Gagal simpan history:", error);
     return !error;
-  } catch { return false; }
+  } catch (e) { 
+    console.error(e);
+    return false; 
+  }
 };
 
 // --- CHAT SERVICES ---
@@ -299,7 +309,7 @@ export const fetchChatSessions = async (): Promise<ChatSession[]> => {
       customerName: c.customer_name || 'Guest',
       messages: c.messages || [],
       lastMessage: c.last_message || '',
-      lastTimestamp: c.last_timestamp,
+      lastTimestamp: c.last_timestamp, // Sesuaikan jika chat juga menggunakan timestamp
       unreadAdminCount: c.unread_admin_count || 0,
       unreadUserCount: c.unread_user_count || 0
     }));
