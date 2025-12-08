@@ -19,6 +19,7 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
+  items, // Items dari App.tsx (Data Global untuk lookup harga history)
   orders, history, onViewOrders, onAddNew, onEdit, onDelete 
 }) => {
   // State Lokal untuk Data & Pagination
@@ -74,14 +75,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const formatRupiah = (num: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num || 0);
   
-  // UPDATE: Fungsi format angka pintar (Bisa mata uang, bisa angka biasa)
   const formatCompactNumber = (num: number, isCurrency = true) => {
     const n = num || 0;
     if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'M';
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'jt';
-    
-    // Jika mata uang: Pakai formatRupiah (ada Rp)
-    // Jika bukan: Pakai format angka biasa (ada titik ribuan, tanpa Rp)
     return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID').format(n);
   };
 
@@ -97,11 +94,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return { resi, ecommerce, keterangan };
   };
 
-  // --- MODAL & SUB-COMPONENTS ---
+  // --- MODAL RIWAYAT GLOBAL ---
   const HistoryModal = () => {
     if (!showHistoryDetail) return null;
     const type = showHistoryDetail;
     const filteredHistory = history.filter(h => h.type === type).sort((a, b) => b.timestamp - a.timestamp).slice(0, 100);
+    
     return (
       <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
         <div className="bg-white w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 duration-300 flex flex-col max-h-[90vh]">
@@ -120,9 +118,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </thead>
                     <tbody className="divide-y divide-gray-100 text-sm">
                         {filteredHistory.map((h) => {
-                            // Cari item di localItems mungkin tidak ada karena pagination, jadi kita ambil harga dr history jika ada (to be improved)
-                            // Fallback price 0
-                            const price = 0; 
+                            // Lookup item dari props 'items' (global) untuk dapat harga
+                            const item = items.find(i => i.id === h.itemId || i.partNumber === h.partNumber);
+                            const price = item ? (Number(item.price) || 0) : 0;
                             const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
                             return (
                                 <tr key={h.id} className="hover:bg-blue-50 transition-colors">
@@ -132,8 +130,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     <td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber || '-'}</td>
                                     <td className="p-3 font-medium text-gray-800 max-w-[200px] align-top"><div className="line-clamp-2">{h.name || 'Unknown Item'}</div></td>
                                     <td className={`p-3 text-right font-bold align-top ${type==='in'?'text-green-600':'text-red-600'}`}>{type==='in' ? '+' : '-'}{h.quantity}</td>
-                                    <td className="p-3 text-right text-gray-600 font-mono align-top text-xs">-</td>
-                                    <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">-</td>
+                                    <td className="p-3 text-right text-gray-600 font-mono align-top text-xs">{formatRupiah(price)}</td>
+                                    <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">{formatRupiah(price * (Number(h.quantity) || 0))}</td>
                                     {type === 'in' && <td className="p-3 align-top text-xs">{keterangan}</td>}
                                 </tr>
                             );
@@ -147,22 +145,105 @@ export const Dashboard: React.FC<DashboardProps> = ({
     );
   };
 
+  // --- MODAL RIWAYAT PER ITEM (UPDATED: Tambah Harga & Total) ---
   const ItemHistoryModal = () => {
     if (!selectedItemHistory) return null;
-    const itemHistory = history.filter(h => h.itemId === selectedItemHistory.id || h.partNumber === selectedItemHistory.partNumber).sort((a, b) => b.timestamp - a.timestamp);
+    
+    // Filter & Sort
+    const itemHistory = history
+        .filter(h => h.itemId === selectedItemHistory.id || h.partNumber === selectedItemHistory.partNumber)
+        .sort((a, b) => b.timestamp - a.timestamp);
+
+    // Ambil harga saat ini dari item yang dipilih
+    const currentPrice = Number(selectedItemHistory.price) || 0;
+
     return (
       <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-        <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+        <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
             <div className="p-4 border-b flex justify-between items-start bg-gray-50">
-                <div><h3 className="font-bold text-gray-900 text-lg flex items-center gap-2"><History size={20} className="text-blue-600"/> Riwayat Transaksi Barang</h3><p className="text-sm text-gray-500 mt-1 line-clamp-1">{selectedItemHistory.name || 'Tanpa Nama'}</p><div className="flex gap-2 mt-2"><span className="text-xs bg-gray-200 px-2 py-0.5 rounded text-gray-700 font-mono">{selectedItemHistory.partNumber || '-'}</span><span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">Sisa Stok: {selectedItemHistory.quantity}</span></div></div>
+                <div>
+                    <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+                        <History size={20} className="text-blue-600"/>
+                        Riwayat Transaksi Barang
+                    </h3>
+                    <p className="text-sm text-gray-500 mt-1 line-clamp-1">{selectedItemHistory.name || 'Tanpa Nama'}</p>
+                    <div className="flex gap-2 mt-2">
+                        <span className="text-xs bg-gray-200 px-2 py-0.5 rounded text-gray-700 font-mono">{selectedItemHistory.partNumber || '-'}</span>
+                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">Sisa Stok: {selectedItemHistory.quantity}</span>
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded font-bold">Harga: {formatRupiah(currentPrice)}</span>
+                    </div>
+                </div>
                 <button onClick={() => setSelectedItemHistory(null)} className="p-1 hover:bg-gray-200 rounded-full transition-colors"><X size={24} className="text-gray-500"/></button>
             </div>
+
             <div className="overflow-auto flex-1 p-0">
-                {itemHistory.length === 0 ? <div className="flex flex-col items-center justify-center h-64 text-gray-400"><History size={48} className="opacity-20 mb-3"/><p>Belum ada riwayat transaksi untuk barang ini</p></div> : (
+                {itemHistory.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                        <History size={48} className="opacity-20 mb-3"/>
+                        <p>Belum ada riwayat transaksi untuk barang ini</p>
+                    </div>
+                ) : (
                     <table className="w-full text-left border-collapse">
-                        <thead className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10"><tr><th className="p-3 border-b border-gray-200 w-32">Tanggal</th><th className="p-3 border-b border-gray-200 w-24 text-center">Tipe</th><th className="p-3 border-b border-gray-200 w-20 text-right">Jml</th><th className="p-3 border-b border-gray-200 text-right w-24">Stok Akhir</th><th className="p-3 border-b border-gray-200">Keterangan / Resi</th></tr></thead>
+                        <thead className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
+                            <tr>
+                                <th className="p-3 border-b border-gray-200 w-32">Tanggal</th>
+                                <th className="p-3 border-b border-gray-200 w-24 text-center">Tipe</th>
+                                <th className="p-3 border-b border-gray-200 w-20 text-right">Jml</th>
+                                {/* KOLOM BARU: HARGA & TOTAL */}
+                                <th className="p-3 border-b border-gray-200 w-28 text-right">Harga</th>
+                                <th className="p-3 border-b border-gray-200 w-28 text-right">Total</th>
+                                <th className="p-3 border-b border-gray-200 w-24 text-right">Stok Akhir</th>
+                                <th className="p-3 border-b border-gray-200">Keterangan / Resi</th>
+                            </tr>
+                        </thead>
                         <tbody className="divide-y divide-gray-100 text-sm">
-                            {itemHistory.map(h => { const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason); return (<tr key={h.id} className="hover:bg-gray-50 transition-colors"><td className="p-3 align-top text-gray-600"><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div></td><td className="p-3 align-top text-center"><span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${h.type === 'in' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{h.type === 'in' ? 'Masuk' : 'Keluar'}</span></td><td className={`p-3 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>{h.type === 'in' ? '+' : '-'}{h.quantity}</td><td className="p-3 align-top text-right font-mono text-gray-600">{h.currentStock}</td><td className="p-3 align-top text-gray-700"><div className="font-medium text-xs mb-1">{keterangan}</div>{resi !== '-' && <div className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] border border-blue-100 mr-1">Resi: {resi}</div>}{ecommerce !== '-' && <div className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-100"><ShoppingBag size={8}/> {ecommerce}</div>}</td></tr>); })}
+                            {itemHistory.map(h => {
+                                const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
+                                // Hitung total per transaksi
+                                const qty = Number(h.quantity) || 0;
+                                const total = qty * currentPrice;
+
+                                return (
+                                    <tr key={h.id} className="hover:bg-gray-50 transition-colors">
+                                        <td className="p-3 align-top text-gray-600">
+                                            <div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div>
+                                            <div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div>
+                                        </td>
+                                        <td className="p-3 align-top text-center">
+                                            <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${h.type === 'in' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                {h.type === 'in' ? 'Masuk' : 'Keluar'}
+                                            </span>
+                                        </td>
+                                        <td className={`p-3 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>
+                                            {h.type === 'in' ? '+' : '-'}{qty}
+                                        </td>
+                                        {/* ISI KOLOM HARGA & TOTAL */}
+                                        <td className="p-3 align-top text-right font-mono text-gray-600 text-xs">
+                                            {formatRupiah(currentPrice)}
+                                        </td>
+                                        <td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">
+                                            {formatRupiah(total)}
+                                        </td>
+                                        
+                                        <td className="p-3 align-top text-right font-mono text-gray-600">
+                                            {h.currentStock}
+                                        </td>
+                                        <td className="p-3 align-top text-gray-700">
+                                            <div className="font-medium text-xs mb-1">{keterangan}</div>
+                                            {resi !== '-' && (
+                                                <div className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] border border-blue-100 mr-1">
+                                                    Resi: {resi}
+                                                </div>
+                                            )}
+                                            {ecommerce !== '-' && (
+                                                <div className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-100">
+                                                    <ShoppingBag size={8}/> {ecommerce}
+                                                </div>
+                                            )}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 )}
