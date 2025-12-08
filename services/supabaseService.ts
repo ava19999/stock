@@ -2,27 +2,56 @@
 import { supabase } from '../lib/supabase';
 import { InventoryItem, InventoryFormData, Order, StockHistory, ChatSession } from '../types';
 
-// --- INVENTORY SERVICES ---
+// --- INVENTORY SERVICES (OPTIMIZED) ---
 
-export const fetchInventory = async (): Promise<InventoryItem[]> => {
+// 1. Fetch Ringan untuk Statistik (Hanya ambil angka, tanpa gambar/deskripsi)
+export const fetchInventoryStats = async () => {
   try {
     const { data, error } = await supabase
       .from('inventory')
-      .select('*')
-      .range(0, 9999);
+      .select('price, quantity'); // Cuma ambil kolom penting
+
+    if (error) return { totalItems: 0, totalStock: 0, totalAsset: 0 };
+
+    const totalItems = data.length;
+    const totalStock = data.reduce((acc, item) => acc + (Number(item.quantity) || 0), 0);
+    const totalAsset = data.reduce((acc, item) => acc + ((Number(item.price) || 0) * (Number(item.quantity) || 0)), 0);
+
+    return { totalItems, totalStock, totalAsset };
+  } catch {
+    return { totalItems: 0, totalStock: 0, totalAsset: 0 };
+  }
+};
+
+// 2. Fetch dengan Pagination & Search (Data Utama)
+export const fetchInventoryPaginated = async (page: number = 1, limit: number = 50, search: string = '') => {
+  try {
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    let query = supabase
+      .from('inventory')
+      .select('*', { count: 'exact' }) // Minta total jumlah data juga
+      .order('last_updated', { ascending: false }) // Urutkan dari yang terbaru diedit
+      .range(from, to);
+
+    // Jika ada pencarian, filter di server (bukan di browser)
+    if (search) {
+      // Cari di nama ATAU part_number
+      query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%`);
+    }
+
+    const { data, count, error } = await query;
 
     if (error) {
       console.error('Error fetching inventory:', error.message);
-      return [];
+      return { data: [], count: 0 };
     }
 
-    if (!data || !Array.isArray(data)) return [];
-    
-    // Mapping dengan pengaman (|| '')
-    return data.map((item: any) => ({
+    const mappedData = (data || []).map((item: any) => ({
       id: item.id,
-      partNumber: item.part_number || '', // AMAN
-      name: item.name || 'Tanpa Nama',    // AMAN
+      partNumber: item.part_number || '',
+      name: item.name || 'Tanpa Nama',
       description: item.description || '',
       price: Number(item.price) || 0,
       costPrice: Number(item.cost_price) || 0,
@@ -35,12 +64,15 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
       ecommerce: item.ecommerce || '',
       lastUpdated: item.last_updated
     }));
+
+    return { data: mappedData, count: count || 0 };
   } catch (err) {
     console.error(err);
-    return [];
+    return { data: [], count: 0 };
   }
 };
 
+// --- (Fungsi Add, Update, Delete TETAP SAMA seperti sebelumnya) ---
 export const addInventory = async (item: InventoryFormData): Promise<boolean> => {
   try {
     const { error } = await supabase.from('inventory').insert([{
@@ -90,7 +122,6 @@ export const deleteInventory = async (partNumber: string): Promise<boolean> => {
 };
 
 // --- ORDER SERVICES ---
-
 export const fetchOrders = async (): Promise<Order[]> => {
   try {
     const { data, error } = await supabase
@@ -134,14 +165,13 @@ export const updateOrderStatusService = async (orderId: string, status: string):
 };
 
 // --- HISTORY SERVICES ---
-
 export const fetchHistory = async (): Promise<StockHistory[]> => {
   try {
     const { data, error } = await supabase
       .from('stock_history')
       .select('*')
       .order('timestamp', { ascending: false })
-      .range(0, 4999);
+      .range(0, 100); // Batasi history awal 100 saja biar cepat
 
     if (error || !data) return [];
     
@@ -179,10 +209,9 @@ export const addHistoryLog = async (history: StockHistory): Promise<boolean> => 
 };
 
 // --- CHAT SERVICES ---
-
 export const fetchChatSessions = async (): Promise<ChatSession[]> => {
   try {
-    const { data, error } = await supabase.from('chat_sessions').select('*').range(0, 1999);
+    const { data, error } = await supabase.from('chat_sessions').select('*').range(0, 100);
     if (error || !data) return [];
     return data.map((c: any) => ({
       customerId: c.customer_id,
@@ -209,4 +238,10 @@ export const saveChatSession = async (session: ChatSession): Promise<boolean> =>
     }]);
     return !error;
   } catch { return false; }
+};
+
+// Agar App.tsx tidak error karena fungsi lama hilang (backward compatibility)
+export const fetchInventory = async (): Promise<InventoryItem[]> => {
+    const res = await fetchInventoryPaginated(1, 50, '');
+    return res.data;
 };
