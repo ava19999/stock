@@ -22,53 +22,70 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showHistoryDetail, setShowHistoryDetail] = useState<'in' | 'out' | null>(null);
-  const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null); // STATE BARU UNTUK MODAL ITEM
+  const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
+  // --- STATISTIK ---
   const stats = useMemo(() => {
-    const totalItems = items.length;
-    const totalStock = items.reduce((acc, item) => acc + item.quantity, 0);
-    const totalAsset = items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+    // Pastikan items tidak null
+    const safeItems = Array.isArray(items) ? items : [];
+    
+    const totalItems = safeItems.length;
+    const totalStock = safeItems.reduce((acc, item) => acc + (Number(item.quantity) || 0), 0);
+    const totalAsset = safeItems.reduce((acc, item) => acc + ((Number(item.price) || 0) * (Number(item.quantity) || 0)), 0);
 
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     
-    const todayIn = history
-      .filter(h => h.type === 'in' && h.timestamp >= startOfDay.getTime())
-      .reduce((acc, h) => acc + h.quantity, 0);
+    const safeHistory = Array.isArray(history) ? history : [];
 
-    const todayOut = history
+    const todayIn = safeHistory
+      .filter(h => h.type === 'in' && h.timestamp >= startOfDay.getTime())
+      .reduce((acc, h) => acc + (Number(h.quantity) || 0), 0);
+
+    const todayOut = safeHistory
       .filter(h => h.type === 'out' && h.timestamp >= startOfDay.getTime())
-      .reduce((acc, h) => acc + h.quantity, 0);
+      .reduce((acc, h) => acc + (Number(h.quantity) || 0), 0);
 
     return { totalItems, totalStock, totalAsset, todayIn, todayOut };
   }, [items, history]);
 
-  const filteredItems = items.filter(i => 
-    i.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    i.partNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (i.description && i.description.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  // --- FILTER ITEM (PERBAIKAN CRASH: Tambahkan || '' untuk handle null) ---
+  const filteredItems = useMemo(() => {
+    const safeItems = Array.isArray(items) ? items : [];
+    return safeItems.filter(i => {
+        // PERBAIKAN UTAMA DI SINI:
+        const name = (i.name || '').toLowerCase();
+        const partNumber = (i.partNumber || '').toLowerCase();
+        const description = (i.description || '').toLowerCase();
+        const term = searchTerm.toLowerCase();
 
-  const formatRupiah = (num: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num);
+        return name.includes(term) || partNumber.includes(term) || description.includes(term);
+    });
+  }, [items, searchTerm]);
+
+  const formatRupiah = (num: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num || 0);
   const formatCompactNumber = (num: number) => {
-    if (num >= 1000000000) return (num / 1000000000).toFixed(1) + 'M';
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'jt';
-    return formatRupiah(num);
+    const n = num || 0;
+    if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'M';
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'jt';
+    return formatRupiah(n);
   };
 
-  // --- HELPER PARSING ---
+  // --- PARSING INFO DARI REASON ---
   const parseHistoryReason = (reason: string) => {
       let resi = '-';
       let ecommerce = '-';
-      let keterangan = reason;
+      let keterangan = reason || '';
 
+      // Ekstrak Resi
       const resiMatch = keterangan.match(/\(Resi: (.*?)\)/);
       if (resiMatch && resiMatch[1]) {
           resi = resiMatch[1];
           keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, '');
       }
 
+      // Ekstrak E-Commerce
       const viaMatch = keterangan.match(/\(Via: (.*?)\)/);
       if (viaMatch && viaMatch[1]) {
           ecommerce = viaMatch[1];
@@ -82,7 +99,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return { resi, ecommerce, keterangan };
   };
 
-  // --- MODAL RIWAYAT GLOBAL (MASUK/KELUAR) ---
+  // --- MODAL RIWAYAT GLOBAL ---
   const HistoryModal = () => {
     if (!showHistoryDetail) return null;
     const type = showHistoryDetail;
@@ -123,7 +140,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <tbody className="divide-y divide-gray-100 text-sm">
                         {filteredHistory.map((h) => {
                             const item = items.find(i => i.id === h.itemId || i.partNumber === h.partNumber);
-                            const price = item ? item.price : 0;
+                            const price = item ? (Number(item.price) || 0) : 0;
                             const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
                             const isRetur = keterangan === 'Retur';
 
@@ -144,9 +161,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             {ecommerce}
                                         </span>
                                     </td>
-                                    <td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber}</td>
+                                    <td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber || '-'}</td>
                                     <td className="p-3 font-medium text-gray-800 max-w-[200px] align-top">
-                                        <div className="line-clamp-2">{h.name}</div>
+                                        <div className="line-clamp-2">{h.name || 'Unknown Item'}</div>
                                     </td>
                                     <td className={`p-3 text-right font-bold align-top ${type==='in'?'text-green-600':'text-red-600'}`}>
                                         {type==='in' ? '+' : '-'}{h.quantity}
@@ -155,7 +172,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         {formatRupiah(price)}
                                     </td>
                                     <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">
-                                        {formatRupiah(price * h.quantity)}
+                                        {formatRupiah(price * (Number(h.quantity) || 0))}
                                     </td>
                                     {type === 'in' && (
                                         <td className="p-3 align-top text-xs">
@@ -180,11 +197,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     );
   };
 
-  // --- MODAL RIWAYAT PER ITEM (BARU) ---
+  // --- MODAL RIWAYAT PER ITEM ---
   const ItemHistoryModal = () => {
     if (!selectedItemHistory) return null;
     
-    // Filter history hanya untuk item ini
     const itemHistory = history
         .filter(h => h.itemId === selectedItemHistory.id || h.partNumber === selectedItemHistory.partNumber)
         .sort((a, b) => b.timestamp - a.timestamp);
@@ -198,9 +214,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <History size={20} className="text-blue-600"/>
                         Riwayat Transaksi Barang
                     </h3>
-                    <p className="text-sm text-gray-500 mt-1 line-clamp-1">{selectedItemHistory.name}</p>
+                    <p className="text-sm text-gray-500 mt-1 line-clamp-1">{selectedItemHistory.name || 'Tanpa Nama'}</p>
                     <div className="flex gap-2 mt-2">
-                        <span className="text-xs bg-gray-200 px-2 py-0.5 rounded text-gray-700 font-mono">{selectedItemHistory.partNumber}</span>
+                        <span className="text-xs bg-gray-200 px-2 py-0.5 rounded text-gray-700 font-mono">{selectedItemHistory.partNumber || '-'}</span>
                         <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">Sisa Stok: {selectedItemHistory.quantity}</span>
                     </div>
                 </div>
@@ -324,7 +340,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
                    {filteredItems.map(item => (
                      <div key={item.id} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full hover:shadow-md transition-shadow group">
-                        {/* UPDATE ONCLICK IMAGE */}
+                        {/* ONCLICK IMAGE UNTUK LIHAT RIWAYAT */}
                         <div 
                             className="relative aspect-[4/3] bg-gray-50 overflow-hidden border-b border-gray-50 cursor-pointer group-hover:opacity-90 transition-opacity"
                             onClick={() => setSelectedItemHistory(item)}
@@ -342,7 +358,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </div>
                         <div className="p-2.5 flex-1 flex flex-col">
                           <div className="mb-2">
-                            <h3 className="font-bold text-gray-900 text-sm leading-tight line-clamp-2 min-h-[2.4em] mb-1">{item.name}</h3>
+                            <h3 className="font-bold text-gray-900 text-sm leading-tight line-clamp-2 min-h-[2.4em] mb-1">{item.name || 'Tanpa Nama'}</h3>
                             <p className="text-xs text-gray-500 font-mono truncate bg-gray-50 inline-block px-1 rounded">{item.partNumber || '-'}</p>
                             <div className="mt-1.5 flex items-start gap-1.5">
                                 <FileText size={10} className="text-gray-400 mt-0.5 flex-shrink-0" />
@@ -352,7 +368,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           <div className="mt-auto pt-2 border-t border-gray-50 space-y-2">
                              <div className="flex justify-between items-end">
                                 <div className="text-sm font-bold text-blue-700 truncate">{formatCompactNumber(item.price)}</div>
-                                <div className="flex items-center text-xs text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200"><MapPin size={9} className="mr-0.5 text-gray-500"/>{item.shelf}</div>
+                                <div className="flex items-center text-xs text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200"><MapPin size={9} className="mr-0.5 text-gray-500"/>{item.shelf || '-'}</div>
                              </div>
                              <div className="grid grid-cols-2 gap-1.5">
                                 <button onClick={() => onEdit(item)} className="flex items-center justify-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded text-[10px] font-bold transition-colors"><Edit size={10} /> Edit</button>
@@ -368,7 +384,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="flex flex-col gap-2">
                     {filteredItems.map(item => (
                         <div key={item.id} className="bg-white rounded-lg p-3 border border-gray-100 shadow-sm flex items-center gap-3 hover:shadow-md transition-shadow group">
-                            {/* UPDATE ONCLICK IMAGE */}
+                            {/* ONCLICK IMAGE UNTUK LIHAT RIWAYAT */}
                             <div 
                                 className="w-14 h-14 flex-shrink-0 bg-gray-50 rounded-md overflow-hidden border border-gray-100 relative cursor-pointer group-hover:ring-2 group-hover:ring-blue-200 transition-all"
                                 onClick={() => setSelectedItemHistory(item)}
@@ -381,10 +397,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 )}
                             </div>
                             <div className="flex-1 min-w-0">
-                                <h3 className="font-bold text-gray-900 text-sm truncate">{item.name}</h3>
+                                <h3 className="font-bold text-gray-900 text-sm truncate">{item.name || 'Tanpa Nama'}</h3>
                                 <div className="flex items-center gap-3 mt-1">
-                                    <p className="text-xs text-gray-500 font-mono truncate bg-gray-50 px-1.5 py-0.5 rounded">{item.partNumber}</p>
-                                    <div className="flex items-center text-xs text-gray-600"><MapPin size={10} className="mr-0.5 text-gray-400"/>{item.shelf}</div>
+                                    <p className="text-xs text-gray-500 font-mono truncate bg-gray-50 px-1.5 py-0.5 rounded">{item.partNumber || '-'}</p>
+                                    <div className="flex items-center text-xs text-gray-600"><MapPin size={10} className="mr-0.5 text-gray-400"/>{item.shelf || '-'}</div>
                                 </div>
                                 <p className="text-xs text-gray-500 truncate mt-1">{item.description || "-"}</p>
                             </div>

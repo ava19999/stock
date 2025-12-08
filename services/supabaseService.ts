@@ -6,7 +6,6 @@ import { InventoryItem, InventoryFormData, Order, StockHistory, ChatSession } fr
 
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
   try {
-    // Ambil data dengan range besar
     const { data, error } = await supabase
       .from('inventory')
       .select('*')
@@ -17,31 +16,27 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
       return [];
     }
 
-    // PENGECEKAN KEAMANAN (PENTING):
-    // Jika data null/kosong, kembalikan array kosong agar tidak blank putih
-    if (!data || !Array.isArray(data)) {
-        return [];
-    }
+    if (!data || !Array.isArray(data)) return [];
     
-    // Mapping data
+    // Mapping dengan pengaman (|| '')
     return data.map((item: any) => ({
       id: item.id,
-      partNumber: item.part_number,
-      name: item.name,
-      description: item.description,
+      partNumber: item.part_number || '', // AMAN
+      name: item.name || 'Tanpa Nama',    // AMAN
+      description: item.description || '',
       price: Number(item.price) || 0,
       costPrice: Number(item.cost_price) || 0,
       quantity: Number(item.quantity) || 0,
       initialStock: Number(item.initial_stock) || 0,
       qtyIn: Number(item.qty_in) || 0,
       qtyOut: Number(item.qty_out) || 0,
-      shelf: item.shelf,
-      imageUrl: item.image_url,
-      ecommerce: item.ecommerce,
+      shelf: item.shelf || '',
+      imageUrl: item.image_url || '',
+      ecommerce: item.ecommerce || '',
       lastUpdated: item.last_updated
     }));
   } catch (err) {
-    console.error("Unexpected error in fetchInventory:", err);
+    console.error(err);
     return [];
   }
 };
@@ -63,16 +58,8 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
       ecommerce: item.ecommerce,
       last_updated: Date.now()
     }]);
-
-    if (error) {
-      console.error('Error adding inventory:', error.message);
-      return false;
-    }
-    return true;
-  } catch (e) {
-    console.error(e);
-    return false;
-  }
+    return !error;
+  } catch { return false; }
 };
 
 export const updateInventory = async (item: InventoryItem): Promise<boolean> => {
@@ -91,30 +78,15 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
       ecommerce: item.ecommerce,
       last_updated: Date.now()
     }).eq('part_number', item.partNumber);
-
-    if (error) {
-      console.error('Error updating inventory:', error.message);
-      return false;
-    }
-    return true;
-  } catch (e) {
-    console.error(e);
-    return false;
-  }
+    return !error;
+  } catch { return false; }
 };
 
 export const deleteInventory = async (partNumber: string): Promise<boolean> => {
   try {
     const { error } = await supabase.from('inventory').delete().eq('part_number', partNumber);
-    if (error) {
-      console.error('Error deleting inventory:', error.message);
-      return false;
-    }
-    return true;
-  } catch (e) {
-    console.error(e);
-    return false;
-  }
+    return !error;
+  } catch { return false; }
 };
 
 // --- ORDER SERVICES ---
@@ -127,24 +99,17 @@ export const fetchOrders = async (): Promise<Order[]> => {
       .order('timestamp', { ascending: false })
       .range(0, 4999);
 
-    if (error) {
-      console.error('Error fetching orders:', error.message);
-      return [];
-    }
-    
-    if (!data) return [];
+    if (error || !data) return [];
 
     return data.map((o: any) => ({
       id: o.id,
-      customerName: o.customer_name,
-      items: o.items,
-      totalAmount: o.total_amount,
+      customerName: o.customer_name || 'Guest',
+      items: o.items || [],
+      totalAmount: Number(o.total_amount) || 0,
       status: o.status,
       timestamp: o.timestamp
     }));
-  } catch (e) {
-    return [];
-  }
+  } catch { return []; }
 };
 
 export const saveOrder = async (order: Order): Promise<boolean> => {
@@ -157,12 +122,8 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
       status: order.status,
       timestamp: order.timestamp
     }]);
-    if (error) {
-      console.error('Error saving order:', error.message);
-      return false;
-    }
-    return true;
-  } catch (e) { return false; }
+    return !error;
+  } catch { return false; }
 };
 
 export const updateOrderStatusService = async (orderId: string, status: string): Promise<boolean> => {
@@ -190,11 +151,11 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
       partNumber: h.part_number,
       name: h.name,
       type: h.type,
-      quantity: h.quantity,
-      previousStock: h.previous_stock,
-      currentStock: h.current_stock,
+      quantity: Number(h.quantity) || 0,
+      previousStock: Number(h.previous_stock) || 0,
+      currentStock: Number(h.current_stock) || 0,
       timestamp: h.timestamp,
-      reason: h.reason
+      reason: h.reason || ''
     }));
   } catch { return []; }
 };
@@ -221,21 +182,16 @@ export const addHistoryLog = async (history: StockHistory): Promise<boolean> => 
 
 export const fetchChatSessions = async (): Promise<ChatSession[]> => {
   try {
-    const { data, error } = await supabase
-      .from('chat_sessions')
-      .select('*')
-      .range(0, 1999);
-
+    const { data, error } = await supabase.from('chat_sessions').select('*').range(0, 1999);
     if (error || !data) return [];
-    
     return data.map((c: any) => ({
       customerId: c.customer_id,
-      customerName: c.customer_name,
-      messages: c.messages,
-      lastMessage: c.last_message,
+      customerName: c.customer_name || 'Guest',
+      messages: c.messages || [],
+      lastMessage: c.last_message || '',
       lastTimestamp: c.last_timestamp,
-      unreadAdminCount: c.unread_admin_count,
-      unreadUserCount: c.unread_user_count
+      unreadAdminCount: c.unread_admin_count || 0,
+      unreadUserCount: c.unread_user_count || 0
     }));
   } catch { return []; }
 };
