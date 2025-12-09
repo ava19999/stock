@@ -5,7 +5,7 @@ import { fetchInventoryPaginated, fetchInventoryStats } from '../services/supaba
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
   ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin, FileText,
-  LayoutGrid, List, ShoppingBag, History, X, ChevronLeft, Loader2
+  LayoutGrid, List, ShoppingBag, History, X, ChevronLeft, Loader2, AlertTriangle, AlertCircle
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -28,24 +28,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [totalCount, setTotalCount] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   
+  // STATE BARU UNTUK FILTER STOK
+  const [filterType, setFilterType] = useState<'all' | 'low' | 'empty'>('all');
+  
   const [stats, setStats] = useState({ totalItems: 0, totalStock: 0, totalAsset: 0, todayIn: 0, todayOut: 0 });
 
   const [showHistoryDetail, setShowHistoryDetail] = useState<'in' | 'out' | null>(null);
   const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null);
   
-  // State untuk pencarian di modal riwayat item
   const [itemHistorySearch, setItemHistorySearch] = useState('');
   
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const { data, count } = await fetchInventoryPaginated(page, 50, searchTerm);
+    // [PENTING] Mengirim parameter filterType ke service
+    const { data, count } = await fetchInventoryPaginated(page, 50, searchTerm, filterType);
     setLocalItems(data);
     setTotalCount(count);
     setTotalPages(Math.ceil(count / 50));
     setLoading(false);
-  }, [page, searchTerm]);
+  }, [page, searchTerm, filterType]);
 
   const loadStats = useCallback(async () => {
     const invStats = await fetchInventoryStats();
@@ -65,7 +68,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadStats(); }, [loadStats]);
 
-  // Reset pencarian riwayat saat modal ditutup/dibuka
   useEffect(() => {
     if (!selectedItemHistory) {
       setItemHistorySearch('');
@@ -98,15 +100,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return { resi, ecommerce, keterangan: keterangan.trim() };
   };
 
-  // --- LOGIKA FILTER ITEM HISTORY (DIPINDAHKAN KE SINI AGAR TIDAK RE-RENDER INPUT) ---
   const filteredItemHistory = useMemo(() => {
     if (!selectedItemHistory) return [];
     
-    // 1. Ambil history untuk item ini
     let itemHistory = history.filter(h => h.itemId === selectedItemHistory.id || h.partNumber === selectedItemHistory.partNumber)
                              .sort((a, b) => b.timestamp - a.timestamp);
 
-    // 2. Filter berdasarkan pencarian
     if (itemHistorySearch.trim() !== '') {
         const lowerSearch = itemHistorySearch.toLowerCase();
         itemHistory = itemHistory.filter(h => {
@@ -122,7 +121,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return itemHistory;
   }, [history, selectedItemHistory, itemHistorySearch]);
 
-  // --- LOGIKA FILTER GLOBAL HISTORY ---
   const filteredGlobalHistory = useMemo(() => {
     if (!showHistoryDetail) return [];
     return history.filter(h => h.type === showHistoryDetail)
@@ -179,11 +177,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
-      {/* --- ITEM HISTORY MODAL (FIXED) --- */}
+      {/* --- ITEM HISTORY MODAL --- */}
       {selectedItemHistory && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-                {/* Header Modal */}
                 <div className="p-4 border-b flex justify-between items-start bg-gray-50">
                     <div className="flex-1">
                         <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2"><History size={20} className="text-blue-600"/> Riwayat Transaksi Barang</h3>
@@ -196,7 +193,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <button onClick={() => setSelectedItemHistory(null)} className="p-1 hover:bg-gray-200 rounded-full transition-colors ml-4"><X size={24} className="text-gray-500"/></button>
                 </div>
 
-                {/* Kolom Pencarian Baru (Auto Focus) */}
                 <div className="p-3 bg-white border-b border-gray-100">
                     <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
@@ -211,7 +207,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                 </div>
 
-                {/* Tabel Riwayat */}
                 <div className="overflow-auto flex-1 p-0">
                     {filteredItemHistory.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-64 text-gray-400">
@@ -261,11 +256,42 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div className="mt-6">
         <div className="flex justify-between items-center mb-4">
             <div className="flex items-center gap-3"><h2 className="text-base font-bold text-gray-800">Daftar Barang</h2><span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{totalCount} Item</span></div>
-            <div className="flex gap-2"><div className="bg-white rounded-lg p-1 flex shadow-sm border border-gray-100"><button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={16}/></button><button onClick={() => setViewMode('list')} className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><List size={16}/></button></div><button onClick={onAddNew} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-md active:scale-95 transition-all flex items-center gap-1.5">+ Barang</button></div>
+            <div className="flex gap-2">
+                {/* --- TOMBOL FILTER (BARU) --- */}
+                <div className="bg-white rounded-lg p-1 flex shadow-sm border border-gray-100 items-center">
+                    <button 
+                        onClick={() => setFilterType('all')} 
+                        className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${filterType === 'all' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                    >
+                        Semua
+                    </button>
+                    <button 
+                        onClick={() => setFilterType('low')} 
+                        className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${filterType === 'low' ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                        title="Stok Kurang dari 4"
+                    >
+                        <AlertTriangle size={12}/> Menipis
+                    </button>
+                    <button 
+                        onClick={() => setFilterType('empty')} 
+                        className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${filterType === 'empty' ? 'bg-red-100 text-red-700 border border-red-200' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                        title="Stok Habis (0)"
+                    >
+                        <AlertCircle size={12}/> Habis
+                    </button>
+                </div>
+                {/* --------------------------- */}
+                
+                <div className="bg-white rounded-lg p-1 flex shadow-sm border border-gray-100 ml-2">
+                    <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={16}/></button>
+                    <button onClick={() => setViewMode('list')} className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><List size={16}/></button>
+                </div>
+                <button onClick={onAddNew} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-md active:scale-95 transition-all flex items-center gap-1.5 ml-2">+ Barang</button>
+            </div>
         </div>
         <div className="relative mb-4"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} /><input type="text" placeholder="Cari (Tekan Enter atau Tunggu)..." onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm" /></div>
 
-        {loading ? <div className="flex flex-col items-center justify-center h-64 text-blue-500"><Loader2 size={32} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat Data...</p></div> : localItems.length === 0 ? <div className="p-8 text-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-200"><Package size={24} className="mx-auto mb-2 opacity-50"/><p className="text-xs">Tidak ada barang</p></div> : (
+        {loading ? <div className="flex flex-col items-center justify-center h-64 text-blue-500"><Loader2 size={32} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat Data...</p></div> : localItems.length === 0 ? <div className="p-8 text-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-200"><Package size={24} className="mx-auto mb-2 opacity-50"/><p className="text-xs">Tidak ada barang yang cocok.</p></div> : (
              <>
              {viewMode === 'grid' ? (
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
@@ -273,7 +299,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                      <div key={item.id} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full hover:shadow-md transition-shadow group">
                         <div className="relative aspect-[4/3] bg-gray-50 overflow-hidden border-b border-gray-50 cursor-pointer group-hover:opacity-90 transition-opacity" onClick={() => setSelectedItemHistory(item)}>
                           {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}/> : <div className="w-full h-full flex items-center justify-center text-gray-300"><Package size={20} /></div>}
-                          <div className="absolute top-1.5 left-1.5"><span className={`text-[8px] font-bold px-1 py-0.5 rounded shadow-sm border ${item.quantity < 5 ? 'bg-red-500 text-white border-red-600' : 'bg-white/90 text-gray-700 backdrop-blur-sm border-gray-200'}`}>{item.quantity} Unit</span></div>
+                          <div className="absolute top-1.5 left-1.5"><span className={`text-[8px] font-bold px-1 py-0.5 rounded shadow-sm border ${item.quantity === 0 ? 'bg-black text-white border-gray-600' : item.quantity < 4 ? 'bg-orange-500 text-white border-orange-600' : 'bg-white/90 text-gray-700 backdrop-blur-sm border-gray-200'}`}>{item.quantity === 0 ? 'HABIS' : item.quantity + ' Unit'}</span></div>
                           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20"><span className="bg-white/90 text-gray-800 text-[10px] font-bold px-2 py-1 rounded-full shadow-sm flex items-center gap-1"><History size={10}/> Riwayat</span></div>
                         </div>
                         <div className="p-2.5 flex-1 flex flex-col">
@@ -294,7 +320,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}/> : <div className="w-full h-full flex items-center justify-center text-gray-300"><Package size={20} /></div>}
                             </div>
                             <div className="flex-1 min-w-0"><h3 className="font-bold text-gray-900 text-sm truncate">{item.name || 'Tanpa Nama'}</h3><div className="flex items-center gap-3 mt-1"><p className="text-xs text-gray-500 font-mono truncate bg-gray-50 px-1.5 py-0.5 rounded">{item.partNumber || '-'}</p><div className="flex items-center text-xs text-gray-600"><MapPin size={10} className="mr-0.5 text-gray-400"/>{item.shelf || '-'}</div></div><p className="text-xs text-gray-500 truncate mt-1">{item.description || "-"}</p></div>
-                            <div className="flex flex-col items-end gap-2 pl-3 border-l border-gray-50 ml-1"><div className="text-right"><div className="text-sm font-bold text-blue-700">{formatCompactNumber(item.price)}</div><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm border inline-block mt-0.5 ${item.quantity < 5 ? 'bg-red-500 text-white border-red-600' : 'bg-green-50 text-green-700 border-green-100'}`}>{item.quantity} Unit</span></div><div className="flex gap-1.5"><button onClick={() => onEdit(item)} className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md transition-colors"><Edit size={14} /></button><button onClick={() => onDelete(item.id)} className="p-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-md transition-colors"><Trash2 size={14} /></button></div></div>
+                            <div className="flex flex-col items-end gap-2 pl-3 border-l border-gray-50 ml-1"><div className="text-right"><div className="text-sm font-bold text-blue-700">{formatCompactNumber(item.price)}</div><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm border inline-block mt-0.5 ${item.quantity === 0 ? 'bg-black text-white border-gray-600' : item.quantity < 4 ? 'bg-orange-500 text-white border-orange-600' : 'bg-green-50 text-green-700 border-green-100'}`}>{item.quantity === 0 ? 'HABIS' : item.quantity + ' Unit'}</span></div><div className="flex gap-1.5"><button onClick={() => onEdit(item)} className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md transition-colors"><Edit size={14} /></button><button onClick={() => onDelete(item.id)} className="p-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-md transition-colors"><Trash2 size={14} /></button></div></div>
                         </div>
                     ))}
                 </div>

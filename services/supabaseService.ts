@@ -25,9 +25,7 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
     description: item.description,
     
     price: Number(item.price),
-    // --- TAMBAHAN MAPPING ---
-    kingFanoPrice: Number(item.king_fano_price || 0), // Baca dari DB (snake_case) ke App (camelCase)
-    // ------------------------
+    kingFanoPrice: Number(item.king_fano_price || 0),
     costPrice: Number(item.cost_price),
     
     quantity: Number(item.quantity),
@@ -51,9 +49,7 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
     description: data.description,
     
     price: Number(data.price),
-    // --- TAMBAHAN MAPPING ---
     kingFanoPrice: Number(data.king_fano_price || 0),
-    // ------------------------
     costPrice: Number(data.cost_price),
     
     quantity: Number(data.quantity),
@@ -67,12 +63,24 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
   };
 };
 
-export const fetchInventoryPaginated = async (page: number, limit: number, search: string) => {
+// [UPDATED] Fungsi ini sekarang menerima parameter 'filter'
+export const fetchInventoryPaginated = async (page: number, limit: number, search: string, filter: string = 'all') => {
     const all = await fetchInventory();
     let filtered = all;
+
+    // --- LOGIKA FILTER STOK ---
+    if (filter === 'low') {
+        // Stok Menipis (Kurang dari 4 tapi tidak 0)
+        filtered = filtered.filter(i => i.quantity > 0 && i.quantity < 4);
+    } else if (filter === 'empty') {
+        // Stok Habis (0)
+        filtered = filtered.filter(i => i.quantity === 0);
+    }
+    // --------------------------
+
     if (search) {
         const s = search.toLowerCase();
-        filtered = all.filter(i => 
+        filtered = filtered.filter(i => 
             (i.name || '').toLowerCase().includes(s) || 
             (i.partNumber || '').toLowerCase().includes(s)
         );
@@ -112,9 +120,7 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
     description: item.description,
     
     price: item.price,
-    // --- TAMBAHAN INSERT ---
-    king_fano_price: item.kingFanoPrice, // Simpan App (camelCase) ke DB (snake_case)
-    // -----------------------
+    king_fano_price: item.kingFanoPrice,
     cost_price: item.costPrice,
     
     quantity: item.quantity,
@@ -136,9 +142,7 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
     description: item.description,
     
     price: item.price,
-    // --- TAMBAHAN UPDATE ---
     king_fano_price: item.kingFanoPrice,
-    // -----------------------
     cost_price: item.costPrice,
     
     quantity: item.quantity,
@@ -165,7 +169,6 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
 
 export const fetchOrders = async (): Promise<Order[]> => {
     const { data } = await supabase.from('orders').select('*').order('timestamp', { ascending: false }).limit(100);
-    // Mapping balik dari DB (snake_case) ke App (camelCase) saat ambil data
     return (data || []).map((o: any) => ({
         id: o.id, 
         customerName: o.customer_name,
