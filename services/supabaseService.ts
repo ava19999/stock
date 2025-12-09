@@ -2,11 +2,11 @@
 import { supabase } from '../lib/supabase';
 import { InventoryItem, InventoryFormData, Order, StockHistory, ChatSession } from '../types';
 
-// Helper untuk notifikasi error database
+// Helper untuk menampilkan error database ke layar
 const handleDbError = (operation: string, error: any) => {
   console.error(`${operation} Error:`, error);
-  // Alert hanya muncul jika error serius
-  alert(`Gagal ${operation}: ${error.message || JSON.stringify(error)}`);
+  // Alert agar Anda langsung tahu jika database menolak
+  alert(`Gagal ${operation}. Pesan Database: ${error.message || JSON.stringify(error)}`);
 };
 
 // --- INVENTORY SERVICES ---
@@ -132,7 +132,7 @@ export const fetchShopItems = async (page: number = 1, limit: number = 20, searc
   }
 };
 
-// --- CRUD INVENTORY ---
+// --- CRUD INVENTORY (UPDATED & FIXED) ---
 
 export const addInventory = async (item: InventoryFormData): Promise<boolean> => {
   try {
@@ -158,7 +158,8 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
 
 export const updateInventory = async (item: InventoryItem): Promise<boolean> => {
   try {
-    const { error } = await supabase.from('inventory').update({
+    // UPDATE MENGGUNAKAN ID (Lebih Aman dan Akurat daripada PartNumber)
+    const { data, error } = await supabase.from('inventory').update({
       name: item.name,
       description: item.description,
       price: item.price,
@@ -171,11 +172,28 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
       image_url: item.imageUrl,
       ecommerce: item.ecommerce,
       last_updated: Date.now()
-    }).eq('part_number', item.partNumber);
-    
-    if (error) { handleDbError("Update Stock", error); return false; }
+    })
+    .eq('id', item.id) // Kunci update menggunakan ID
+    .select(); // Minta data balik untuk memastikan ada yang berubah
+
+    if (error) { 
+        handleDbError("Update Stock", error); 
+        return false; 
+    }
+
+    // Jika sukses tapi tidak ada data yang kembali, berarti ID tidak ditemukan di DB
+    if (!data || data.length === 0) {
+        console.warn("Update Sukses tapi 0 baris berubah. ID mungkin salah:", item.id);
+        // Kita anggap gagal agar user tau
+        alert("Gagal Update Stok: Barang tidak ditemukan di database server.");
+        return false;
+    }
+
     return true;
-  } catch (e) { console.error(e); return false; }
+  } catch (e) { 
+      console.error(e); 
+      return false; 
+  }
 };
 
 export const deleteInventory = async (partNumber: string): Promise<boolean> => {
@@ -263,7 +281,6 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
 
 export const addHistoryLog = async (history: StockHistory): Promise<boolean> => {
   try {
-    // Pastikan kolom 'price' dan 'total_price' sudah dibuat di tabel Database via SQL Editor
     const { error } = await supabase.from('stock_history').insert([{
       id: history.id,
       item_id: history.itemId,
@@ -280,7 +297,7 @@ export const addHistoryLog = async (history: StockHistory): Promise<boolean> => 
     }]);
     
     if (error) { 
-        handleDbError("Save History (Detail Barang Keluar)", error); 
+        handleDbError("Save History", error); 
         return false; 
     }
     return true;
