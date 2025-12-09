@@ -4,7 +4,8 @@ import { InventoryItem, Order, StockHistory } from '../types';
 import { fetchInventoryPaginated, fetchInventoryStats } from '../services/supabaseService';
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
-  ArrowUpRight, ArrowDownRight, History, X, ChevronLeft, Loader2, ShoppingBag
+  ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin, FileText,
+  Grid, List, ShoppingBag, History, X, ChevronLeft, Loader2 // <-- GANTI LayoutGrid JADI Grid
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -18,7 +19,7 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
-  history, onViewOrders, onAddNew, onEdit, onDelete 
+  history, onAddNew, onEdit, onDelete 
 }) => {
   const [localItems, setLocalItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -84,24 +85,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return { resi, ecommerce, keterangan };
   };
 
-  // --- LOGIC PINTAR (FIX STOK KOSONG) ---
   const getDisplayStock = (h: StockHistory) => {
-      // 1. Prioritas: Data asli dari database
       if (h.currentStock !== undefined && h.currentStock !== null) {
           return h.currentStock;
       }
-      
-      // 2. Fallback: Hitung Manual (Stok Awal +/- Qty)
       if (h.previousStock !== undefined && h.previousStock !== null) {
           if (h.type === 'in') return h.previousStock + h.quantity;
           if (h.type === 'out') return Math.max(0, h.previousStock - h.quantity);
       }
-
-      // 3. Terakhir: Tampilkan 0 daripada strip
       return 0; 
   };
 
-  // --- HISTORY MODAL (GLOBAL) ---
+  // --- HISTORY MODAL ---
   const HistoryModal = () => {
     if (!showHistoryDetail) return null;
     const type = showHistoryDetail;
@@ -152,7 +147,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     );
   };
 
-  // --- ITEM HISTORY MODAL (DETAIL PER BARANG) ---
+  // --- ITEM HISTORY MODAL ---
   const ItemHistoryModal = () => {
     if (!selectedItemHistory) return null;
     const itemHistory = history.filter(h => h.itemId === selectedItemHistory.id || h.partNumber === selectedItemHistory.partNumber).sort((a, b) => b.timestamp - a.timestamp);
@@ -190,12 +185,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         <td className={`p-3 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>{h.type === 'in' ? '+' : '-'}{h.quantity}</td>
                                         <td className="p-3 align-top text-right font-mono text-gray-600 text-xs">{formatRupiah(price)}</td>
                                         <td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(total)}</td>
-                                        
-                                        {/* BAGIAN STOK YG DIPERBAIKI (PAKAI HELPER) */}
-                                        <td className="p-3 align-top text-right font-mono text-gray-600 bg-gray-50 font-bold">
-                                            {getDisplayStock(h)}
-                                        </td>
-
+                                        <td className="p-3 align-top text-right font-mono text-gray-600 bg-gray-50 font-bold">{getDisplayStock(h)}</td>
                                         <td className="p-3 align-top text-gray-700"><div className="font-medium text-xs mb-1">{keterangan}</div>{resi !== '-' && (<div className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] border border-blue-100 mr-1">Resi: {resi}</div>)}{ecommerce !== '-' && (<div className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-100"><ShoppingBag size={8}/> {ecommerce}</div>)}</td>
                                     </tr>
                                 );
