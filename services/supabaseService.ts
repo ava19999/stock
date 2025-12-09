@@ -2,23 +2,21 @@
 import { supabase } from '../lib/supabase';
 import { InventoryItem, InventoryFormData, Order, StockHistory, ChatSession } from '../types';
 
-// Helper error
 const handleDbError = (op: string, err: any) => {
   console.error(`${op} Error:`, err);
 };
 
-// Helper Mapping dari DB (snake_case) ke App (camelCase)
+// Update Mapping: Tambahkan sku
 const mapDbToInventoryItem = (item: any): InventoryItem => ({
     id: item.id,
     partNumber: item.part_number,
+    sku: item.sku || '', // <--- MAPPING SKU
     name: item.name,
     description: item.description,
-    
     price: Number(item.price),
     kingFanoPrice: Number(item.king_fano_price || 0),
     costPrice: Number(item.cost_price),
-    
-    quantity: Number(item.quantity), // NULL akan jadi 0 di sini
+    quantity: Number(item.quantity),
     initialStock: Number(item.initial_stock),
     qtyIn: Number(item.qty_in),
     qtyOut: Number(item.qty_out),
@@ -28,14 +26,11 @@ const mapDbToInventoryItem = (item: any): InventoryItem => ({
     lastUpdated: Number(item.last_updated)
 });
 
-// --- INVENTORY ---
+// ... fetchInventory, getItemById, fetchInventoryPaginated, fetchInventoryStats, fetchShopItems TETAP SAMA ...
+// Hanya pastikan mapDbToInventoryItem di atas sudah diupdate.
 
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
-  const { data, error } = await supabase
-    .from('inventory')
-    .select('*') // Ambil semua kolom (tanpa count biar ringan)
-    .order('last_updated', { ascending: false });
-
+  const { data, error } = await supabase.from('inventory').select('*').order('last_updated', { ascending: false });
   if (error) { console.error(error); return []; }
   return data.map(mapDbToInventoryItem);
 };
@@ -46,54 +41,25 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
   return mapDbToInventoryItem(data);
 };
 
-// [OPTIMALISASI & PERBAIKAN BUG NULL]
 export const fetchInventoryPaginated = async (page: number, limit: number, search: string, filter: string = 'all') => {
-    let query = supabase
-        .from('inventory')
-        .select('*', { count: 'exact' });
-
-    // 1. Pencarian (Nama / No Part)
+    let query = supabase.from('inventory').select('*', { count: 'exact' });
+    // Update pencarian agar bisa cari via SKU juga
     if (search) {
-        query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%`);
+        query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,sku.ilike.%${search}%`);
     }
+    if (filter === 'low') { query = query.gt('quantity', 0).lt('quantity', 4); } 
+    else if (filter === 'empty') { query = query.or('quantity.lte.0,quantity.is.null'); }
 
-    // 2. Filter Stok (DIPERBAIKI)
-    if (filter === 'low') {
-        // Stok Menipis: Lebih dari 0 TAPI kurang dari 4
-        query = query.gt('quantity', 0).lt('quantity', 4);
-    } else if (filter === 'empty') {
-        // Stok Habis:
-        // - lte.0  -> Kurang dari atau sama dengan 0 (cover 0 dan minus)
-        // - is.null -> Data kosong (NULL) dianggap habis juga
-        query = query.or('quantity.lte.0,quantity.is.null');
-    }
-
-    // 3. Pagination
     const from = (page - 1) * limit;
     const to = from + limit - 1;
-    
-    const { data, error, count } = await query
-        .order('last_updated', { ascending: false })
-        .range(from, to);
-
-    if (error) {
-        console.error("Error fetching inventory paginated:", error);
-        return { data: [], count: 0 };
-    }
-
-    const mappedData = (data || []).map(mapDbToInventoryItem);
-    return { data: mappedData, count: count || 0 };
+    const { data, error, count } = await query.order('last_updated', { ascending: false }).range(from, to);
+    if (error) { console.error("Error fetching inventory:", error); return { data: [], count: 0 }; }
+    return { data: (data || []).map(mapDbToInventoryItem), count: count || 0 };
 };
 
-// [OPTIMALISASI STATISTIK]
 export const fetchInventoryStats = async () => {
-    // Hanya ambil kolom quantity dan price untuk statistik cepat
-    const { data, error } = await supabase
-        .from('inventory')
-        .select('quantity, price');
-
-    if (error) { console.error(error); return { totalItems: 0, totalStock: 0, totalAsset: 0 }; }
-
+    const { data, error } = await supabase.from('inventory').select('quantity, price');
+    if (error) return { totalItems: 0, totalStock: 0, totalAsset: 0 };
     const all = data || [];
     return {
         totalItems: all.length,
@@ -102,38 +68,22 @@ export const fetchInventoryStats = async () => {
     };
 };
 
-// [OPTIMALISASI SHOP]
 export const fetchShopItems = async (page: number, limit: number, search: string, cat: string) => {
-    let query = supabase
-        .from('inventory')
-        .select('*', { count: 'exact' })
-        .gt('quantity', 0)   // Hanya yang ada stok
-        .gt('price', 0);     // Hanya yang ada harga
-
-    if (cat !== 'Semua') {
-        query = query.ilike('description', `%[${cat}]%`);
-    }
-
-    if (search) {
-        query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%`);
-    }
-
+    let query = supabase.from('inventory').select('*', { count: 'exact' }).gt('quantity', 0).gt('price', 0);
+    if (cat !== 'Semua') query = query.ilike('description', `%[${cat}]%`);
+    if (search) query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,sku.ilike.%${search}%`);
     const from = (page - 1) * limit;
     const to = from + limit - 1;
-
     const { data, error, count } = await query.range(from, to);
-
-    if (error) { return { data: [], count: 0 }; }
-
-    const mappedData = (data || []).map(mapDbToInventoryItem);
-    return { data: mappedData, count: count || 0 };
+    if (error) return { data: [], count: 0 };
+    return { data: (data || []).map(mapDbToInventoryItem), count: count || 0 };
 };
 
-// --- CRUD ---
-
+// Update Add: Tambahkan SKU
 export const addInventory = async (item: InventoryFormData): Promise<boolean> => {
   const { error } = await supabase.from('inventory').insert([{
     part_number: item.partNumber,
+    sku: item.sku, // <--- TAMBAHKAN INI
     name: item.name,
     description: item.description,
     price: item.price,
@@ -152,8 +102,10 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
   return true;
 };
 
+// Update Update: Tambahkan SKU
 export const updateInventory = async (item: InventoryItem): Promise<boolean> => {
   const { error } = await supabase.from('inventory').update({
+    sku: item.sku, // <--- TAMBAHKAN INI
     name: item.name,
     description: item.description,
     price: item.price,
@@ -173,36 +125,24 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
   return true;
 };
 
+// ... deleteInventory, fetchOrders, saveOrder, updateOrderStatusService, fetchHistory, addHistoryLog, fetchChatSessions, saveChatSession TETAP SAMA ...
 export const deleteInventory = async (id: string): Promise<boolean> => {
   const { error } = await supabase.from('inventory').delete().eq('id', id);
   if (error) { handleDbError("Hapus Barang", error); return false; }
   return true;
 };
 
-// --- ORDERS ---
-
 export const fetchOrders = async (): Promise<Order[]> => {
     const { data } = await supabase.from('orders').select('*').order('timestamp', { ascending: false }).limit(100);
     return (data || []).map((o: any) => ({
-        id: o.id, 
-        customerName: o.customer_name,
-        items: o.items, 
-        totalAmount: Number(o.total_amount),
-        status: o.status, 
-        timestamp: Number(o.timestamp)
+        id: o.id, customerName: o.customer_name, items: o.items, totalAmount: Number(o.total_amount), status: o.status, timestamp: Number(o.timestamp)
     }));
 };
 
 export const saveOrder = async (order: Order): Promise<boolean> => {
     const { error } = await supabase.from('orders').insert([{
-        id: order.id, 
-        customer_name: order.customerName,
-        items: order.items,
-        total_amount: order.totalAmount,
-        status: order.status, 
-        timestamp: order.timestamp
+        id: order.id, customer_name: order.customerName, items: order.items, total_amount: order.totalAmount, status: order.status, timestamp: order.timestamp
     }]);
-    
     if (error) { handleDbError("Simpan Order", error); return false; }
     return true;
 };
@@ -213,70 +153,31 @@ export const updateOrderStatusService = async (id: string, status: string): Prom
     return true;
 };
 
-// --- HISTORY ---
-
 export const fetchHistory = async (): Promise<StockHistory[]> => {
     const { data } = await supabase.from('stock_history').select('*').order('timestamp', { ascending: false }).limit(200);
     return (data || []).map((h: any) => ({
-        id: h.id, 
-        itemId: h.item_id, 
-        partNumber: h.part_number, 
-        name: h.name, 
-        type: h.type,
-        quantity: h.quantity, 
-        previousStock: h.previous_stock, 
-        currentStock: h.current_stock,
-        price: h.price, 
-        totalPrice: h.total_price, 
-        timestamp: h.timestamp, 
-        reason: h.reason
+        id: h.id, itemId: h.item_id, partNumber: h.part_number, name: h.name, type: h.type, quantity: h.quantity, previousStock: h.previous_stock, currentStock: h.current_stock, price: h.price, totalPrice: h.total_price, timestamp: h.timestamp, reason: h.reason
     }));
 };
 
 export const addHistoryLog = async (h: StockHistory): Promise<boolean> => {
     const { error } = await supabase.from('stock_history').insert([{
-        id: h.id, 
-        item_id: h.itemId, 
-        part_number: h.partNumber, 
-        name: h.name, 
-        type: h.type,
-        quantity: h.quantity, 
-        previous_stock: h.previousStock, 
-        current_stock: h.currentStock, 
-        price: h.price, 
-        total_price: h.totalPrice, 
-        timestamp: h.timestamp, 
-        reason: h.reason
+        id: h.id, item_id: h.itemId, part_number: h.partNumber, name: h.name, type: h.type, quantity: h.quantity, previous_stock: h.previousStock, current_stock: h.currentStock, price: h.price, total_price: h.totalPrice, timestamp: h.timestamp, reason: h.reason
     }]);
-    
     if (error) { handleDbError("Simpan History", error); return false; }
     return true;
 };
 
-// --- CHAT ---
-
 export const fetchChatSessions = async (): Promise<ChatSession[]> => {
     const { data } = await supabase.from('chat_sessions').select('*');
     return (data || []).map((c: any) => ({
-        customerId: c.customer_id, 
-        customerName: c.customer_name, 
-        messages: c.messages,
-        lastMessage: c.last_message, 
-        lastTimestamp: c.last_timestamp,
-        unreadAdminCount: c.unread_admin_count, 
-        unreadUserCount: c.unread_user_count
+        customerId: c.customer_id, customerName: c.customer_name, messages: c.messages, lastMessage: c.last_message, lastTimestamp: c.last_timestamp, unreadAdminCount: c.unread_admin_count, unreadUserCount: c.unread_user_count
     }));
 };
 
 export const saveChatSession = async (s: ChatSession): Promise<boolean> => {
     const { error } = await supabase.from('chat_sessions').upsert([{
-        customer_id: s.customerId, 
-        customer_name: s.customerName, 
-        messages: s.messages,
-        last_message: s.lastMessage, 
-        last_timestamp: s.lastTimestamp,
-        unread_admin_count: s.unreadAdminCount, 
-        unread_user_count: s.unreadUserCount
+        customer_id: s.customerId, customer_name: s.customerName, messages: s.messages, last_message: s.lastMessage, last_timestamp: s.lastTimestamp, unread_admin_count: s.unreadAdminCount, unread_user_count: s.unreadUserCount
     }]);
     return !error;
 };

@@ -3,20 +3,20 @@
 export interface InventoryItem {
   id: string;
   partNumber: string;
+  sku?: string;          // <--- KOLOM BARU (SKU Induk)
   name: string;
   description: string;
   quantity: number; 
   shelf: string;
   
-  price: number;           // Harga Umum / Eceran
-  kingFanoPrice: number;   // <--- KOLOM BARU (Khusus King Fano)
+  price: number;           
+  kingFanoPrice: number;   
   
-  costPrice: number;       // Harga Modal
+  costPrice: number;       
   ecommerce: string;
   imageUrl: string;
   lastUpdated: number;
   
-  // Field Stok untuk Kalkulasi
   initialStock: number;
   qtyIn: number;
   qtyOut: number;
@@ -24,6 +24,7 @@ export interface InventoryItem {
 
 export type InventoryFormData = Omit<InventoryItem, 'id' | 'lastUpdated'>;
 
+// ... interface lainnya tetap sama
 export interface CartItem extends InventoryItem {
   cartQuantity: number;
   customPrice?: number;
