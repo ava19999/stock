@@ -1,7 +1,7 @@
 // FILE: src/components/OrderManagement.tsx
 import React, { useState, useMemo, useEffect } from 'react';
 import { Order, OrderStatus } from '../types';
-import { Clock, CheckCircle, Package, Truck, ClipboardList, RotateCcw, Edit3, ShoppingBag } from 'lucide-react';
+import { Clock, CheckCircle, Package, Truck, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag } from 'lucide-react';
 import { formatRupiah } from '../utils';
 
 interface OrderManagementProps {
@@ -32,12 +32,11 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       localStorage.setItem('stockmaster_order_notes', JSON.stringify(newNotes));
   };
 
-  // --- SAFE GUARD: Pastikan orders selalu array ---
   const safeOrders = Array.isArray(orders) ? orders : [];
 
   const filteredOrders = useMemo(() => {
     return safeOrders.filter(o => {
-      if (!o) return false; // Skip jika order null
+      if (!o) return false;
       if (activeTab === 'pending') return o.status === 'pending';
       if (activeTab === 'processing') return o.status === 'processing';
       if (activeTab === 'history') return o.status === 'completed' || o.status === 'cancelled';
@@ -65,9 +64,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       return status;
   };
 
-  // --- LOGIKA EKSTRAKSI DATA BARU (DENGAN SAFE GUARD) ---
   const getOrderDetails = (order: Order) => {
-      // Default value jika null/undefined
       let cleanName = order.customerName || 'Tanpa Nama';
       let orderId = order.id || '???';
       let resiText = `#${orderId.slice(0, 8)}`;
@@ -75,7 +72,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       let ecommerce = '-';
 
       try {
-          // 1. Ekstrak Resi
           const resiMatch = cleanName.match(/\(Resi: (.*?)\)/);
           if (resiMatch && resiMatch[1]) {
               resiText = resiMatch[1];
@@ -83,7 +79,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
               cleanName = cleanName.replace(/\s*\(Resi:.*?\)/, '');
           }
 
-          // 2. Ekstrak E-Commerce
           const viaMatch = cleanName.match(/\(Via: (.*?)\)/);
           if (viaMatch && viaMatch[1]) {
               ecommerce = viaMatch[1];
@@ -154,7 +149,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                         <th className="p-4 w-32">No. Part</th>
                         <th className="p-4">Nama Barang</th>
                         <th className="p-4 text-right w-20">Qty</th>
-                        <th className="p-4 text-right w-32">Harga</th>
+                        <th className="p-4 text-right w-32">Harga Satuan</th>
                         <th className="p-4 text-right w-32">Total</th>
                         <th className="p-4 text-center w-32">Status</th>
                         <th className="p-4 text-center w-48">
@@ -176,14 +171,19 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                             const { cleanName, resiText, isResi, ecommerce } = getOrderDetails(order);
                             const dt = formatDate(order.timestamp);
                             
-                            // Safe Guard untuk items
                             const items = Array.isArray(order.items) ? order.items : [];
+                            if (items.length === 0) return null;
 
-                            if (items.length === 0) return null; // Skip jika tidak ada item
+                            return items.map((item, index) => {
+                                // --- PERBAIKAN DI SINI ---
+                                // Gunakan customPrice jika ada, kalau tidak pakai harga normal
+                                const dealPrice = item.customPrice ?? item.price ?? 0;
+                                const dealTotal = dealPrice * (item.cartQuantity || 0);
+                                const hasCustomPrice = item.customPrice !== undefined && item.customPrice !== item.price;
 
-                            return items.map((item, index) => (
+                                return (
                                 <tr key={`${order.id}-${index}`} className="hover:bg-blue-50/30 transition-colors group">
-                                    {/* Kolom yang digabung (Merged Rows) untuk info Order */}
+                                    {/* Kolom Info Order (Merged) */}
                                     {index === 0 && (
                                         <>
                                             <td rowSpan={items.length} className="p-4 align-top border-r border-gray-100 bg-white group-hover:bg-blue-50/30">
@@ -195,7 +195,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                     {resiText}
                                                 </span>
                                             </td>
-                                            {/* KOLOM E-COMMERCE */}
                                             <td rowSpan={items.length} className="p-4 align-top border-r border-gray-100 font-medium bg-white group-hover:bg-blue-50/30 text-gray-600">
                                                 {ecommerce !== '-' ? (
                                                    <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-orange-50 text-orange-700 border border-orange-100 w-fit">
@@ -216,10 +215,25 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                     <td className="p-4 align-top font-mono text-xs text-gray-500">{item.partNumber || '-'}</td>
                                     <td className="p-4 align-top text-gray-700 font-medium max-w-[250px]">{item.name || 'Item Tanpa Nama'}</td>
                                     <td className="p-4 align-top text-right font-bold text-gray-800">{item.cartQuantity || 0}</td>
-                                    <td className="p-4 align-top text-right text-gray-500 font-mono text-xs">{formatRupiah(item.price || 0)}</td>
-                                    <td className="p-4 align-top text-right font-bold text-gray-900 font-mono text-xs">{formatRupiah((item.price || 0) * (item.cartQuantity || 0))}</td>
+                                    
+                                    {/* HARGA SATUAN (Tampilkan label jika harga khusus) */}
+                                    <td className="p-4 align-top text-right text-gray-500 font-mono text-xs">
+                                        <div className={hasCustomPrice ? "text-orange-600 font-bold" : ""}>
+                                            {formatRupiah(dealPrice)}
+                                        </div>
+                                        {hasCustomPrice && (
+                                            <div className="flex items-center justify-end gap-1 text-[9px] text-orange-500 mt-0.5">
+                                                <Tag size={8}/> Khusus
+                                            </div>
+                                        )}
+                                    </td>
 
-                                    {/* Kolom Status & Aksi/Keterangan (Merged) */}
+                                    {/* TOTAL PER ITEM */}
+                                    <td className="p-4 align-top text-right font-bold text-gray-900 font-mono text-xs">
+                                        {formatRupiah(dealTotal)}
+                                    </td>
+
+                                    {/* Kolom Status & Aksi (Merged) */}
                                     {index === 0 && (
                                         <>
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
@@ -227,10 +241,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                     {getStatusLabel(order.status)}
                                                 </div>
                                                 <div className="text-[10px] text-gray-400 font-medium">Total Order:</div>
+                                                {/* Total Order diambil dari data order yang sudah dihitung saat checkout */}
                                                 <div className="text-sm font-extrabold text-purple-700">{formatRupiah(order.totalAmount || 0)}</div>
                                             </td>
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
-                                                
                                                 {activeTab === 'history' ? (
                                                     <div className="relative group/note">
                                                         <textarea 
@@ -247,34 +261,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                     <div className="flex flex-col gap-2">
                                                         {order.status === 'pending' && (
                                                             <>
-                                                                <button
-                                                                    onClick={() => onUpdateStatus(order.id, 'processing')}
-                                                                    className="w-full py-1.5 bg-purple-600 text-white text-[10px] font-bold rounded hover:bg-purple-700 shadow-sm transition-all flex items-center justify-center gap-1"
-                                                                >
-                                                                    <Package size={12} /> Proses
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => onUpdateStatus(order.id, 'cancelled')}
-                                                                    className="w-full py-1.5 bg-white border border-gray-300 text-gray-600 text-[10px] font-bold rounded hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors"
-                                                                >
-                                                                    Tolak
-                                                                </button>
+                                                                <button onClick={() => onUpdateStatus(order.id, 'processing')} className="w-full py-1.5 bg-purple-600 text-white text-[10px] font-bold rounded hover:bg-purple-700 shadow-sm transition-all flex items-center justify-center gap-1"><Package size={12} /> Proses</button>
+                                                                <button onClick={() => onUpdateStatus(order.id, 'cancelled')} className="w-full py-1.5 bg-white border border-gray-300 text-gray-600 text-[10px] font-bold rounded hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors">Tolak</button>
                                                             </>
                                                         )}
                                                         {order.status === 'processing' && (
                                                             <>
-                                                                <button
-                                                                    onClick={() => onUpdateStatus(order.id, 'completed')}
-                                                                    className="w-full py-1.5 bg-green-600 text-white text-[10px] font-bold rounded hover:bg-green-700 shadow-sm transition-all flex items-center justify-center gap-1"
-                                                                >
-                                                                    <Truck size={12} /> Selesai
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => onUpdateStatus(order.id, 'cancelled')}
-                                                                    className="w-full py-1.5 bg-orange-50 border border-orange-200 text-orange-600 text-[10px] font-bold rounded hover:bg-orange-100 transition-colors flex items-center justify-center gap-1"
-                                                                >
-                                                                    <RotateCcw size={12} /> Retur
-                                                                </button>
+                                                                <button onClick={() => onUpdateStatus(order.id, 'completed')} className="w-full py-1.5 bg-green-600 text-white text-[10px] font-bold rounded hover:bg-green-700 shadow-sm transition-all flex items-center justify-center gap-1"><Truck size={12} /> Selesai</button>
+                                                                <button onClick={() => onUpdateStatus(order.id, 'cancelled')} className="w-full py-1.5 bg-orange-50 border border-orange-200 text-orange-600 text-[10px] font-bold rounded hover:bg-orange-100 transition-colors flex items-center justify-center gap-1"><RotateCcw size={12} /> Retur</button>
                                                             </>
                                                         )}
                                                     </div>
@@ -283,7 +277,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                         </>
                                     )}
                                 </tr>
-                            ));
+                                );
+                            });
                         })
                     )}
                 </tbody>
