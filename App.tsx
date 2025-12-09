@@ -7,11 +7,10 @@ import { ShopView } from './components/ShopView';
 import { ChatView } from './components/ChatView';
 import { OrderManagement } from './components/OrderManagement';
 import { CustomerOrderView } from './components/CustomerOrderView';
-import { ScanResiView } from './components/ScanResiView'; // Pastikan file ini sudah dibuat
+import { ScanResiView } from './components/ScanResiView';
 import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
-import { ResiAnalysisResult } from './services/geminiService'; // Import tipe data hasil scan
+import { ResiAnalysisResult } from './services/geminiService';
 
-// IMPORT LENGKAP SERVICE
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory, getItemById,
   fetchOrders, saveOrder, updateOrderStatusService,
@@ -31,7 +30,6 @@ const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 
 type ActiveView = 'shop' | 'chat' | 'inventory' | 'orders' | 'scan';
 
-// --- KOMPONEN TOAST ---
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
   return (
@@ -42,27 +40,22 @@ const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 
   );
 };
 
-// --- KOMPONEN UTAMA APLIKASI ---
 const AppContent: React.FC = () => {
-  // STATE AUTENTIKASI
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loginName, setLoginName] = useState('');
   const [loginPass, setLoginPass] = useState('');
 
-  // STATE DATA
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [history, setHistory] = useState<StockHistory[]>([]);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
-  
-  // STATE UI
   const [loading, setLoading] = useState(false); 
   const [activeView, setActiveView] = useState<ActiveView>('shop');
+  
   const [bannerUrl, setBannerUrl] = useState<string>('');
   const [myCustomerId, setMyCustomerId] = useState<string>('');
   
-  // STATE EDIT/CART
   const [isEditing, setIsEditing] = useState(false);
   const [editItem, setEditItem] = useState<InventoryItem | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -70,23 +63,17 @@ const AppContent: React.FC = () => {
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => setToast({msg, type});
 
-  // DETEKSI USER KHUSUS (KING FANO)
   const isKingFano = useMemo(() => {
       return loginName.trim().toLowerCase() === 'king fano';
   }, [loginName]);
 
-  // INITIAL LOAD
   useEffect(() => {
     let cId = localStorage.getItem(CUSTOMER_ID_KEY);
     if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
     setMyCustomerId(cId);
     
-    // Cek sesi login tersimpan (opsional)
     const savedName = localStorage.getItem('stockmaster_customer_name');
-    if(savedName) {
-        setLoginName(savedName);
-        setIsAuthenticated(true);
-    }
+    if(savedName) { setLoginName(savedName); setIsAuthenticated(true); }
     
     refreshData();
   }, []);
@@ -97,7 +84,6 @@ const AppContent: React.FC = () => {
         const inventoryData = await fetchInventory();
         const bannerItem = inventoryData.find(i => i.partNumber === BANNER_PART_NUMBER);
         if (bannerItem) setBannerUrl(bannerItem.imageUrl);
-        // Filter banner dari list barang
         setItems(inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER));
 
         const ordersData = await fetchOrders();
@@ -109,22 +95,16 @@ const AppContent: React.FC = () => {
         const chatData = await fetchChatSessions();
         setChatSessions(chatData);
 
-    } catch (e) { 
-        console.error("Gagal memuat data:", e); 
-        showToast("Gagal sinkronisasi data", 'error');
-    }
+    } catch (e) { console.error("Gagal memuat data:", e); showToast("Gagal sinkronisasi data", 'error'); }
     setLoading(false);
   };
 
   const addNewHistory = async (newRecord: StockHistory) => {
       const success = await addHistoryLog(newRecord);
-      if (success) {
-          setHistory(prev => [newRecord, ...prev]);
-      }
+      if (success) setHistory(prev => [newRecord, ...prev]);
       return success;
   };
 
-  // --- HANDLER LOGIN ---
   const handleGlobalLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (loginName.toLowerCase() === 'ava' && loginPass === '9193') {
@@ -133,27 +113,18 @@ const AppContent: React.FC = () => {
         refreshData();
     } else if (loginName.trim() !== '') {
         loginAsCustomer(loginName);
-    } else {
-        showToast('Masukkan Nama', 'error');
-    }
+    } else { showToast('Masukkan Nama', 'error'); }
   };
 
   const loginAsCustomer = (name: string) => {
       setIsAdmin(false); setIsAuthenticated(true); setActiveView('shop');
       localStorage.setItem('stockmaster_customer_name', name); 
-      if (name.toLowerCase() === 'king fano') {
-          showToast(`Selamat Datang, King Fano! Harga Khusus Aktif.`);
-      } else {
-          showToast(`Selamat Datang, ${name}!`);
-      }
+      if (name.toLowerCase() === 'king fano') showToast(`Selamat Datang, King Fano! Harga Khusus Aktif.`);
+      else showToast(`Selamat Datang, ${name}!`);
   };
 
-  const handleLogout = () => { 
-      setIsAuthenticated(false); setIsAdmin(false); setLoginName(''); setLoginPass(''); 
-      localStorage.removeItem('stockmaster_customer_name');
-  };
+  const handleLogout = () => { setIsAuthenticated(false); setIsAdmin(false); setLoginName(''); setLoginPass(''); localStorage.removeItem('stockmaster_customer_name'); };
 
-  // --- HANDLER INVENTORY ---
   const handleSaveItem = async (data: InventoryFormData) => {
       setLoading(true);
       const newQuantity = Number(data.quantity) || 0;
@@ -164,64 +135,42 @@ const AppContent: React.FC = () => {
           const oldQty = Number(editItem.quantity) || 0;
           const diff = newQuantity - oldQty;
           
-          let updatedItem: InventoryItem = { 
-              ...editItem, ...data, 
-              quantity: newQuantity,
-              initialStock: data.initialStock || 0,
-              qtyIn: data.qtyIn || 0,
-              qtyOut: data.qtyOut || 0,
-              lastUpdated: Date.now() 
-          };
+          let updatedItem: InventoryItem = { ...editItem, ...data, quantity: newQuantity, initialStock: data.initialStock || 0, qtyIn: data.qtyIn || 0, qtyOut: data.qtyOut || 0, lastUpdated: Date.now() };
 
           if (diff !== 0) {
               await addNewHistory({
                   id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
-                  type: diff > 0 ? 'in' : 'out', 
-                  quantity: Math.abs(diff), 
-                  previousStock: oldQty, currentStock: newQuantity,
-                  price: currentPrice, totalPrice: currentPrice * Math.abs(diff),
-                  timestamp: Date.now(), 
+                  type: diff > 0 ? 'in' : 'out', quantity: Math.abs(diff), previousStock: oldQty, currentStock: newQuantity,
+                  price: currentPrice, totalPrice: currentPrice * Math.abs(diff), timestamp: Date.now(), 
                   reason: diff > 0 ? `Restock Manual${ecommerceInfo}` : 'Koreksi Stok Manual'
               });
           }
-          const success = await updateInventory(updatedItem);
-          if (success) { showToast('Update berhasil!'); refreshData(); }
-
+          if (await updateInventory(updatedItem)) { showToast('Update berhasil!'); refreshData(); }
       } else {
           if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number sudah ada!', 'error'); setLoading(false); return; }
-          
           await addNewHistory({ 
               id: generateId(), itemId: data.partNumber, partNumber: data.partNumber, name: data.name, 
               type: 'in', quantity: newQuantity, previousStock: 0, currentStock: newQuantity, 
-              price: currentPrice, totalPrice: currentPrice * newQuantity,
-              timestamp: Date.now(), reason: `Barang Baru${ecommerceInfo}` 
+              price: currentPrice, totalPrice: currentPrice * newQuantity, timestamp: Date.now(), reason: `Barang Baru${ecommerceInfo}` 
           });
-          
-          const success = await addInventory(data);
-          if (success) { showToast('Tersimpan!'); refreshData(); }
+          if (await addInventory(data)) { showToast('Tersimpan!'); refreshData(); }
       }
       setIsEditing(false); setEditItem(null); setLoading(false);
   };
 
   const handleUpdateBanner = async (base64: string) => {
-      const bannerData: any = {
-          partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', description: 'DO NOT DELETE',
-          price: 0, costPrice: 0, ecommerce: '', quantity: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, shelf: 'SYSTEM', imageUrl: base64
-      };
-      let success = await (bannerUrl ? updateInventory(bannerData) : addInventory(bannerData));
-      if (success) { setBannerUrl(base64); showToast('Banner diperbarui!'); } else { showToast('Gagal update banner', 'error'); }
+      const bannerData: any = { partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', description: 'DO NOT DELETE', price: 0, costPrice: 0, ecommerce: '', quantity: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, shelf: 'SYSTEM', imageUrl: base64 };
+      if (await (bannerUrl ? updateInventory(bannerData) : addInventory(bannerData))) { setBannerUrl(base64); showToast('Banner diperbarui!'); } else { showToast('Gagal update banner', 'error'); }
   };
   
   const handleDelete = async (id: string) => {
       if(confirm('Hapus Barang Permanen?')) {
           setLoading(true);
-          const success = await deleteInventory(id);
-          if (success) { showToast('Dihapus'); refreshData(); }
+          if (await deleteInventory(id)) { showToast('Dihapus'); refreshData(); }
           setLoading(false);
       }
   }
 
-  // --- HANDLER CART & CHECKOUT ---
   const addToCart = (item: InventoryItem) => {
       setCart(prev => {
           const ex = prev.find(c => c.id === item.id);
@@ -237,111 +186,69 @@ const AppContent: React.FC = () => {
   const doCheckout = async (name: string) => {
       if (name !== loginName && !isAdmin) { setLoginName(name); localStorage.setItem('stockmaster_customer_name', name); }
       const totalAmount = cart.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
-
-      const newOrder: Order = {
-          id: generateId(), customerName: name, items: [...cart], totalAmount: totalAmount, status: 'pending', timestamp: Date.now()
-      };
+      const newOrder: Order = { id: generateId(), customerName: name, items: [...cart], totalAmount: totalAmount, status: 'pending', timestamp: Date.now() };
       
       setLoading(true);
-      const orderSuccess = await saveOrder(newOrder);
-      
-      if (orderSuccess) {
+      if (await saveOrder(newOrder)) {
           for (const cartItem of cart) {
               const currentItem = await getItemById(cartItem.id);
               if (currentItem) {
                   const qtySold = cartItem.cartQuantity;
                   const dealPrice = cartItem.customPrice ?? currentItem.price;
-                  const itemToUpdate = { 
-                      ...currentItem,
-                      qtyOut: (currentItem.qtyOut || 0) + qtySold,
-                      quantity: Math.max(0, currentItem.quantity - qtySold),
-                      lastUpdated: Date.now()
-                  };
+                  const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                   await updateInventory(itemToUpdate);
                   await addNewHistory({
                       id: generateId(), itemId: cartItem.id, partNumber: cartItem.partNumber, name: cartItem.name,
                       type: 'out', quantity: qtySold, previousStock: currentItem.quantity, currentStock: itemToUpdate.quantity,
-                      price: dealPrice, totalPrice: dealPrice * qtySold,
-                      timestamp: Date.now(), reason: `Order #${newOrder.id.slice(0,6)} (${name})`
+                      price: dealPrice, totalPrice: dealPrice * qtySold, timestamp: Date.now(), reason: `Order #${newOrder.id.slice(0,6)} (${name})`
                   });
               }
           }
-          showToast('Pesanan berhasil dibuat!');
-          setCart([]); setActiveView('orders'); await refreshData();
+          showToast('Pesanan berhasil dibuat!'); setCart([]); setActiveView('orders'); await refreshData();
       } else { showToast('Gagal membuat pesanan', 'error'); }
       setLoading(false);
   };
 
-  // --- HANDLER UPDATE STATUS PESANAN ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
-
-      const success = await updateOrderStatusService(orderId, newStatus);
-      if (!success) return;
-
-      if (newStatus === 'cancelled' && order.status !== 'cancelled') {
-          for (const orderItem of order.items) {
-              const currentItem = await getItemById(orderItem.id);
-              if (currentItem) {
-                  const restoreQty = orderItem.cartQuantity;
-                  const itemToUpdate = { 
-                      ...currentItem,
-                      qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty),
-                      quantity: currentItem.quantity + restoreQty,
-                      lastUpdated: Date.now()
-                   };
-                  await updateInventory(itemToUpdate);
-                  await addNewHistory({
-                      id: generateId(), itemId: itemToUpdate.id, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name,
-                      type: 'in', quantity: restoreQty, previousStock: itemToUpdate.quantity - restoreQty, currentStock: itemToUpdate.quantity,
-                      price: orderItem.customPrice ?? orderItem.price, totalPrice: (orderItem.customPrice ?? orderItem.price) * restoreQty,
-                      timestamp: Date.now(), reason: `Retur Order #${orderId.slice(0,6)}`
-                  });
+      if (await updateOrderStatusService(orderId, newStatus)) {
+          if (newStatus === 'cancelled' && order.status !== 'cancelled') {
+              for (const orderItem of order.items) {
+                  const currentItem = await getItemById(orderItem.id);
+                  if (currentItem) {
+                      const restoreQty = orderItem.cartQuantity;
+                      const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: currentItem.quantity + restoreQty, lastUpdated: Date.now() };
+                      await updateInventory(itemToUpdate);
+                      await addNewHistory({
+                          id: generateId(), itemId: itemToUpdate.id, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name,
+                          type: 'in', quantity: restoreQty, previousStock: itemToUpdate.quantity - restoreQty, currentStock: itemToUpdate.quantity,
+                          price: orderItem.customPrice ?? orderItem.price, totalPrice: (orderItem.customPrice ?? orderItem.price) * restoreQty, timestamp: Date.now(), reason: `Retur Order #${orderId.slice(0,6)}`
+                      });
+                  }
               }
+              showToast('Pesanan dibatalkan, stok dikembalikan.'); refreshData();
           }
-          showToast('Pesanan dibatalkan, stok dikembalikan.');
-          refreshData();
+          setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
       }
-      setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
   };
 
-  // --- HANDLER CHAT ---
   const handleSendMessage = async (customerId: string, text: string, sender: 'user' | 'admin') => {
     const newMessage: Message = { id: Date.now().toString(), sender, text, timestamp: Date.now(), read: false };
     let currentSession = chatSessions.find(s => s.customerId === customerId);
     let isNew = false;
-
-    if (!currentSession) {
-        currentSession = { customerId, customerName: loginName || `Guest ${customerId.slice(-4)}`, messages: [], lastMessage: '', lastTimestamp: Date.now(), unreadAdminCount: 0, unreadUserCount: 0 };
-        isNew = true;
-    }
-
-    const updatedSession: ChatSession = {
-        ...currentSession, messages: [...currentSession.messages, newMessage], lastMessage: text, lastTimestamp: Date.now(),
-        unreadAdminCount: sender === 'user' ? (currentSession.unreadAdminCount || 0) + 1 : (currentSession.unreadAdminCount || 0),
-        unreadUserCount: sender === 'admin' ? (currentSession.unreadUserCount || 0) + 1 : (currentSession.unreadUserCount || 0)
-    };
-
-    if (isNew) setChatSessions(prev => [...prev, updatedSession]);
-    else setChatSessions(prev => prev.map(s => s.customerId === customerId ? updatedSession : s));
+    if (!currentSession) { currentSession = { customerId, customerName: loginName || `Guest ${customerId.slice(-4)}`, messages: [], lastMessage: '', lastTimestamp: Date.now(), unreadAdminCount: 0, unreadUserCount: 0 }; isNew = true; }
+    const updatedSession: ChatSession = { ...currentSession, messages: [...currentSession.messages, newMessage], lastMessage: text, lastTimestamp: Date.now(), unreadAdminCount: sender === 'user' ? (currentSession.unreadAdminCount || 0) + 1 : (currentSession.unreadAdminCount || 0), unreadUserCount: sender === 'admin' ? (currentSession.unreadUserCount || 0) + 1 : (currentSession.unreadUserCount || 0) };
+    if (isNew) setChatSessions(prev => [...prev, updatedSession]); else setChatSessions(prev => prev.map(s => s.customerId === customerId ? updatedSession : s));
     await saveChatSession(updatedSession);
   };
 
-  // =========================================================================
-  // --- FITUR BARU: HANDLER SCAN RESI & IMPORT CSV ---
-  // =========================================================================
-  
+  // --- LOGIC HANDLE SCAN RESI & IMPORT CSV ---
   const handleSaveScannedOrder = async (data: ResiAnalysisResult | any) => {
-    // Validasi data
-    if (!data.items || data.items.length === 0) {
-        showToast("Gagal: Tidak ada item terdeteksi.", 'error');
-        return;
-    }
-
+    if (!data.items || data.items.length === 0) { showToast("Gagal: Tidak ada item terdeteksi.", 'error'); return; }
     setLoading(true);
 
-    // 1. Format Nama Pelanggan Lengkap
+    // Format Nama Pelanggan Lengkap (Agar terlihat di Order Management)
     let finalCustomerName = data.customerName || 'Pelanggan';
     if (data.resi) finalCustomerName += ` (Resi: ${data.resi})`;
     if (data.ecommerce) finalCustomerName += ` (Via: ${data.ecommerce})`;
@@ -349,14 +256,10 @@ const AppContent: React.FC = () => {
     const matchedCartItems: CartItem[] = [];
     const unmatchedItems: string[] = [];
 
-    // 2. LOGIKA PENCOCOKAN SKU (CORE LOGIC)
+    // --- MATCHING LOGIC (SKU Induk -> Database SKU) ---
     for (const scannedItem of data.items) {
-        if (!scannedItem.sku) {
-            unmatchedItems.push(`${scannedItem.name} (Tanpa SKU)`);
-            continue;
-        }
-
-        // Cari di database berdasarkan SKU (Exact Match) ATAU Part Number
+        if (!scannedItem.sku) { unmatchedItems.push(`${scannedItem.name} (Tanpa SKU)`); continue; }
+        // Cari barang di database yang SKU-nya COCOK (Case Insensitive)
         const foundItem = items.find(i => 
             (i.sku && i.sku.trim().toLowerCase() === scannedItem.sku.trim().toLowerCase()) || 
             (i.partNumber && i.partNumber.toLowerCase() === scannedItem.sku.trim().toLowerCase())
@@ -366,95 +269,63 @@ const AppContent: React.FC = () => {
             matchedCartItems.push({
                 ...foundItem,
                 cartQuantity: scannedItem.qty || 1,
-                // Gunakan harga database agar konsisten, kecuali mau override
-                customPrice: foundItem.price 
+                customPrice: foundItem.price // Selalu pakai harga database
             });
         } else {
             unmatchedItems.push(`${scannedItem.name} (SKU: ${scannedItem.sku})`);
         }
     }
 
-    // 3. Jika tidak ada yang cocok
     if (matchedCartItems.length === 0) {
-        showToast(`Gagal! ${unmatchedItems.length} barang tidak ditemukan di sistem. Periksa SKU.`, 'error');
+        showToast(`Gagal! ${unmatchedItems.length} barang tidak ditemukan di sistem. Periksa SKU Induk.`, 'error');
         setLoading(false);
         return;
     }
 
-    // 4. Hitung Total & Buat Order
     const totalAmount = matchedCartItems.reduce((sum, item) => sum + (item.price * item.cartQuantity), 0);
+    const newOrder: Order = { id: generateId(), customerName: finalCustomerName, items: matchedCartItems, totalAmount: totalAmount, status: 'pending', timestamp: Date.now() };
 
-    const newOrder: Order = {
-        id: generateId(),
-        customerName: finalCustomerName,
-        items: matchedCartItems,
-        totalAmount: totalAmount,
-        status: 'pending', // Masuk ke Pesanan Baru
-        timestamp: Date.now()
-    };
-
-    // 5. Simpan & Update Stok
-    const success = await saveOrder(newOrder);
-
-    if (success) {
+    if (await saveOrder(newOrder)) {
         for (const item of matchedCartItems) {
             const currentItem = await getItemById(item.id);
             if (currentItem) {
                 const qtySold = item.cartQuantity;
-                const updateData = { 
-                    ...currentItem,
-                    qtyOut: (currentItem.qtyOut || 0) + qtySold,
-                    quantity: Math.max(0, currentItem.quantity - qtySold),
-                    lastUpdated: Date.now()
-                };
+                const updateData = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                 await updateInventory(updateData);
+                
+                // --- PERBAIKAN DI SINI (FORMAT REASON) ---
+                // Format disesuaikan dengan Dashboard.tsx agar terbaca di Detail Riwayat
                 await addHistoryLog({
                     id: generateId(), itemId: item.id, partNumber: item.partNumber, name: item.name,
                     type: 'out', quantity: qtySold, previousStock: currentItem.quantity, currentStock: updateData.quantity,
-                    price: item.price, totalPrice: item.price * qtySold,
-                    timestamp: Date.now(), reason: `Scan Resi: ${data.resi} (${data.ecommerce})`
+                    price: item.price, totalPrice: item.price * qtySold, timestamp: Date.now(), 
+                    // Format khusus yang dibaca oleh Dashboard: (Resi: ...) (Via: ...)
+                    reason: `Scan Resi (Resi: ${data.resi || '-'}) (Via: ${data.ecommerce || '-'})`
                 });
+                // ----------------------------------------
             }
         }
         
-        if (unmatchedItems.length > 0) {
-            showToast(`Sukses Sebagian! ${unmatchedItems.length} SKU dilewati (tidak dikenal).`, 'error');
-        } else {
-            showToast('Pesanan Berhasil Disimpan & Stok Berkurang!', 'success');
-        }
+        if (unmatchedItems.length > 0) showToast(`Sukses Sebagian! ${unmatchedItems.length} SKU dilewati.`, 'error');
+        else showToast('Pesanan Berhasil Disimpan!', 'success');
         
         if (activeView === 'scan') setActiveView('orders');
         await refreshData();
-    } else {
-        showToast('Gagal menyimpan pesanan ke database', 'error');
-    }
+    } else { showToast('Gagal menyimpan pesanan', 'error'); }
     setLoading(false);
   };
 
-  // Handler untuk Import Massal CSV
   const handleBulkSave = async (ordersList: any[]) => {
     setLoading(true);
     let successCount = 0;
-    
-    // Proses satu per satu agar urutan history rapi
     for (const orderData of ordersList) {
-        // Kita panggil fungsi save di atas, tapi kita handle errornya sendiri agar tidak stop loop
-        try {
-            // Re-use logic di atas (refactor sedikit bisa lebih baik, tapi call langsung juga oke)
-            // Kita inject logic khusus untuk bypass state loading UI yang berkedip
-            await handleSaveScannedOrder(orderData);
-            successCount++;
-        } catch (e) {
-            console.error("Gagal import order:", orderData.resi, e);
-        }
+        try { await handleSaveScannedOrder(orderData); successCount++; } catch (e) { console.error("Gagal import:", orderData.resi); }
     }
-    
-    showToast(`Proses Selesai! ${successCount} pesanan berhasil diproses.`, 'success');
+    showToast(`Proses Selesai! ${successCount} pesanan diproses.`, 'success');
     setActiveView('orders');
     setLoading(false);
   };
 
-  // --- UI UTAMA ---
   const pendingOrdersCount = orders.filter(o => o.status === 'pending').length;
   const myPendingOrdersCount = orders.filter(o => o.customerName === loginName && o.status === 'pending').length;
   const unreadChatCount = chatSessions.reduce((sum, s) => sum + (s.unreadAdminCount || 0), 0);
@@ -486,8 +357,6 @@ const AppContent: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
-      
-      {/* HEADER NAVIGASI */}
       <div className="bg-white border-b px-4 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm backdrop-blur-md bg-white/90">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')}>
               <div className={`${isAdmin ? 'bg-purple-600' : 'bg-blue-600'} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform`}>{isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />}</div>
@@ -500,8 +369,6 @@ const AppContent: React.FC = () => {
           </div>
           <div className="flex items-center gap-2">
               <button onClick={() => { refreshData(); showToast('Data direfresh'); }} className="p-2 text-gray-400 hover:bg-gray-100 hover:text-blue-600 rounded-full transition-colors" title="Refresh Data"><RefreshCw size={20} /></button>
-              
-              {/* MENU ADMIN */}
               {isAdmin ? (
                   <>
                     <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><ShoppingCart size={18}/> Beranda</button>
@@ -511,7 +378,6 @@ const AppContent: React.FC = () => {
                     <button onClick={() => setActiveView('chat')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='chat'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><MessageSquare size={18}/> Chat {unreadChatCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{unreadChatCount}</span>}</button>
                   </>
               ) : (
-              // MENU CUSTOMER
                   <>
                     <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-blue-50 text-blue-700 ring-1 ring-blue-200':'text-gray-500 hover:bg-gray-50'}`}><Home size={18}/> Belanja</button>
                     <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-blue-50 text-blue-700 ring-1 ring-blue-200':'text-gray-500 hover:bg-gray-50'}`}><ClipboardList size={18}/> Pesanan {myPendingOrdersCount > 0 && <span className="bg-orange-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{myPendingOrdersCount}</span>}</button>
@@ -522,64 +388,13 @@ const AppContent: React.FC = () => {
               <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 text-gray-500 hover:bg-red-50 hover:text-red-600 rounded-lg transition-all" title="Keluar"><span className="text-xs font-semibold hidden lg:inline">{loginName}</span><LogOut size={20} /></button>
           </div>
       </div>
-
-      {/* MAIN CONTENT AREA */}
       <main className="flex-1 max-w-7xl mx-auto w-full p-4 pb-24 md:pb-10">
-        
-        {/* VIEW: BELANJA */}
-        {activeView === 'shop' && 
-            <ShopView 
-                items={items} 
-                cart={cart} 
-                isAdmin={isAdmin}
-                isKingFano={isKingFano}
-                bannerUrl={bannerUrl} 
-                onUpdateBanner={handleUpdateBanner} 
-                onAddToCart={addToCart} 
-                onRemoveFromCart={(id)=>setCart(c=>c.filter(x=>x.id!==id))} 
-                onUpdateCartItem={updateCartItem}
-                onCheckout={doCheckout} 
-            />
-        }
-
-        {/* VIEW: SCAN RESI (BARU) */}
-        {activeView === 'scan' && (
-            <ScanResiView 
-                onSave={handleSaveScannedOrder}
-                onSaveBulk={handleBulkSave} 
-                isProcessing={loading} 
-            />
-        )}
-
-        {/* VIEW: CHAT */}
-        {activeView === 'chat' && (
-            <div className="max-w-2xl mx-auto h-[calc(100vh-140px)]">
-                <ChatView 
-                    isAdmin={isAdmin} 
-                    currentCustomerId={isAdmin ? 'ADMIN' : myCustomerId} 
-                    chatSessions={chatSessions} 
-                    onSendMessage={handleSendMessage} 
-                    onMarkAsRead={(cid)=>setChatSessions(prev=>prev.map(s=>s.customerId===cid?{...s, [isAdmin?'unreadAdminCount':'unreadUserCount']:0}:s))} 
-                />
-            </div>
-        )}
-
-        {/* VIEW: INVENTORY / DASHBOARD */}
-        {activeView === 'inventory' && isAdmin && (
-            isEditing 
-                ? <ItemForm initialData={editItem || undefined} onSubmit={handleSaveItem} onCancel={()=>{setIsEditing(false); setEditItem(null)}} /> 
-                : <Dashboard items={items} orders={orders} history={history} onViewOrders={() => setActiveView('orders')} onAddNew={()=>{setEditItem(null); setIsEditing(true)}} onEdit={(i)=>{setEditItem(i); setIsEditing(true)}} onDelete={handleDelete} />
-        )}
-
-        {/* VIEW: PESANAN */}
-        {activeView === 'orders' && (
-            isAdmin 
-            ? <OrderManagement orders={orders} onUpdateStatus={handleUpdateStatus} /> 
-            : <CustomerOrderView orders={orders} currentCustomerName={loginName} />
-        )}
+        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onUpdateBanner={handleUpdateBanner} onAddToCart={addToCart} onRemoveFromCart={(id)=>setCart(c=>c.filter(x=>x.id!==id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} />}
+        {activeView === 'scan' && <ScanResiView onSave={handleSaveScannedOrder} onSaveBulk={handleBulkSave} isProcessing={loading} />}
+        {activeView === 'chat' && <div className="max-w-2xl mx-auto h-[calc(100vh-140px)]"><ChatView isAdmin={isAdmin} currentCustomerId={isAdmin ? 'ADMIN' : myCustomerId} chatSessions={chatSessions} onSendMessage={handleSendMessage} onMarkAsRead={(cid)=>setChatSessions(prev=>prev.map(s=>s.customerId===cid?{...s, [isAdmin?'unreadAdminCount':'unreadUserCount']:0}:s))} /></div>}
+        {activeView === 'inventory' && isAdmin && (isEditing ? <ItemForm initialData={editItem || undefined} onSubmit={handleSaveItem} onCancel={()=>{setIsEditing(false); setEditItem(null)}} /> : <Dashboard items={items} orders={orders} history={history} onViewOrders={() => setActiveView('orders')} onAddNew={()=>{setEditItem(null); setIsEditing(true)}} onEdit={(i)=>{setEditItem(i); setIsEditing(true)}} onDelete={handleDelete} />)}
+        {activeView === 'orders' && (isAdmin ? <OrderManagement orders={orders} onUpdateStatus={handleUpdateStatus} /> : <CustomerOrderView orders={orders} currentCustomerName={loginName} />)}
       </main>
-
-      {/* MOBILE BOTTOM NAVIGATION */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pb-safe z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
         <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-3'} h-16`}>
             {isAdmin ? (
@@ -594,10 +409,7 @@ const AppContent: React.FC = () => {
                 <>
                     <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}><Home size={22} className={activeView==='shop'?'fill-blue-100':''} /><span className="text-[10px] font-medium">Belanja</span></button>
                     <button onClick={()=>setActiveView('orders')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='orders'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}>
-                        <div className="relative">
-                            <ClipboardList size={22} className={activeView==='orders'?'fill-blue-100':''} />
-                            {myPendingOrdersCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-white"></span>}
-                        </div>
+                        <div className="relative"><ClipboardList size={22} className={activeView==='orders'?'fill-blue-100':''} />{myPendingOrdersCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-white"></span>}</div>
                         <span className="text-[10px] font-medium">Pesanan</span>
                     </button>
                     <button onClick={()=>setActiveView('chat')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='chat'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}><MessageSquare size={22} className={activeView==='chat'?'fill-blue-100':''} /><span className="text-[10px] font-medium">Chat</span></button>
