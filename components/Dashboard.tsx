@@ -1,17 +1,12 @@
 // FILE: src/components/Dashboard.tsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
-// PERBAIKAN: Pastikan import dari supabaseService
 import { fetchInventoryPaginated, fetchInventoryStats } from '../services/supabaseService';
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
   ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin, FileText,
   LayoutGrid, List, ShoppingBag, History, X, ChevronLeft, Loader2
 } from 'lucide-react';
-
-// ... (Sisa kode Dashboard.tsx tidak berubah, copy-paste dari sebelumnya atau biarkan jika sudah ada) ...
-// Karena kodenya panjang, saya singkat di sini. Yang penting adalah baris import di atas.
-// Pastikan tidak ada lagi "firebaseService" di seluruh file ini.
 
 interface DashboardProps {
   items: InventoryItem[]; 
@@ -116,7 +111,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </thead>
                     <tbody className="divide-y divide-gray-100 text-sm">
                         {filteredHistory.map((h) => {
-                            // MENGGUNAKAN HARGA DARI DB HISTORY
                             const price = h.price || 0; 
                             const total = h.totalPrice || (price * (Number(h.quantity) || 0));
                             const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
@@ -144,7 +138,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     );
   };
 
-  // --- ITEM HISTORY MODAL ---
+  // --- ITEM HISTORY MODAL (FIXED) ---
   const ItemHistoryModal = () => {
     if (!selectedItemHistory) return null;
     const itemHistory = history.filter(h => h.itemId === selectedItemHistory.id || h.partNumber === selectedItemHistory.partNumber).sort((a, b) => b.timestamp - a.timestamp);
@@ -182,7 +176,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         <td className={`p-3 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>{h.type === 'in' ? '+' : '-'}{h.quantity}</td>
                                         <td className="p-3 align-top text-right font-mono text-gray-600 text-xs">{formatRupiah(price)}</td>
                                         <td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(total)}</td>
-                                        <td className="p-3 align-top text-right font-mono text-gray-600">{h.currentStock}</td>
+                                        
+                                        {/* PERBAIKAN DI SINI: Handle jika stok null */}
+                                        <td className="p-3 align-top text-right font-mono text-gray-600">
+                                            {h.currentStock !== undefined && h.currentStock !== null ? h.currentStock : '-'}
+                                        </td>
+
                                         <td className="p-3 align-top text-gray-700"><div className="font-medium text-xs mb-1">{keterangan}</div>{resi !== '-' && (<div className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] border border-blue-100 mr-1">Resi: {resi}</div>)}{ecommerce !== '-' && (<div className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-100"><ShoppingBag size={8}/> {ecommerce}</div>)}</td>
                                     </tr>
                                 );
