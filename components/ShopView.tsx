@@ -1,7 +1,7 @@
 // FILE: src/components/ShopView.tsx
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { InventoryItem, CartItem } from '../types';
-import { fetchShopItems } from '../services/supabaseService'; // Import fungsi baru
+import { fetchShopItems } from '../services/firebaseService';
 import { ShoppingCart, Search, Plus, X, Tag, Car, Package, Camera, Loader2, Sparkles, LayoutGrid, List, Check, ZoomIn, Move, ChevronLeft, ChevronRight, ShoppingBag } from 'lucide-react';
 import { formatRupiah, compressImage } from '../utils';
 
