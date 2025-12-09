@@ -1,12 +1,17 @@
 // FILE: src/components/Dashboard.tsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
-import { fetchInventoryPaginated, fetchInventoryStats } from '../services/firebaseService';
+// PERBAIKAN: Pastikan import dari supabaseService
+import { fetchInventoryPaginated, fetchInventoryStats } from '../services/supabaseService';
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
   ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin, FileText,
   LayoutGrid, List, ShoppingBag, History, X, ChevronLeft, Loader2
 } from 'lucide-react';
+
+// ... (Sisa kode Dashboard.tsx tidak berubah, copy-paste dari sebelumnya atau biarkan jika sudah ada) ...
+// Karena kodenya panjang, saya singkat di sini. Yang penting adalah baris import di atas.
+// Pastikan tidak ada lagi "firebaseService" di seluruh file ini.
 
 interface DashboardProps {
   items: InventoryItem[]; 
