@@ -9,7 +9,7 @@ import { OrderManagement } from './components/OrderManagement';
 import { CustomerOrderView } from './components/CustomerOrderView';
 import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
 
-// IMPORT DARI SUPABASE SERVICE
+// IMPORT FROM SUPABASE SERVICE
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory,
   fetchOrders, saveOrder, updateOrderStatusService,
@@ -94,13 +94,13 @@ const AppContent: React.FC = () => {
 
     } catch (e) { 
         console.error("Gagal memuat data:", e); 
-        showToast("Gagal memuat data", 'error');
+        showToast("Gagal memuat data dari server", 'error');
     }
     setLoading(false);
   };
 
   const addNewHistory = async (newRecord: StockHistory) => {
-      // PENTING: Await agar proses simpan selesai
+      // PERBAIKAN: Await agar proses simpan selesai sebelum lanjut
       const success = await addHistoryLog(newRecord);
       if (success) {
           setHistory(prev => [newRecord, ...prev]);
@@ -202,7 +202,7 @@ const AppContent: React.FC = () => {
       if (!itemToDelete) return;
       if(confirm('Hapus Permanen?')) {
           setLoading(true);
-          const success = await deleteInventory(itemToDelete.id); // PENTING: Hapus by ID
+          const success = await deleteInventory(itemToDelete.id);
           if (success) { 
               showToast('Dihapus'); 
               refreshData();
@@ -219,7 +219,6 @@ const AppContent: React.FC = () => {
       showToast('Masuk keranjang');
   };
 
-  // --- LOGIKA UTAMA CHECKOUT (Perbaikan Stok Berkurang) ---
   const doCheckout = async (name: string) => {
       if (name !== loginName && !isAdmin) { setLoginName(name); localStorage.setItem('stockmaster_customer_name', name); }
 
@@ -234,7 +233,6 @@ const AppContent: React.FC = () => {
       if (orderSuccess) {
           // Loop untuk mengurangi stok setiap item
           for (const cartItem of cart) {
-              // Cari item terbaru dari state (untuk memastikan stok valid)
               const currentItem = items.find(i => i.id === cartItem.id);
               if (currentItem) {
                   const qtySold = cartItem.cartQuantity;
@@ -271,7 +269,7 @@ const AppContent: React.FC = () => {
           showToast('Pesanan berhasil! Stok berkurang.');
           setCart([]); 
           setActiveView('orders');
-          await refreshData(); // Refresh agar UI sinkron dengan DB
+          await refreshData();
       } else {
           showToast('Gagal membuat pesanan', 'error');
       }
