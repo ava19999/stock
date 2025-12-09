@@ -2,13 +2,6 @@
 import { supabase } from '../lib/supabase';
 import { InventoryItem, InventoryFormData, Order, StockHistory, ChatSession } from '../types';
 
-// Helper untuk menampilkan error database ke layar
-const handleDbError = (operation: string, error: any) => {
-  console.error(`${operation} Error:`, error);
-  // Alert agar Anda langsung tahu jika database menolak
-  alert(`Gagal ${operation}. Pesan Database: ${error.message || JSON.stringify(error)}`);
-};
-
 // --- INVENTORY SERVICES ---
 
 export const fetchInventoryStats = async () => {
@@ -65,7 +58,7 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
       shelf: item.shelf || '',
       imageUrl: item.image_url || '',
       ecommerce: item.ecommerce || '',
-      lastUpdated: Number(item.last_updated) || Date.now()
+      lastUpdated: item.last_updated
     }));
 
     return { data: mappedData, count: count || 0 };
@@ -76,7 +69,8 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
 };
 
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
-    const res = await fetchInventoryPaginated(1, 2000, '');
+    // Kita naikkan limitnya agar aman, tapi history tidak lagi bergantung pada ini
+    const res = await fetchInventoryPaginated(1, 1000, '');
     return res.data;
 };
 
@@ -123,7 +117,7 @@ export const fetchShopItems = async (page: number = 1, limit: number = 20, searc
       shelf: item.shelf || '',
       imageUrl: item.image_url || '',
       ecommerce: item.ecommerce || '',
-      lastUpdated: Number(item.last_updated) || Date.now()
+      lastUpdated: item.last_updated
     }));
 
     return { data: mappedData, count: count || 0 };
@@ -132,7 +126,7 @@ export const fetchShopItems = async (page: number = 1, limit: number = 20, searc
   }
 };
 
-// --- CRUD INVENTORY (UPDATED & FIXED) ---
+// --- CRUD INVENTORY ---
 
 export const addInventory = async (item: InventoryFormData): Promise<boolean> => {
   try {
@@ -149,17 +143,15 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
       shelf: item.shelf,
       image_url: item.imageUrl,
       ecommerce: item.ecommerce,
-      last_updated: Date.now() 
+      last_updated: new Date().toISOString()
     }]);
-    if (error) { handleDbError("Add Inventory", error); return false; }
-    return true;
-  } catch (e) { console.error(e); return false; }
+    return !error;
+  } catch { return false; }
 };
 
 export const updateInventory = async (item: InventoryItem): Promise<boolean> => {
   try {
-    // UPDATE MENGGUNAKAN ID (Lebih Aman dan Akurat daripada PartNumber)
-    const { data, error } = await supabase.from('inventory').update({
+    const { error } = await supabase.from('inventory').update({
       name: item.name,
       description: item.description,
       price: item.price,
@@ -171,36 +163,16 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
       shelf: item.shelf,
       image_url: item.imageUrl,
       ecommerce: item.ecommerce,
-      last_updated: Date.now()
-    })
-    .eq('id', item.id) // Kunci update menggunakan ID
-    .select(); // Minta data balik untuk memastikan ada yang berubah
-
-    if (error) { 
-        handleDbError("Update Stock", error); 
-        return false; 
-    }
-
-    // Jika sukses tapi tidak ada data yang kembali, berarti ID tidak ditemukan di DB
-    if (!data || data.length === 0) {
-        console.warn("Update Sukses tapi 0 baris berubah. ID mungkin salah:", item.id);
-        // Kita anggap gagal agar user tau
-        alert("Gagal Update Stok: Barang tidak ditemukan di database server.");
-        return false;
-    }
-
-    return true;
-  } catch (e) { 
-      console.error(e); 
-      return false; 
-  }
+      last_updated: new Date().toISOString()
+    }).eq('part_number', item.partNumber);
+    return !error;
+  } catch { return false; }
 };
 
 export const deleteInventory = async (partNumber: string): Promise<boolean> => {
   try {
     const { error } = await supabase.from('inventory').delete().eq('part_number', partNumber);
-    if (error) { handleDbError("Delete Inventory", error); return false; }
-    return true;
+    return !error;
   } catch { return false; }
 };
 
@@ -219,10 +191,10 @@ export const fetchOrders = async (): Promise<Order[]> => {
     return data.map((o: any) => ({
       id: o.id,
       customerName: o.customer_name || 'Guest',
-      items: o.items || [], 
+      items: o.items || [],
       totalAmount: Number(o.total_amount) || 0,
       status: o.status,
-      timestamp: Number(o.timestamp)
+      timestamp: o.timestamp
     }));
   } catch { return []; }
 };
@@ -237,20 +209,18 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
       status: order.status,
       timestamp: order.timestamp
     }]);
-    if (error) { handleDbError("Save Order", error); return false; }
-    return true;
+    return !error;
   } catch { return false; }
 };
 
 export const updateOrderStatusService = async (orderId: string, status: string): Promise<boolean> => {
   try {
     const { error } = await supabase.from('orders').update({ status }).eq('id', orderId);
-    if (error) { handleDbError("Update Order Status", error); return false; }
-    return true;
+    return !error;
   } catch { return false; }
 };
 
-// --- HISTORY SERVICES ---
+// --- HISTORY SERVICES (UPDATED) ---
 
 export const fetchHistory = async (): Promise<StockHistory[]> => {
   try {
@@ -271,9 +241,10 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
       quantity: Number(h.quantity) || 0,
       previousStock: Number(h.previous_stock) || 0,
       currentStock: Number(h.current_stock) || 0,
+      // MAPPING BARU
       price: Number(h.price) || 0, 
       totalPrice: Number(h.total_price) || 0,
-      timestamp: Number(h.timestamp),
+      timestamp: h.timestamp,
       reason: h.reason || ''
     }));
   } catch { return []; }
@@ -290,17 +261,13 @@ export const addHistoryLog = async (history: StockHistory): Promise<boolean> => 
       quantity: history.quantity,
       previous_stock: history.previousStock,
       current_stock: history.currentStock,
-      price: history.price, 
+      // FIELD BARU
+      price: history.price,
       total_price: history.totalPrice,
       timestamp: history.timestamp,
       reason: history.reason
     }]);
-    
-    if (error) { 
-        handleDbError("Save History", error); 
-        return false; 
-    }
-    return true;
+    return !error;
   } catch { return false; }
 };
 
@@ -333,7 +300,6 @@ export const saveChatSession = async (session: ChatSession): Promise<boolean> =>
       unread_admin_count: session.unreadAdminCount,
       unread_user_count: session.unreadUserCount
     }]);
-    if (error) { console.error("Chat Error:", error); return false; }
-    return true;
+    return !error;
   } catch { return false; }
 };

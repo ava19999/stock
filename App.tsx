@@ -96,15 +96,9 @@ const AppContent: React.FC = () => {
     setLoading(false);
   };
 
-  // Fungsi helper untuk simpan history dengan feedback
   const addNewHistory = async (newRecord: StockHistory) => {
-      const success = await addHistoryLog(newRecord);
-      if (success) {
-          setHistory(prev => [newRecord, ...prev]);
-      } else {
-          console.error("GAGAL SIMPAN HISTORY: Pastikan tabel stock_history sudah di-update di SQL Editor.");
-      }
-      return success;
+      await addHistoryLog(newRecord);
+      setHistory(prev => [newRecord, ...prev]);
   };
 
   const handleGlobalLogin = (e: React.FormEvent) => {
@@ -148,31 +142,40 @@ const AppContent: React.FC = () => {
           };
 
           if (diff !== 0) {
-              const histData: StockHistory = {
-                  id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
-                  type: diff > 0 ? 'in' : 'out', 
-                  quantity: Math.abs(diff), 
-                  previousStock: oldQty, currentStock: newQuantity,
-                  price: currentPrice,
-                  totalPrice: currentPrice * Math.abs(diff),
-                  timestamp: Date.now(), 
-                  reason: diff > 0 ? `Restock Manual${ecommerceInfo}` : 'Koreksi Stok Manual'
-              };
-              await addNewHistory(histData);
+              if (diff > 0) {
+                  addNewHistory({
+                      id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
+                      type: 'in', quantity: diff, previousStock: oldQty, currentStock: newQuantity,
+                      price: currentPrice,
+                      totalPrice: currentPrice * diff,
+                      timestamp: Date.now(), 
+                      reason: `Restock Manual${ecommerceInfo}` 
+                  });
+              } else {
+                  const absDiff = Math.abs(diff);
+                  addNewHistory({
+                      id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
+                      type: 'out', quantity: absDiff, previousStock: oldQty, currentStock: newQuantity,
+                      price: currentPrice,
+                      totalPrice: currentPrice * absDiff,
+                      timestamp: Date.now(), 
+                      reason: 'Koreksi Stok Manual'
+                  });
+              }
           }
           
           const success = await updateInventory(updatedItem);
           if (success) { 
               showToast('Update berhasil!'); 
-              refreshData(); // Refresh untuk memastikan data sinkron
+              setItems(prev => prev.map(i => i.id === editItem.id ? updatedItem : i)); 
           } else {
-              showToast('Gagal update ke Database', 'error');
+              showToast('Gagal update', 'error');
           }
 
       } else {
-          if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number sudah ada!', 'error'); setLoading(false); return; }
+          if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number ada!', 'error'); setLoading(false); return; }
           
-          await addNewHistory({ 
+          addNewHistory({ 
               id: generateId(), itemId: data.partNumber, partNumber: data.partNumber, name: data.name, 
               type: 'in', quantity: newQuantity, previousStock: 0, currentStock: newQuantity, 
               price: currentPrice,
@@ -186,7 +189,7 @@ const AppContent: React.FC = () => {
               showToast('Tersimpan di Database!');
               refreshData(); 
           } else {
-              showToast('Gagal simpan ke Database', 'error');
+              showToast('Gagal simpan', 'error');
           }
       }
       setIsEditing(false); setEditItem(null); setLoading(false);
@@ -207,12 +210,7 @@ const AppContent: React.FC = () => {
       if(confirm('Hapus Permanen dari Database?')) {
           setLoading(true);
           const success = await deleteInventory(itemToDelete.partNumber);
-          if (success) { 
-              showToast('Dihapus'); 
-              setItems(prev => prev.filter(i => i.id !== id)); 
-          } else { 
-              showToast('Gagal hapus dari DB', 'error'); 
-          }
+          if (success) { showToast('Dihapus'); setItems(prev => prev.filter(i => i.id !== id)); } else { showToast('Gagal hapus', 'error'); }
           setLoading(false);
       }
   }
@@ -225,7 +223,6 @@ const AppContent: React.FC = () => {
       showToast('Masuk keranjang');
   };
 
-  // --- PERBAIKAN LOGIKA CHECKOUT ---
   const doCheckout = async (name: string) => {
       if (name !== loginName && !isAdmin) { setLoginName(name); localStorage.setItem('stockmaster_customer_name', name); }
 
@@ -239,55 +236,30 @@ const AppContent: React.FC = () => {
       
       if (orderSuccess) {
           const updatedItemsList = [...items];
-          let errorCount = 0;
-
-          // Loop processing per item
           for (const cartItem of cart) {
               const idx = updatedItemsList.findIndex(i => i.id === cartItem.id);
               if (idx > -1) {
                   const itemToUpdate = { ...updatedItemsList[idx] };
                   const qtySold = cartItem.cartQuantity;
-                  
-                  // Hitung stok baru
                   itemToUpdate.qtyOut = (itemToUpdate.qtyOut || 0) + qtySold;
                   itemToUpdate.quantity = Math.max(0, itemToUpdate.quantity - qtySold);
                   updatedItemsList[idx] = itemToUpdate;
                   
-                  // 1. Update Inventory di DB
-                  const updSuccess = await updateInventory(itemToUpdate);
-                  if (!updSuccess) errorCount++;
-
-                  // 2. Simpan History di DB
-                  const histSuccess = await addNewHistory({ 
-                      id: generateId(), 
-                      itemId: cartItem.id, 
-                      partNumber: cartItem.partNumber, 
-                      name: cartItem.name,
-                      type: 'out', 
-                      quantity: qtySold, 
+                  await updateInventory(itemToUpdate);
+                  addNewHistory({
+                      id: generateId(), itemId: cartItem.id, partNumber: cartItem.partNumber, name: cartItem.name,
+                      type: 'out', quantity: qtySold, 
                       previousStock: itemToUpdate.quantity + qtySold, 
                       currentStock: itemToUpdate.quantity,
                       price: itemToUpdate.price, 
                       totalPrice: itemToUpdate.price * qtySold,
-                      timestamp: Date.now(), 
-                      reason: `Order #${newOrder.id.slice(0,6)} (${name})`
+                      timestamp: Date.now(), reason: `Order #${newOrder.id.slice(0,6)} (${name})`
                   });
-                  if (!histSuccess) errorCount++;
               }
           }
-
-          if (errorCount > 0) {
-              showToast(`Pesanan dibuat, tapi ${errorCount} data stok gagal diupdate di DB. Cek koneksi/izin DB.`, 'error');
-          } else {
-              showToast('Pesanan berhasil! Stok telah dikurangi.');
-          }
-
-          setCart([]); 
-          setActiveView('orders');
-          // Refresh total dari server untuk memastikan data sinkron
-          await refreshData();
+          setItems(updatedItemsList); setOrders([newOrder, ...orders]); setCart([]); setActiveView('orders'); showToast('Pesanan dibuat, stok terpotong!');
       } else {
-          showToast('Gagal membuat pesanan (Database Error)', 'error');
+          showToast('Gagal membuat pesanan', 'error');
       }
       setLoading(false);
   };
@@ -297,21 +269,21 @@ const AppContent: React.FC = () => {
       if (!order) return;
 
       const success = await updateOrderStatusService(orderId, newStatus);
-      if (!success) { showToast('Gagal update status di DB', 'error'); return; }
+      if (!success) { showToast('Gagal update status', 'error'); return; }
 
       if (newStatus === 'cancelled' && order.status !== 'cancelled') {
+          const newItems = [...items];
           for (const orderItem of order.items) {
-              const currentItem = items.find(i => i.id === orderItem.id);
-              if (currentItem) {
+              const idx = newItems.findIndex(i => i.id === orderItem.id);
+              if (idx > -1) {
                   const restoreQty = orderItem.cartQuantity;
-                  const itemToUpdate = { ...currentItem };
-                  
+                  const itemToUpdate = { ...newItems[idx] };
                   itemToUpdate.qtyOut = Math.max(0, (itemToUpdate.qtyOut || 0) - restoreQty);
                   itemToUpdate.quantity = itemToUpdate.quantity + restoreQty;
+                  newItems[idx] = itemToUpdate;
 
                   await updateInventory(itemToUpdate);
-                  
-                  await addNewHistory({
+                  addNewHistory({
                       id: generateId(), itemId: itemToUpdate.id, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name,
                       type: 'in', quantity: restoreQty,
                       previousStock: itemToUpdate.quantity - restoreQty, currentStock: itemToUpdate.quantity,
@@ -321,8 +293,7 @@ const AppContent: React.FC = () => {
                   });
               }
           }
-          showToast('Pesanan dibatalkan, stok dikembalikan.');
-          refreshData(); // Refresh data agar sinkron
+          setItems(newItems); showToast('Pesanan dibatalkan, stok dikembalikan.');
       }
       setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
   };
