@@ -1,7 +1,6 @@
 // FILE: src/components/Dashboard.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
-// Menggunakan service Supabase
 import { fetchInventoryPaginated, fetchInventoryStats } from '../services/supabaseService';
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
@@ -34,7 +33,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [showHistoryDetail, setShowHistoryDetail] = useState<'in' | 'out' | null>(null);
   const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null);
   
-  // State baru untuk pencarian di modal riwayat item
+  // State untuk pencarian di modal riwayat item
   const [itemHistorySearch, setItemHistorySearch] = useState('');
   
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -99,65 +98,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return { resi, ecommerce, keterangan: keterangan.trim() };
   };
 
-  // --- HISTORY MODAL (GLOBAL) ---
-  const HistoryModal = () => {
-    if (!showHistoryDetail) return null;
-    const type = showHistoryDetail;
-    const filteredHistory = history.filter(h => h.type === type).sort((a, b) => b.timestamp - a.timestamp).slice(0, 100);
-    
-    return (
-      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
-        <div className="bg-white w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 duration-300 flex flex-col max-h-[90vh]">
-          <div className="p-4 border-b flex justify-between items-center bg-gray-50">
-            <h3 className="font-bold text-gray-800 flex items-center gap-2">
-              {type === 'in' ? <TrendingUp size={18} className="text-green-600"/> : <TrendingDown size={18} className="text-red-600"/>}
-              Detail Riwayat {type === 'in' ? 'Masuk' : 'Keluar'}
-            </h3>
-            <button onClick={() => setShowHistoryDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm font-medium">Tutup</button>
-          </div>
-          <div className="overflow-auto flex-1 p-0">
-            {filteredHistory.length === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Belum ada riwayat.</div> : (
-                <table className="w-full text-left border-collapse">
-                    <thead className="bg-gray-100 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
-                        <tr><th className="p-3 border-b border-gray-200 w-28">Tanggal</th><th className="p-3 border-b border-gray-200 w-32">Resi</th><th className="p-3 border-b border-gray-200 w-32">E-Commerce</th><th className="p-3 border-b border-gray-200 w-32">No. Part</th><th className="p-3 border-b border-gray-200">Nama Barang</th><th className="p-3 border-b border-gray-200 text-right w-20">Qty</th><th className="p-3 border-b border-gray-200 text-right w-32">Harga Satuan</th><th className="p-3 border-b border-gray-200 text-right w-32">Total Harga</th>{type === 'in' && <th className="p-3 border-b border-gray-200 w-48">Keterangan</th>}</tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 text-sm">
-                        {filteredHistory.map((h) => {
-                            const price = h.price || 0; 
-                            const total = h.totalPrice || (price * (Number(h.quantity) || 0));
-                            const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
-                            
-                            return (
-                                <tr key={h.id} className="hover:bg-blue-50 transition-colors">
-                                    <td className="p-3 text-gray-600 whitespace-nowrap align-top"><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div></td>
-                                    <td className="p-3 align-top"><span className={`inline-block px-2 py-1 rounded text-xs font-medium ${resi !== '-' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-300'}`}>{resi}</span></td>
-                                    <td className="p-3 align-top"><span className={`inline-block px-2 py-1 rounded text-xs font-medium flex items-center gap-1 w-fit ${ecommerce !== '-' ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'text-gray-300'}`}>{ecommerce !== '-' && <ShoppingBag size={10} />}{ecommerce}</span></td>
-                                    <td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber || '-'}</td>
-                                    <td className="p-3 font-medium text-gray-800 max-w-[200px] align-top"><div className="line-clamp-2">{h.name || 'Unknown Item'}</div></td>
-                                    <td className={`p-3 text-right font-bold align-top ${type==='in'?'text-green-600':'text-red-600'}`}>{type==='in' ? '+' : '-'}{h.quantity}</td>
-                                    <td className="p-3 text-right text-gray-600 font-mono align-top text-xs">{formatRupiah(price)}</td>
-                                    <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">{formatRupiah(total)}</td>
-                                    {type === 'in' && <td className="p-3 align-top text-xs">{keterangan}</td>}
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // --- ITEM HISTORY MODAL (PERBAIKAN FITUR SEARCH) ---
-  const ItemHistoryModal = () => {
-    if (!selectedItemHistory) return null;
+  // --- LOGIKA FILTER ITEM HISTORY (DIPINDAHKAN KE SINI AGAR TIDAK RE-RENDER INPUT) ---
+  const filteredItemHistory = useMemo(() => {
+    if (!selectedItemHistory) return [];
     
     // 1. Ambil history untuk item ini
-    let itemHistory = history.filter(h => h.itemId === selectedItemHistory.id || h.partNumber === selectedItemHistory.partNumber).sort((a, b) => b.timestamp - a.timestamp);
+    let itemHistory = history.filter(h => h.itemId === selectedItemHistory.id || h.partNumber === selectedItemHistory.partNumber)
+                             .sort((a, b) => b.timestamp - a.timestamp);
 
-    // 2. Filter berdasarkan pencarian (Nama Pembeli / Resi / E-Commerce)
+    // 2. Filter berdasarkan pencarian
     if (itemHistorySearch.trim() !== '') {
         const lowerSearch = itemHistorySearch.toLowerCase();
         itemHistory = itemHistory.filter(h => {
@@ -166,68 +115,59 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 keterangan.toLowerCase().includes(lowerSearch) || 
                 resi.toLowerCase().includes(lowerSearch) || 
                 ecommerce.toLowerCase().includes(lowerSearch) ||
-                h.reason.toLowerCase().includes(lowerSearch) // Cari di raw string juga
+                h.reason.toLowerCase().includes(lowerSearch)
             );
         });
     }
+    return itemHistory;
+  }, [history, selectedItemHistory, itemHistorySearch]);
 
-    return (
-      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-        <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-            {/* Header Modal */}
-            <div className="p-4 border-b flex justify-between items-start bg-gray-50">
-                <div className="flex-1">
-                    <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2"><History size={20} className="text-blue-600"/> Riwayat Transaksi Barang</h3>
-                    <p className="text-sm text-gray-500 mt-1 line-clamp-1">{selectedItemHistory.name || 'Tanpa Nama'}</p>
-                    <div className="flex gap-2 mt-2">
-                        <span className="text-xs bg-gray-200 px-2 py-0.5 rounded text-gray-700 font-mono">{selectedItemHistory.partNumber || '-'}</span>
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">Sisa Stok: {selectedItemHistory.quantity}</span>
-                    </div>
-                </div>
-                <button onClick={() => setSelectedItemHistory(null)} className="p-1 hover:bg-gray-200 rounded-full transition-colors ml-4"><X size={24} className="text-gray-500"/></button>
+  // --- LOGIKA FILTER GLOBAL HISTORY ---
+  const filteredGlobalHistory = useMemo(() => {
+    if (!showHistoryDetail) return [];
+    return history.filter(h => h.type === showHistoryDetail)
+                  .sort((a, b) => b.timestamp - a.timestamp)
+                  .slice(0, 100);
+  }, [history, showHistoryDetail]);
+
+
+  return (
+    <div className="space-y-4 pb-24">
+      
+      {/* --- GLOBAL HISTORY MODAL --- */}
+      {showHistoryDetail && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="bg-white w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 duration-300 flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b flex justify-between items-center bg-gray-50">
+                <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                {showHistoryDetail === 'in' ? <TrendingUp size={18} className="text-green-600"/> : <TrendingDown size={18} className="text-red-600"/>}
+                Detail Riwayat {showHistoryDetail === 'in' ? 'Masuk' : 'Keluar'}
+                </h3>
+                <button onClick={() => setShowHistoryDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm font-medium">Tutup</button>
             </div>
-
-            {/* Kolom Pencarian Baru */}
-            <div className="p-3 bg-white border-b border-gray-100">
-                <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                    <input 
-                        type="text" 
-                        placeholder="Cari Pembeli, No. Resi, atau E-Commerce..." 
-                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                        value={itemHistorySearch}
-                        onChange={(e) => setItemHistorySearch(e.target.value)}
-                    />
-                </div>
-            </div>
-
-            {/* Tabel Riwayat */}
             <div className="overflow-auto flex-1 p-0">
-                {itemHistory.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-                        <History size={48} className="opacity-20 mb-3"/>
-                        <p>{itemHistorySearch ? 'Tidak ditemukan data sesuai pencarian' : 'Belum ada riwayat transaksi'}</p>
-                    </div>
-                ) : (
+                {filteredGlobalHistory.length === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Belum ada riwayat.</div> : (
                     <table className="w-full text-left border-collapse">
-                        <thead className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
-                            <tr><th className="p-3 border-b border-gray-200 w-32">Tanggal</th><th className="p-3 border-b border-gray-200 w-24 text-center">Tipe</th><th className="p-3 border-b border-gray-200 w-20 text-right">Jml</th><th className="p-3 border-b border-gray-200 w-28 text-right">Harga</th><th className="p-3 border-b border-gray-200 w-28 text-right">Total</th><th className="p-3 border-b border-gray-200 w-24 text-right">Stok Akhir</th><th className="p-3 border-b border-gray-200">Keterangan / Resi</th></tr>
+                        <thead className="bg-gray-100 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
+                            <tr><th className="p-3 border-b border-gray-200 w-28">Tanggal</th><th className="p-3 border-b border-gray-200 w-32">Resi</th><th className="p-3 border-b border-gray-200 w-32">E-Commerce</th><th className="p-3 border-b border-gray-200 w-32">No. Part</th><th className="p-3 border-b border-gray-200">Nama Barang</th><th className="p-3 border-b border-gray-200 text-right w-20">Qty</th><th className="p-3 border-b border-gray-200 text-right w-32">Harga Satuan</th><th className="p-3 border-b border-gray-200 text-right w-32">Total Harga</th>{showHistoryDetail === 'in' && <th className="p-3 border-b border-gray-200 w-48">Keterangan</th>}</tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 text-sm">
-                            {itemHistory.map(h => {
-                                const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
-                                const price = h.price || 0;
+                            {filteredGlobalHistory.map((h) => {
+                                const price = h.price || 0; 
                                 const total = h.totalPrice || (price * (Number(h.quantity) || 0));
-
+                                const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
+                                
                                 return (
-                                    <tr key={h.id} className="hover:bg-gray-50 transition-colors">
-                                        <td className="p-3 align-top text-gray-600"><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div></td>
-                                        <td className="p-3 align-top text-center"><span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${h.type === 'in' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{h.type === 'in' ? 'Masuk' : 'Keluar'}</span></td>
-                                        <td className={`p-3 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>{h.type === 'in' ? '+' : '-'}{h.quantity}</td>
-                                        <td className="p-3 align-top text-right font-mono text-gray-600 text-xs">{formatRupiah(price)}</td>
-                                        <td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(total)}</td>
-                                        <td className="p-3 align-top text-right font-mono text-gray-600">{h.currentStock}</td>
-                                        <td className="p-3 align-top text-gray-700"><div className="font-medium text-xs mb-1">{keterangan}</div>{resi !== '-' && (<div className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] border border-blue-100 mr-1">Resi: {resi}</div>)}{ecommerce !== '-' && (<div className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-100"><ShoppingBag size={8}/> {ecommerce}</div>)}</td>
+                                    <tr key={h.id} className="hover:bg-blue-50 transition-colors">
+                                        <td className="p-3 text-gray-600 whitespace-nowrap align-top"><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div></td>
+                                        <td className="p-3 align-top"><span className={`inline-block px-2 py-1 rounded text-xs font-medium ${resi !== '-' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-300'}`}>{resi}</span></td>
+                                        <td className="p-3 align-top"><span className={`inline-block px-2 py-1 rounded text-xs font-medium flex items-center gap-1 w-fit ${ecommerce !== '-' ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'text-gray-300'}`}>{ecommerce !== '-' && <ShoppingBag size={10} />}{ecommerce}</span></td>
+                                        <td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber || '-'}</td>
+                                        <td className="p-3 font-medium text-gray-800 max-w-[200px] align-top"><div className="line-clamp-2">{h.name || 'Unknown Item'}</div></td>
+                                        <td className={`p-3 text-right font-bold align-top ${showHistoryDetail==='in'?'text-green-600':'text-red-600'}`}>{showHistoryDetail==='in' ? '+' : '-'}{h.quantity}</td>
+                                        <td className="p-3 text-right text-gray-600 font-mono align-top text-xs">{formatRupiah(price)}</td>
+                                        <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">{formatRupiah(total)}</td>
+                                        {showHistoryDetail === 'in' && <td className="p-3 align-top text-xs">{keterangan}</td>}
                                     </tr>
                                 );
                             })}
@@ -235,15 +175,79 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </table>
                 )}
             </div>
+            </div>
         </div>
-      </div>
-    );
-  };
+      )}
 
-  return (
-    <div className="space-y-4 pb-24">
-      <HistoryModal />
-      <ItemHistoryModal />
+      {/* --- ITEM HISTORY MODAL (FIXED) --- */}
+      {selectedItemHistory && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+                {/* Header Modal */}
+                <div className="p-4 border-b flex justify-between items-start bg-gray-50">
+                    <div className="flex-1">
+                        <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2"><History size={20} className="text-blue-600"/> Riwayat Transaksi Barang</h3>
+                        <p className="text-sm text-gray-500 mt-1 line-clamp-1">{selectedItemHistory.name || 'Tanpa Nama'}</p>
+                        <div className="flex gap-2 mt-2">
+                            <span className="text-xs bg-gray-200 px-2 py-0.5 rounded text-gray-700 font-mono">{selectedItemHistory.partNumber || '-'}</span>
+                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">Sisa Stok: {selectedItemHistory.quantity}</span>
+                        </div>
+                    </div>
+                    <button onClick={() => setSelectedItemHistory(null)} className="p-1 hover:bg-gray-200 rounded-full transition-colors ml-4"><X size={24} className="text-gray-500"/></button>
+                </div>
+
+                {/* Kolom Pencarian Baru (Auto Focus) */}
+                <div className="p-3 bg-white border-b border-gray-100">
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                        <input 
+                            autoFocus
+                            type="text" 
+                            placeholder="Cari Pembeli, No. Resi, atau E-Commerce..." 
+                            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                            value={itemHistorySearch}
+                            onChange={(e) => setItemHistorySearch(e.target.value)}
+                        />
+                    </div>
+                </div>
+
+                {/* Tabel Riwayat */}
+                <div className="overflow-auto flex-1 p-0">
+                    {filteredItemHistory.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                            <History size={48} className="opacity-20 mb-3"/>
+                            <p>{itemHistorySearch ? 'Tidak ditemukan data sesuai pencarian' : 'Belum ada riwayat transaksi'}</p>
+                        </div>
+                    ) : (
+                        <table className="w-full text-left border-collapse">
+                            <thead className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
+                                <tr><th className="p-3 border-b border-gray-200 w-32">Tanggal</th><th className="p-3 border-b border-gray-200 w-24 text-center">Tipe</th><th className="p-3 border-b border-gray-200 w-20 text-right">Jml</th><th className="p-3 border-b border-gray-200 w-28 text-right">Harga</th><th className="p-3 border-b border-gray-200 w-28 text-right">Total</th><th className="p-3 border-b border-gray-200 w-24 text-right">Stok Akhir</th><th className="p-3 border-b border-gray-200">Keterangan / Resi</th></tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 text-sm">
+                                {filteredItemHistory.map(h => {
+                                    const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
+                                    const price = h.price || 0;
+                                    const total = h.totalPrice || (price * (Number(h.quantity) || 0));
+
+                                    return (
+                                        <tr key={h.id} className="hover:bg-gray-50 transition-colors">
+                                            <td className="p-3 align-top text-gray-600"><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div></td>
+                                            <td className="p-3 align-top text-center"><span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${h.type === 'in' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{h.type === 'in' ? 'Masuk' : 'Keluar'}</span></td>
+                                            <td className={`p-3 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>{h.type === 'in' ? '+' : '-'}{h.quantity}</td>
+                                            <td className="p-3 align-top text-right font-mono text-gray-600 text-xs">{formatRupiah(price)}</td>
+                                            <td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(total)}</td>
+                                            <td className="p-3 align-top text-right font-mono text-gray-600">{h.currentStock}</td>
+                                            <td className="p-3 align-top text-gray-700"><div className="font-medium text-xs mb-1">{keterangan}</div>{resi !== '-' && (<div className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] border border-blue-100 mr-1">Resi: {resi}</div>)}{ecommerce !== '-' && (<div className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-100"><ShoppingBag size={8}/> {ecommerce}</div>)}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+        </div>
+      )}
       
       {/* STATS */}
       <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide snap-x md:grid md:grid-cols-5 md:gap-4 md:overflow-visible md:mx-0 md:px-0 md:pb-0">
