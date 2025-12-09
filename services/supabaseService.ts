@@ -207,7 +207,10 @@ export const addHistoryLog = async (h: StockHistory): Promise<boolean> => {
         type: h.type,
         quantity: h.quantity, 
         previous_stock: h.previousStock, 
-        current_stock: h.currentstock,
+        
+        // [PERBAIKAN] Menggunakan camelCase dari objek h
+        current_stock: h.currentStock, 
+        
         price: h.price, 
         total_price: h.totalPrice, 
         timestamp: h.timestamp, 
