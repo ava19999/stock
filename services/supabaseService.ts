@@ -109,7 +109,7 @@ export const fetchShopItems = async (page: number = 1, limit: number = 20, searc
   }
 };
 
-// --- CRUD INVENTORY ---
+// --- CRUD INVENTORY (UPDATED) ---
 
 export const addInventory = async (item: InventoryFormData): Promise<boolean> => {
   try {
@@ -135,7 +135,8 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
 
 export const updateInventory = async (item: InventoryItem): Promise<boolean> => {
   try {
-    // UPDATE MENGGUNAKAN ID (Lebih Aman) dan cek hasil
+    // KITA UPDATE SEMUA KOLOM
+    // JIKA ADA KOLOM YANG TIDAK ADA DI DB (MISAL cost_price), INI AKAN ERROR (BAGUS, SUPAYA KETAHUAN)
     const { data, error } = await supabase.from('inventory').update({
       name: item.name,
       description: item.description,
@@ -151,14 +152,17 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
       last_updated: Date.now()
     })
     .eq('id', item.id) // Kunci update ID
-    .select(); // Minta balikan data
+    .select(); // Minta balikan data untuk konfirmasi
 
-    if (error) { handleDbError("Update Stok Barang", error); return false; }
+    if (error) { 
+        handleDbError("Update Stok Barang", error); 
+        return false; 
+    }
     
-    // Jika sukses tapi tidak ada data yg berubah (misal ID tidak ketemu)
+    // DETEKSI SILENT FAIL: Sukses query tapi 0 baris terupdate
     if (!data || data.length === 0) {
-        console.warn("Update sukses 0 row. ID:", item.id);
-        alert("Gagal Update Stok: Barang tidak ditemukan di server. Coba refresh halaman.");
+        console.warn("Update sukses 0 row. ID tidak ditemukan:", item.id);
+        alert(`GAGAL UPDATE STOK! Server menolak update untuk barang: ${item.name}. (Kemungkinan ID tidak cocok atau RLS aktif)`);
         return false;
     }
     return true;
@@ -254,7 +258,7 @@ export const addHistoryLog = async (history: StockHistory): Promise<boolean> => 
     }]);
     
     if (error) { 
-        handleDbError("Simpan Riwayat (History)", error); 
+        handleDbError("Simpan Riwayat", error); 
         return false; 
     }
     return true;
