@@ -97,8 +97,13 @@ const AppContent: React.FC = () => {
   };
 
   const addNewHistory = async (newRecord: StockHistory) => {
-      await addHistoryLog(newRecord);
-      setHistory(prev => [newRecord, ...prev]);
+      // PERBAIKAN: Menggunakan await untuk memastikan data tersimpan ke DB
+      const success = await addHistoryLog(newRecord);
+      if (success) {
+          setHistory(prev => [newRecord, ...prev]);
+      } else {
+          console.error("Gagal menyimpan riwayat. Pastikan tabel stock_history memiliki kolom 'price' dan 'total_price'.");
+      }
   };
 
   const handleGlobalLogin = (e: React.FormEvent) => {
@@ -143,7 +148,8 @@ const AppContent: React.FC = () => {
 
           if (diff !== 0) {
               if (diff > 0) {
-                  addNewHistory({
+                  // PERBAIKAN: Menambahkan await
+                  await addNewHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
                       type: 'in', quantity: diff, previousStock: oldQty, currentStock: newQuantity,
                       price: currentPrice,
@@ -153,7 +159,8 @@ const AppContent: React.FC = () => {
                   });
               } else {
                   const absDiff = Math.abs(diff);
-                  addNewHistory({
+                  // PERBAIKAN: Menambahkan await
+                  await addNewHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
                       type: 'out', quantity: absDiff, previousStock: oldQty, currentStock: newQuantity,
                       price: currentPrice,
@@ -175,7 +182,8 @@ const AppContent: React.FC = () => {
       } else {
           if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number ada!', 'error'); setLoading(false); return; }
           
-          addNewHistory({ 
+          // PERBAIKAN: Menambahkan await
+          await addNewHistory({ 
               id: generateId(), itemId: data.partNumber, partNumber: data.partNumber, name: data.name, 
               type: 'in', quantity: newQuantity, previousStock: 0, currentStock: newQuantity, 
               price: currentPrice,
@@ -236,6 +244,8 @@ const AppContent: React.FC = () => {
       
       if (orderSuccess) {
           const updatedItemsList = [...items];
+          
+          // PERBAIKAN: Menggunakan loop for...of agar bisa menggunakan await
           for (const cartItem of cart) {
               const idx = updatedItemsList.findIndex(i => i.id === cartItem.id);
               if (idx > -1) {
@@ -246,14 +256,21 @@ const AppContent: React.FC = () => {
                   updatedItemsList[idx] = itemToUpdate;
                   
                   await updateInventory(itemToUpdate);
-                  addNewHistory({
-                      id: generateId(), itemId: cartItem.id, partNumber: cartItem.partNumber, name: cartItem.name,
-                      type: 'out', quantity: qtySold, 
+
+                  // PERBAIKAN UTAMA: Tambahkan await di sini agar history tercatat sebelum lanjut
+                  await addNewHistory({
+                      id: generateId(), 
+                      itemId: cartItem.id, 
+                      partNumber: cartItem.partNumber, 
+                      name: cartItem.name,
+                      type: 'out', 
+                      quantity: qtySold, 
                       previousStock: itemToUpdate.quantity + qtySold, 
                       currentStock: itemToUpdate.quantity,
                       price: itemToUpdate.price, 
                       totalPrice: itemToUpdate.price * qtySold,
-                      timestamp: Date.now(), reason: `Order #${newOrder.id.slice(0,6)} (${name})`
+                      timestamp: Date.now(), 
+                      reason: `Order #${newOrder.id.slice(0,6)} (${name})`
                   });
               }
           }
@@ -283,7 +300,9 @@ const AppContent: React.FC = () => {
                   newItems[idx] = itemToUpdate;
 
                   await updateInventory(itemToUpdate);
-                  addNewHistory({
+                  
+                  // PERBAIKAN: Menambahkan await
+                  await addNewHistory({
                       id: generateId(), itemId: itemToUpdate.id, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name,
                       type: 'in', quantity: restoreQty,
                       previousStock: itemToUpdate.quantity - restoreQty, currentStock: itemToUpdate.quantity,
