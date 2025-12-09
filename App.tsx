@@ -9,9 +9,9 @@ import { OrderManagement } from './components/OrderManagement';
 import { CustomerOrderView } from './components/CustomerOrderView';
 import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
 
-// IMPORT FROM SUPABASE SERVICE
+// IMPORT LENGKAP
 import { 
-  fetchInventory, addInventory, updateInventory, deleteInventory,
+  fetchInventory, addInventory, updateInventory, deleteInventory, getItemById,
   fetchOrders, saveOrder, updateOrderStatusService,
   fetchHistory, addHistoryLog,
   fetchChatSessions, saveChatSession
@@ -100,7 +100,6 @@ const AppContent: React.FC = () => {
   };
 
   const addNewHistory = async (newRecord: StockHistory) => {
-      // PERBAIKAN: Await agar proses simpan selesai sebelum lanjut
       const success = await addHistoryLog(newRecord);
       if (success) {
           setHistory(prev => [newRecord, ...prev]);
@@ -231,13 +230,13 @@ const AppContent: React.FC = () => {
       const orderSuccess = await saveOrder(newOrder);
       
       if (orderSuccess) {
-          // Loop untuk mengurangi stok setiap item
+          // Loop update stok (ambil data terbaru by ID dulu)
           for (const cartItem of cart) {
-              const currentItem = items.find(i => i.id === cartItem.id);
+              const currentItem = await getItemById(cartItem.id);
+              
               if (currentItem) {
                   const qtySold = cartItem.cartQuantity;
                   
-                  // Update objek item
                   const itemToUpdate = { 
                       ...currentItem,
                       qtyOut: (currentItem.qtyOut || 0) + qtySold,
@@ -245,10 +244,8 @@ const AppContent: React.FC = () => {
                       lastUpdated: Date.now()
                   };
                   
-                  // 1. Update DB Inventory
                   await updateInventory(itemToUpdate);
 
-                  // 2. Simpan Riwayat
                   await addNewHistory({
                       id: generateId(), 
                       itemId: cartItem.id, 
@@ -285,13 +282,15 @@ const AppContent: React.FC = () => {
 
       if (newStatus === 'cancelled' && order.status !== 'cancelled') {
           for (const orderItem of order.items) {
-              const currentItem = items.find(i => i.id === orderItem.id);
+              const currentItem = await getItemById(orderItem.id);
               if (currentItem) {
                   const restoreQty = orderItem.cartQuantity;
-                  const itemToUpdate = { ...currentItem };
-                  
-                  itemToUpdate.qtyOut = Math.max(0, (itemToUpdate.qtyOut || 0) - restoreQty);
-                  itemToUpdate.quantity = itemToUpdate.quantity + restoreQty;
+                  const itemToUpdate = { 
+                      ...currentItem,
+                      qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty),
+                      quantity: currentItem.quantity + restoreQty,
+                      lastUpdated: Date.now()
+                   };
 
                   await updateInventory(itemToUpdate);
                   
