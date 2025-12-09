@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { InventoryItem, CartItem } from '../types';
 import { fetchShopItems } from '../services/supabaseService'; 
-import { ShoppingCart, Search, Plus, Minus, X, Tag, Car, Package, Camera, Loader2, Sparkles, LayoutGrid, List, Check, ZoomIn, Move, ChevronLeft, ChevronRight, ShoppingBag } from 'lucide-react';
+import { ShoppingCart, Search, Plus, Minus, X, Tag, Car, Package, Camera, Loader2, Sparkles, LayoutGrid, List, Check, ZoomIn, Move, ChevronLeft, ChevronRight, ShoppingBag, Crown, ChevronDown, Eye } from 'lucide-react';
 import { formatRupiah, compressImage } from '../utils';
 
 interface ImageCropperProps { imageSrc: string; onConfirm: (croppedBase64: string) => void; onCancel: () => void; }
@@ -19,22 +19,24 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ imageSrc, onConfirm, onCanc
 interface ShopViewProps { 
     items: InventoryItem[]; 
     cart: CartItem[]; 
-    isAdmin: boolean; 
+    isAdmin: boolean;
+    isKingFano: boolean; 
     bannerUrl: string; 
     onAddToCart: (item: InventoryItem) => void; 
     onRemoveFromCart: (itemId: string) => void; 
-    onUpdateCartItem: (itemId: string, changes: Partial<CartItem>) => void; // <--- PROPS BARU
+    onUpdateCartItem: (itemId: string, changes: Partial<CartItem>) => void; 
     onCheckout: (customerName: string) => void; 
     onUpdateBanner: (base64: string) => Promise<void>; 
 }
 
 export const ShopView: React.FC<ShopViewProps> = ({ 
     cart = [], 
-    isAdmin, 
+    isAdmin,
+    isKingFano, 
     bannerUrl, 
     onAddToCart, 
     onRemoveFromCart, 
-    onUpdateCartItem, // Destructure prop baru
+    onUpdateCartItem, 
     onCheckout, 
     onUpdateBanner 
 }) => {
@@ -47,6 +49,11 @@ export const ShopView: React.FC<ShopViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState('Semua');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
+  // --- STATE KHUSUS ADMIN: MODE TAMPILAN HARGA ---
+  const [adminPriceMode, setAdminPriceMode] = useState<'retail' | 'kingFano'>('retail');
+  const [showAdminPriceMenu, setShowAdminPriceMenu] = useState(false);
+  // -----------------------------------------------
+
   const [isCartOpen, setIsCartOpen] = useState(false); 
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false); 
   const [isUploadingBanner, setIsUploadingBanner] = useState(false); 
@@ -81,14 +88,13 @@ export const ShopView: React.FC<ShopViewProps> = ({
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onloadend = () => { setTempBannerImg(reader.result as string); if (bannerInputRef.current) bannerInputRef.current.value = ''; }; reader.readAsDataURL(file); };
   const handleCropConfirm = async (base64: string) => { setTempBannerImg(null); setIsUploadingBanner(true); try { const compressed = await compressImage(base64); await onUpdateBanner(compressed); } catch (error) { console.error("Gagal upload banner", error); alert("Gagal memproses gambar banner"); } finally { setIsUploadingBanner(false); } };
   
-  // Total dihitung berdasarkan harga custom jika ada
   const cartTotal = cart.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0); 
   const cartItemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
 
   const carCategories = ['Semua', 'Honda', 'Toyota', 'Suzuki', 'Nissan', 'Daihatsu', 'Mitsubishi', 'Wuling', 'Mazda'];
 
   return (
-    <div className="relative min-h-full pb-20">
+    <div className="relative min-h-full pb-20" onClick={() => setShowAdminPriceMenu(false)}>
       {tempBannerImg && <ImageCropper imageSrc={tempBannerImg} onConfirm={handleCropConfirm} onCancel={() => setTempBannerImg(null)} />}
       
       {/* BANNER */}
@@ -101,6 +107,43 @@ export const ShopView: React.FC<ShopViewProps> = ({
       <div className="sticky top-[64px] z-30 bg-gray-50/95 backdrop-blur-sm pt-2 pb-2 -mx-2 px-2 md:mx-0 md:px-0 space-y-3 border-b border-gray-200/50">
         <div className="flex gap-2">
             <div className="relative w-full group"><div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none"><Search size={18} className="text-gray-400 group-focus-within:text-blue-600 transition-colors" /></div><input type="text" placeholder="Cari sparepart..." className="pl-10 pr-4 py-3 w-full bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm transition-all" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/></div>
+            
+            {/* --- ADMIN PRICE SWITCHER (NEW) --- */}
+            {isAdmin && (
+                <div className="relative">
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); setShowAdminPriceMenu(!showAdminPriceMenu); }}
+                        className={`h-full px-3 rounded-xl flex items-center gap-2 border shadow-sm transition-all whitespace-nowrap ${adminPriceMode === 'kingFano' ? 'bg-purple-50 border-purple-200 text-purple-700' : 'bg-white border-gray-200 text-gray-600'}`}
+                    >
+                        <Eye size={16} />
+                        <span className="text-xs font-bold hidden sm:inline">{adminPriceMode === 'retail' ? 'Harga Eceran' : 'View: King Fano'}</span>
+                        <ChevronDown size={14} className="opacity-50" />
+                    </button>
+
+                    {showAdminPriceMenu && (
+                        <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-50 animate-in zoom-in-95">
+                            <div className="p-1">
+                                <div className="px-3 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Mode Tampilan Harga</div>
+                                <button 
+                                    onClick={() => { setAdminPriceMode('retail'); setShowAdminPriceMenu(false); }}
+                                    className={`w-full text-left px-3 py-2 text-xs font-bold rounded-lg flex items-center justify-between group transition-colors ${adminPriceMode === 'retail' ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'}`}
+                                >
+                                    <div className="flex items-center gap-2"><Tag size={14} /> Eceran (Umum)</div>
+                                    {adminPriceMode === 'retail' && <Check size={14}/>}
+                                </button>
+                                <button 
+                                    onClick={() => { setAdminPriceMode('kingFano'); setShowAdminPriceMenu(false); }}
+                                    className={`w-full text-left px-3 py-2 text-xs font-bold rounded-lg flex items-center justify-between group transition-colors ${adminPriceMode === 'kingFano' ? 'bg-purple-50 text-purple-700' : 'text-gray-700 hover:bg-gray-50'}`}
+                                >
+                                    <div className="flex items-center gap-2"><Crown size={14} /> King Fano</div>
+                                    {adminPriceMode === 'kingFano' && <Check size={14}/>}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+            
             <div className="bg-white rounded-xl p-1 flex shadow-sm border border-gray-200"><button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={18}/></button><button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><List size={18}/></button></div>
         </div>
         <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar scroll-smooth">
@@ -121,27 +164,53 @@ export const ShopView: React.FC<ShopViewProps> = ({
         <>
         {viewMode === 'grid' ? (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-6 mt-4">
-                {shopItems.map((item) => (
-                <div key={item.id} className="group bg-white rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:shadow-lg border border-gray-100 overflow-hidden flex flex-col transition-all duration-300 transform hover:-translate-y-1">
-                    <div className="aspect-square w-full bg-gray-50 relative overflow-hidden">
-                        {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}} /> : <div className="w-full h-full flex flex-col items-center justify-center text-gray-300"><Car size={32}/><span className="text-[10px] mt-1">No Image</span></div>}
-                        <div className="absolute top-2 right-2 bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold text-gray-700 shadow-sm border border-gray-100">{item.quantity} Unit</div>
-                    </div>
-                    <div className="p-3 flex-1 flex flex-col">
-                        <div className="flex items-center gap-1.5 mb-1.5"><Tag size={10} className="text-blue-500" /><span className="text-xs font-mono text-gray-500 uppercase tracking-wider truncate">{item.partNumber || '-'}</span></div>
-                        <h3 className="text-sm font-bold text-gray-900 mb-1 leading-snug line-clamp-1" title={item.name}>{item.name}</h3>
-                        <p className="text-xs text-gray-500 line-clamp-2 mb-3 leading-relaxed flex-1">{item.description}</p>
-                        <div className="mt-auto pt-3 border-t border-gray-50 flex flex-col justify-between gap-2">
-                            <span className="text-sm font-extrabold text-gray-900">{formatRupiah(item.price)}</span>
-                            <button onClick={() => onAddToCart(item)} className="bg-gray-900 text-white py-2 px-3 rounded-lg hover:bg-blue-600 active:scale-95 transition-all flex items-center justify-center space-x-1.5 w-full shadow-sm"><Plus size={14} /><span className="text-[10px] sm:text-xs font-bold uppercase tracking-wide">Keranjang</span></button>
+                {shopItems.map((item) => {
+                    // --- LOGIKA HARGA (ADMIN + USER) ---
+                    // Jika Admin: Ikuti state adminPriceMode
+                    // Jika User: Ikuti prop isKingFano
+                    const isSpecialView = isAdmin ? (adminPriceMode === 'kingFano') : isKingFano;
+                    
+                    const useSpecialPrice = isSpecialView && item.kingFanoPrice && item.kingFanoPrice > 0;
+                    const displayPrice = useSpecialPrice ? item.kingFanoPrice : item.price;
+                    
+                    return (
+                    <div key={item.id} className="group bg-white rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:shadow-lg border border-gray-100 overflow-hidden flex flex-col transition-all duration-300 transform hover:-translate-y-1">
+                        <div className="aspect-square w-full bg-gray-50 relative overflow-hidden">
+                            {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}} /> : <div className="w-full h-full flex flex-col items-center justify-center text-gray-300"><Car size={32}/><span className="text-[10px] mt-1">No Image</span></div>}
+                            <div className="absolute top-2 right-2 bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold text-gray-700 shadow-sm border border-gray-100">{item.quantity} Unit</div>
+                            
+                            {/* BADGE HARGA KHUSUS */}
+                            {useSpecialPrice && (
+                                <div className="absolute top-2 left-2 bg-purple-600 text-white px-2 py-1 rounded-lg text-[10px] font-bold shadow-sm flex items-center gap-1">
+                                    <Crown size={10} fill="white"/> SPECIAL
+                                </div>
+                            )}
+                        </div>
+                        <div className="p-3 flex-1 flex flex-col">
+                            <div className="flex items-center gap-1.5 mb-1.5"><Tag size={10} className="text-blue-500" /><span className="text-xs font-mono text-gray-500 uppercase tracking-wider truncate">{item.partNumber || '-'}</span></div>
+                            <h3 className="text-sm font-bold text-gray-900 mb-1 leading-snug line-clamp-1" title={item.name}>{item.name}</h3>
+                            <p className="text-xs text-gray-500 line-clamp-2 mb-3 leading-relaxed flex-1">{item.description}</p>
+                            <div className="mt-auto pt-3 border-t border-gray-50 flex flex-col justify-between gap-2">
+                                <div className="flex flex-col">
+                                    {useSpecialPrice && <span className="text-[10px] text-gray-400 line-through decoration-red-400">{formatRupiah(item.price)}</span>}
+                                    <span className={`text-sm font-extrabold ${useSpecialPrice ? 'text-purple-700' : 'text-gray-900'}`}>{formatRupiah(displayPrice)}</span>
+                                </div>
+                                {/* PENTING: Override customPrice saat masuk keranjang */}
+                                <button onClick={() => onAddToCart({ ...item, customPrice: displayPrice })} className="bg-gray-900 text-white py-2 px-3 rounded-lg hover:bg-blue-600 active:scale-95 transition-all flex items-center justify-center space-x-1.5 w-full shadow-sm"><Plus size={14} /><span className="text-[10px] sm:text-xs font-bold uppercase tracking-wide">Keranjang</span></button>
+                            </div>
                         </div>
                     </div>
-                </div>
-                ))}
+                    );
+                })}
             </div>
         ) : (
             <div className="flex flex-col gap-3 mt-4">
-                {shopItems.map((item) => (
+                {shopItems.map((item) => {
+                    const isSpecialView = isAdmin ? (adminPriceMode === 'kingFano') : isKingFano;
+                    const useSpecialPrice = isSpecialView && item.kingFanoPrice && item.kingFanoPrice > 0;
+                    const displayPrice = useSpecialPrice ? item.kingFanoPrice : item.price;
+
+                    return (
                     <div key={item.id} className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 flex gap-3 hover:shadow-md transition-shadow">
                          <div className="w-20 h-20 bg-gray-50 rounded-lg overflow-hidden flex-shrink-0 relative">
                             {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}} /> : <div className="w-full h-full flex items-center justify-center text-gray-300"><Car size={20}/></div>}
@@ -154,12 +223,16 @@ export const ShopView: React.FC<ShopViewProps> = ({
                                  <p className="text-xs text-gray-500 line-clamp-1 truncate">{item.description}</p>
                              </div>
                              <div className="flex justify-between items-end mt-2">
-                                 <span className="text-sm font-extrabold text-gray-900">{formatRupiah(item.price)}</span>
-                                 <button onClick={() => onAddToCart(item)} className="bg-gray-900 text-white p-2 rounded-lg hover:bg-blue-600 active:scale-95 transition-all shadow-sm flex items-center gap-1"><Plus size={14} /><span className="text-[10px] font-bold">Beli</span></button>
+                                 <div>
+                                     {useSpecialPrice && <span className="block text-[9px] text-gray-400 line-through decoration-red-400">{formatRupiah(item.price)}</span>}
+                                     <span className={`text-sm font-extrabold ${useSpecialPrice ? 'text-purple-700' : 'text-gray-900'}`}>{formatRupiah(displayPrice)}</span>
+                                 </div>
+                                 <button onClick={() => onAddToCart({ ...item, customPrice: displayPrice })} className="bg-gray-900 text-white p-2 rounded-lg hover:bg-blue-600 active:scale-95 transition-all shadow-sm flex items-center gap-1"><Plus size={14} /><span className="text-[10px] font-bold">Beli</span></button>
                              </div>
                          </div>
                     </div>
-                ))}
+                    );
+                })}
             </div>
         )}
 
@@ -175,7 +248,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
       {/* FLOAT BUTTON */}
       <button onClick={() => setIsCartOpen(true)} className="fixed bottom-20 right-4 sm:bottom-8 sm:right-8 bg-gray-900 text-white p-4 rounded-full shadow-xl hover:bg-blue-600 hover:scale-105 active:scale-95 transition-all z-40 flex items-center justify-center group"><ShoppingCart size={24} />{cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-white shadow-sm">{cartItemCount}</span>}</button>
       
-      {/* CART MODAL (UPDATED) */}
+      {/* CART MODAL & CHECKOUT MODAL (SAMA SEPERTI SEBELUMNYA) */}
       {isCartOpen && (
         <div className="fixed inset-0 z-[60] flex justify-end">
             <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setIsCartOpen(false)}></div>

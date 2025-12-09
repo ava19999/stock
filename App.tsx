@@ -1,5 +1,5 @@
 // FILE: src/App.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { HashRouter as Router } from 'react-router-dom';
 import { Dashboard } from './components/Dashboard';
 import { ItemForm } from './components/ItemForm';
@@ -9,6 +9,7 @@ import { OrderManagement } from './components/OrderManagement';
 import { CustomerOrderView } from './components/CustomerOrderView';
 import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
 
+// IMPORT LENGKAP
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory, getItemById,
   fetchOrders, saveOrder, updateOrderStatusService,
@@ -67,6 +68,12 @@ const AppContent: React.FC = () => {
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => setToast({msg, type});
 
+  // --- LOGIKA DETEKSI USER KHUSUS (KING FANO) ---
+  const isKingFano = useMemo(() => {
+      return loginName.trim().toLowerCase() === 'king fano';
+  }, [loginName]);
+  // ----------------------------------------------
+
   useEffect(() => {
     let cId = localStorage.getItem(CUSTOMER_ID_KEY);
     if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
@@ -122,7 +129,13 @@ const AppContent: React.FC = () => {
   const loginAsCustomer = (name: string) => {
       setIsAdmin(false); setIsAuthenticated(true); setActiveView('shop');
       localStorage.setItem('stockmaster_customer_name', name); 
-      showToast(`Selamat Datang, ${name}!`);
+      
+      // Pesan selamat datang khusus
+      if (name.toLowerCase() === 'king fano') {
+          showToast(`Selamat Datang, King Fano! Harga Khusus Aktif.`);
+      } else {
+          showToast(`Selamat Datang, ${name}!`);
+      }
   };
 
   const handleLogout = () => { setIsAuthenticated(false); setIsAdmin(false); setLoginName(''); setLoginPass(''); };
@@ -217,7 +230,7 @@ const AppContent: React.FC = () => {
       showToast('Masuk keranjang');
   };
 
-  // --- FUNGSI BARU UNTUK EDIT KERANJANG ---
+  // Fungsi Edit Keranjang (Qty & Harga Khusus)
   const updateCartItem = (itemId: string, changes: Partial<CartItem>) => {
       setCart(prev => prev.map(item => 
           item.id === itemId ? { ...item, ...changes } : item
@@ -227,7 +240,7 @@ const AppContent: React.FC = () => {
   const doCheckout = async (name: string) => {
       if (name !== loginName && !isAdmin) { setLoginName(name); localStorage.setItem('stockmaster_customer_name', name); }
 
-      // Hitung total menggunakan customPrice jika ada, kalau tidak pakai price biasa
+      // Hitung total dengan harga yang ada di keranjang (bisa harga King Fano atau Custom)
       const totalAmount = cart.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
 
       const newOrder: Order = {
@@ -243,16 +256,14 @@ const AppContent: React.FC = () => {
       const orderSuccess = await saveOrder(newOrder);
       
       if (orderSuccess) {
-          // Loop update stok (ambil data terbaru by ID dulu)
           for (const cartItem of cart) {
               const currentItem = await getItemById(cartItem.id);
               
               if (currentItem) {
                   const qtySold = cartItem.cartQuantity;
-                  // Gunakan harga transaksi (deal price) untuk history
+                  // Harga deal yang tercatat di history
                   const dealPrice = cartItem.customPrice ?? currentItem.price;
                   
-                  // Update Stok Master (Harga master TIDAK berubah)
                   const itemToUpdate = { 
                       ...currentItem,
                       qtyOut: (currentItem.qtyOut || 0) + qtySold,
@@ -262,7 +273,6 @@ const AppContent: React.FC = () => {
                   
                   await updateInventory(itemToUpdate);
 
-                  // Catat History dengan Harga Transaksi (Deal Price)
                   await addNewHistory({
                       id: generateId(), 
                       itemId: cartItem.id, 
@@ -272,7 +282,7 @@ const AppContent: React.FC = () => {
                       quantity: qtySold, 
                       previousStock: currentItem.quantity, 
                       currentStock: itemToUpdate.quantity,
-                      price: dealPrice, // <-- Harga di history pakai harga deal
+                      price: dealPrice, 
                       totalPrice: dealPrice * qtySold,
                       timestamp: Date.now(), 
                       reason: `Order #${newOrder.id.slice(0,6)} (${name})`
@@ -311,7 +321,6 @@ const AppContent: React.FC = () => {
 
                   await updateInventory(itemToUpdate);
                   
-                  // Gunakan harga transaksi dari orderItem saat pengembalian
                   const refundPrice = orderItem.customPrice ?? orderItem.price;
 
                   await addNewHistory({
@@ -414,17 +423,17 @@ const AppContent: React.FC = () => {
           </div>
       </div>
       <main className="flex-1 max-w-7xl mx-auto w-full p-4 pb-24 md:pb-10">
-        {/* PASS PROPS BARU KE SHOP VIEW */}
         {activeView === 'shop' && 
             <ShopView 
                 items={items} 
                 cart={cart} 
-                isAdmin={isAdmin} 
+                isAdmin={isAdmin}
+                isKingFano={isKingFano} // <--- KIRIM STATUS KING FANO KE SHOP
                 bannerUrl={bannerUrl} 
                 onUpdateBanner={handleUpdateBanner} 
                 onAddToCart={addToCart} 
                 onRemoveFromCart={(id)=>setCart(c=>c.filter(x=>x.id!==id))} 
-                onUpdateCartItem={updateCartItem} // <--- FUNGSI BARU DI PASS KE SINI
+                onUpdateCartItem={updateCartItem}
                 onCheckout={doCheckout} 
             />
         }

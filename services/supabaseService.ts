@@ -23,8 +23,13 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
     partNumber: item.part_number,
     name: item.name,
     description: item.description,
+    
     price: Number(item.price),
+    // --- TAMBAHAN MAPPING ---
+    kingFanoPrice: Number(item.king_fano_price), // Baca dari DB (snake_case) ke App (camelCase)
+    // ------------------------
     costPrice: Number(item.cost_price),
+    
     quantity: Number(item.quantity),
     initialStock: Number(item.initial_stock),
     qtyIn: Number(item.qty_in),
@@ -44,8 +49,13 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
     partNumber: data.part_number,
     name: data.name,
     description: data.description,
+    
     price: Number(data.price),
+    // --- TAMBAHAN MAPPING ---
+    kingFanoPrice: Number(data.king_fano_price),
+    // ------------------------
     costPrice: Number(data.cost_price),
+    
     quantity: Number(data.quantity),
     initialStock: Number(data.initial_stock),
     qtyIn: Number(data.qty_in),
@@ -100,8 +110,13 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
     part_number: item.partNumber,
     name: item.name,
     description: item.description,
+    
     price: item.price,
+    // --- TAMBAHAN INSERT ---
+    king_fano_price: item.kingFanoPrice, // Simpan App (camelCase) ke DB (snake_case)
+    // -----------------------
     cost_price: item.costPrice,
+    
     quantity: item.quantity,
     initial_stock: item.initialStock,
     qty_in: item.qtyIn,
@@ -119,8 +134,13 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
   const { error } = await supabase.from('inventory').update({
     name: item.name,
     description: item.description,
+    
     price: item.price,
+    // --- TAMBAHAN UPDATE ---
+    king_fano_price: item.kingFanoPrice,
+    // -----------------------
     cost_price: item.costPrice,
+    
     quantity: item.quantity,
     initial_stock: item.initialStock,
     qty_in: item.qtyIn,
@@ -148,21 +168,20 @@ export const fetchOrders = async (): Promise<Order[]> => {
     // Mapping balik dari DB (snake_case) ke App (camelCase) saat ambil data
     return (data || []).map((o: any) => ({
         id: o.id, 
-        customerName: o.customer_name,  // <-- Perhatikan ini
+        customerName: o.customer_name,
         items: o.items, 
-        totalAmount: Number(o.total_amount), // <-- Perhatikan ini
+        totalAmount: Number(o.total_amount),
         status: o.status, 
         timestamp: Number(o.timestamp)
     }));
 };
 
 export const saveOrder = async (order: Order): Promise<boolean> => {
-    // [PERBAIKAN PENTING]: Mapping App (camelCase) -> DB (snake_case)
     const { error } = await supabase.from('orders').insert([{
         id: order.id, 
-        customer_name: order.customerName, // Jangan salah ketik 'customerName'
+        customer_name: order.customerName,
         items: order.items,
-        total_amount: order.totalAmount,   // Jangan salah ketik 'totalAmount'
+        total_amount: order.totalAmount,
         status: order.status, 
         timestamp: order.timestamp
     }]);
@@ -198,7 +217,6 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
 };
 
 export const addHistoryLog = async (h: StockHistory): Promise<boolean> => {
-    // Mapping App -> DB
     const { error } = await supabase.from('stock_history').insert([{
         id: h.id, 
         item_id: h.itemId, 
@@ -207,10 +225,7 @@ export const addHistoryLog = async (h: StockHistory): Promise<boolean> => {
         type: h.type,
         quantity: h.quantity, 
         previous_stock: h.previousStock, 
-        
-        // [PERBAIKAN] Menggunakan camelCase dari objek h
         current_stock: h.currentStock, 
-        
         price: h.price, 
         total_price: h.totalPrice, 
         timestamp: h.timestamp, 

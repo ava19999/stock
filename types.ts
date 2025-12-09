@@ -1,4 +1,5 @@
 // FILE: src/types.ts
+
 export interface InventoryItem {
   id: string;
   partNumber: string;
@@ -6,8 +7,11 @@ export interface InventoryItem {
   description: string;
   quantity: number; 
   shelf: string;
-  price: number;     // Harga Jual Saat Ini
-  costPrice: number; // Harga Modal
+  
+  price: number;           // Harga Umum / Eceran
+  kingFanoPrice: number;   // <--- KOLOM BARU (Khusus King Fano)
+  
+  costPrice: number;       // Harga Modal
   ecommerce: string;
   imageUrl: string;
   lastUpdated: number;
@@ -22,7 +26,7 @@ export type InventoryFormData = Omit<InventoryItem, 'id' | 'lastUpdated'>;
 
 export interface CartItem extends InventoryItem {
   cartQuantity: number;
-  customPrice?: number; // <--- TAMBAHAN BARU: Harga Khusus / Tawar
+  customPrice?: number;
 }
 
 export interface Order {
