@@ -1,17 +1,13 @@
 // FILE: src/components/Dashboard.tsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
-// PERBAIKAN: Pastikan import dari supabaseService
+// Menggunakan service Supabase
 import { fetchInventoryPaginated, fetchInventoryStats } from '../services/supabaseService';
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
   ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin, FileText,
   LayoutGrid, List, ShoppingBag, History, X, ChevronLeft, Loader2
 } from 'lucide-react';
-
-// ... (Sisa kode Dashboard.tsx tidak berubah, copy-paste dari sebelumnya atau biarkan jika sudah ada) ...
-// Karena kodenya panjang, saya singkat di sini. Yang penting adalah baris import di atas.
-// Pastikan tidak ada lagi "firebaseService" di seluruh file ini.
 
 interface DashboardProps {
   items: InventoryItem[]; 
@@ -37,6 +33,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [showHistoryDetail, setShowHistoryDetail] = useState<'in' | 'out' | null>(null);
   const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null);
+  
+  // State baru untuk pencarian di modal riwayat item
+  const [itemHistorySearch, setItemHistorySearch] = useState('');
+  
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   const loadData = useCallback(async () => {
@@ -66,6 +66,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadStats(); }, [loadStats]);
 
+  // Reset pencarian riwayat saat modal ditutup/dibuka
+  useEffect(() => {
+    if (!selectedItemHistory) {
+      setItemHistorySearch('');
+    }
+  }, [selectedItemHistory]);
+
   useEffect(() => {
     const timer = setTimeout(() => { setPage(1); loadData(); }, 500);
     return () => clearTimeout(timer);
@@ -89,7 +96,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const viaMatch = keterangan.match(/\(Via: (.*?)\)/);
       if (viaMatch && viaMatch[1]) { ecommerce = viaMatch[1]; keterangan = keterangan.replace(/\s*\(Via:.*?\)/, ''); }
       if (keterangan.toLowerCase().includes('cancel order')) { keterangan = 'Retur'; }
-      return { resi, ecommerce, keterangan };
+      return { resi, ecommerce, keterangan: keterangan.trim() };
   };
 
   // --- HISTORY MODAL (GLOBAL) ---
@@ -116,7 +123,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </thead>
                     <tbody className="divide-y divide-gray-100 text-sm">
                         {filteredHistory.map((h) => {
-                            // MENGGUNAKAN HARGA DARI DB HISTORY
                             const price = h.price || 0; 
                             const total = h.totalPrice || (price * (Number(h.quantity) || 0));
                             const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
@@ -144,16 +150,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
     );
   };
 
-  // --- ITEM HISTORY MODAL ---
+  // --- ITEM HISTORY MODAL (PERBAIKAN FITUR SEARCH) ---
   const ItemHistoryModal = () => {
     if (!selectedItemHistory) return null;
-    const itemHistory = history.filter(h => h.itemId === selectedItemHistory.id || h.partNumber === selectedItemHistory.partNumber).sort((a, b) => b.timestamp - a.timestamp);
+    
+    // 1. Ambil history untuk item ini
+    let itemHistory = history.filter(h => h.itemId === selectedItemHistory.id || h.partNumber === selectedItemHistory.partNumber).sort((a, b) => b.timestamp - a.timestamp);
+
+    // 2. Filter berdasarkan pencarian (Nama Pembeli / Resi / E-Commerce)
+    if (itemHistorySearch.trim() !== '') {
+        const lowerSearch = itemHistorySearch.toLowerCase();
+        itemHistory = itemHistory.filter(h => {
+            const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
+            return (
+                keterangan.toLowerCase().includes(lowerSearch) || 
+                resi.toLowerCase().includes(lowerSearch) || 
+                ecommerce.toLowerCase().includes(lowerSearch) ||
+                h.reason.toLowerCase().includes(lowerSearch) // Cari di raw string juga
+            );
+        });
+    }
 
     return (
       <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
         <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            {/* Header Modal */}
             <div className="p-4 border-b flex justify-between items-start bg-gray-50">
-                <div>
+                <div className="flex-1">
                     <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2"><History size={20} className="text-blue-600"/> Riwayat Transaksi Barang</h3>
                     <p className="text-sm text-gray-500 mt-1 line-clamp-1">{selectedItemHistory.name || 'Tanpa Nama'}</p>
                     <div className="flex gap-2 mt-2">
@@ -161,10 +184,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">Sisa Stok: {selectedItemHistory.quantity}</span>
                     </div>
                 </div>
-                <button onClick={() => setSelectedItemHistory(null)} className="p-1 hover:bg-gray-200 rounded-full transition-colors"><X size={24} className="text-gray-500"/></button>
+                <button onClick={() => setSelectedItemHistory(null)} className="p-1 hover:bg-gray-200 rounded-full transition-colors ml-4"><X size={24} className="text-gray-500"/></button>
             </div>
+
+            {/* Kolom Pencarian Baru */}
+            <div className="p-3 bg-white border-b border-gray-100">
+                <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <input 
+                        type="text" 
+                        placeholder="Cari Pembeli, No. Resi, atau E-Commerce..." 
+                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                        value={itemHistorySearch}
+                        onChange={(e) => setItemHistorySearch(e.target.value)}
+                    />
+                </div>
+            </div>
+
+            {/* Tabel Riwayat */}
             <div className="overflow-auto flex-1 p-0">
-                {itemHistory.length === 0 ? <div className="flex flex-col items-center justify-center h-64 text-gray-400"><History size={48} className="opacity-20 mb-3"/><p>Belum ada riwayat transaksi</p></div> : (
+                {itemHistory.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                        <History size={48} className="opacity-20 mb-3"/>
+                        <p>{itemHistorySearch ? 'Tidak ditemukan data sesuai pencarian' : 'Belum ada riwayat transaksi'}</p>
+                    </div>
+                ) : (
                     <table className="w-full text-left border-collapse">
                         <thead className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
                             <tr><th className="p-3 border-b border-gray-200 w-32">Tanggal</th><th className="p-3 border-b border-gray-200 w-24 text-center">Tipe</th><th className="p-3 border-b border-gray-200 w-20 text-right">Jml</th><th className="p-3 border-b border-gray-200 w-28 text-right">Harga</th><th className="p-3 border-b border-gray-200 w-28 text-right">Total</th><th className="p-3 border-b border-gray-200 w-24 text-right">Stok Akhir</th><th className="p-3 border-b border-gray-200">Keterangan / Resi</th></tr>
