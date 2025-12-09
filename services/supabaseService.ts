@@ -5,12 +5,12 @@ import { InventoryItem, InventoryFormData, Order, StockHistory, ChatSession } fr
 // Helper error
 const handleDbError = (op: string, err: any) => {
   console.error(`${op} Error:`, err);
-  // Alert dihapus agar tidak mengganggu jika error kecil
+  // Alert dihapus agar tidak mengganggu UI jika error kecil, cek console jika perlu
 };
 
 // Fungsi pembersih kata kunci pencarian (Anti-Crash)
 const cleanSearchTerm = (term: string) => {
-    // Hapus karakter yang bisa merusak query Supabase (seperti koma, persen, kurung)
+    if (!term) return '';
     return term.replace(/[%,()]/g, '').trim();
 };
 
@@ -29,7 +29,6 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
         if (search) {
             const s = cleanSearchTerm(search);
             if (s) {
-                // Mencari di nama atau part_number
                 query = query.or(`name.ilike.%${s}%,part_number.ilike.%${s}%`);
             }
         }
@@ -66,7 +65,6 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
 };
 
 export const fetchInventoryStats = async () => {
-    // Ambil kolom kecil saja untuk hitung total biar cepat
     const { data, error } = await supabase
         .from('inventory')
         .select('quantity, price'); 
@@ -81,7 +79,6 @@ export const fetchInventoryStats = async () => {
 };
 
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
-  // Dipakai untuk fungsi internal, limit 100
   const { data, error } = await supabase
     .from('inventory')
     .select('*')
@@ -118,8 +115,8 @@ export const fetchShopItems = async (page: number, limit: number, search: string
         let query = supabase
             .from('inventory')
             .select('*', { count: 'exact' })
-            .gt('quantity', 0) // Hanya stok ada
-            .gt('price', 0)    // Hanya harga valid
+            .gt('quantity', 0)
+            .gt('price', 0)
             .order('name', { ascending: true });
 
         if (cat !== 'Semua') {
@@ -129,7 +126,6 @@ export const fetchShopItems = async (page: number, limit: number, search: string
         if (search) {
             const s = cleanSearchTerm(search);
             if (s) {
-                // Cari di Nama ATAU Part Number
                 query = query.or(`name.ilike.%${s}%,part_number.ilike.%${s}%`);
             }
         }
@@ -212,7 +208,7 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
   return true;
 };
 
-// --- ORDER SERVICES ---
+// --- ORDERS SERVICES ---
 
 export const fetchOrders = async (): Promise<Order[]> => {
     const { data } = await supabase.from('orders').select('*').order('timestamp', { ascending: false }).limit(100);
@@ -248,12 +244,23 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
     }));
 };
 
+// --- FIX ERROR DI SINI: PASTIKAN KURUNG SIKU DAN KURUNG BIASA LENGKAP ---
 export const addHistoryLog = async (h: StockHistory): Promise<boolean> => {
-    const { error } = await supabase.from('stock_history').insert([{
-        id: h.id, item_id: h.itemId, part_number: h.partNumber, name: h.name, type: h.type,
-        quantity: h.quantity, previous_stock: h.previous_stock, current_stock: h.current_stock,
-        price: h.price, total_price: h.total_price, timestamp: h.timestamp, reason: h.reason
-    }));
+    const { error } = await supabase.from('stock_history').insert([{ 
+        id: h.id, 
+        item_id: h.itemId, 
+        part_number: h.partNumber, 
+        name: h.name, 
+        type: h.type,
+        quantity: h.quantity, 
+        previous_stock: h.previousStock, 
+        current_stock: h.currentStock,
+        price: h.price, 
+        total_price: h.totalPrice, 
+        timestamp: h.timestamp, 
+        reason: h.reason
+    }]); // <-- Perhatikan: }]) ditutup dengan benar
+
     if (error) { handleDbError("Simpan History", error); return false; }
     return true;
 };
