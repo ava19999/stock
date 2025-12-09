@@ -22,6 +22,7 @@ export type InventoryFormData = Omit<InventoryItem, 'id' | 'lastUpdated'>;
 
 export interface CartItem extends InventoryItem {
   cartQuantity: number;
+  customPrice?: number; // <--- TAMBAHAN BARU: Harga Khusus / Tawar
 }
 
 export interface Order {

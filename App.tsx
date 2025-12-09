@@ -9,7 +9,6 @@ import { OrderManagement } from './components/OrderManagement';
 import { CustomerOrderView } from './components/CustomerOrderView';
 import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
 
-// IMPORT LENGKAP
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory, getItemById,
   fetchOrders, saveOrder, updateOrderStatusService,
@@ -218,12 +217,26 @@ const AppContent: React.FC = () => {
       showToast('Masuk keranjang');
   };
 
+  // --- FUNGSI BARU UNTUK EDIT KERANJANG ---
+  const updateCartItem = (itemId: string, changes: Partial<CartItem>) => {
+      setCart(prev => prev.map(item => 
+          item.id === itemId ? { ...item, ...changes } : item
+      ));
+  };
+
   const doCheckout = async (name: string) => {
       if (name !== loginName && !isAdmin) { setLoginName(name); localStorage.setItem('stockmaster_customer_name', name); }
 
+      // Hitung total menggunakan customPrice jika ada, kalau tidak pakai price biasa
+      const totalAmount = cart.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
+
       const newOrder: Order = {
-          id: generateId(), customerName: name, items: [...cart], 
-          totalAmount: cart.reduce((a,b)=>a+(b.price*b.cartQuantity),0), status: 'pending', timestamp: Date.now()
+          id: generateId(), 
+          customerName: name, 
+          items: [...cart], 
+          totalAmount: totalAmount, 
+          status: 'pending', 
+          timestamp: Date.now()
       };
       
       setLoading(true);
@@ -236,7 +249,10 @@ const AppContent: React.FC = () => {
               
               if (currentItem) {
                   const qtySold = cartItem.cartQuantity;
+                  // Gunakan harga transaksi (deal price) untuk history
+                  const dealPrice = cartItem.customPrice ?? currentItem.price;
                   
+                  // Update Stok Master (Harga master TIDAK berubah)
                   const itemToUpdate = { 
                       ...currentItem,
                       qtyOut: (currentItem.qtyOut || 0) + qtySold,
@@ -246,6 +262,7 @@ const AppContent: React.FC = () => {
                   
                   await updateInventory(itemToUpdate);
 
+                  // Catat History dengan Harga Transaksi (Deal Price)
                   await addNewHistory({
                       id: generateId(), 
                       itemId: cartItem.id, 
@@ -255,8 +272,8 @@ const AppContent: React.FC = () => {
                       quantity: qtySold, 
                       previousStock: currentItem.quantity, 
                       currentStock: itemToUpdate.quantity,
-                      price: currentItem.price, 
-                      totalPrice: currentItem.price * qtySold,
+                      price: dealPrice, // <-- Harga di history pakai harga deal
+                      totalPrice: dealPrice * qtySold,
                       timestamp: Date.now(), 
                       reason: `Order #${newOrder.id.slice(0,6)} (${name})`
                   });
@@ -294,12 +311,15 @@ const AppContent: React.FC = () => {
 
                   await updateInventory(itemToUpdate);
                   
+                  // Gunakan harga transaksi dari orderItem saat pengembalian
+                  const refundPrice = orderItem.customPrice ?? orderItem.price;
+
                   await addNewHistory({
                       id: generateId(), itemId: itemToUpdate.id, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name,
                       type: 'in', quantity: restoreQty,
                       previousStock: itemToUpdate.quantity - restoreQty, currentStock: itemToUpdate.quantity,
-                      price: itemToUpdate.price,
-                      totalPrice: itemToUpdate.price * restoreQty,
+                      price: refundPrice,
+                      totalPrice: refundPrice * restoreQty,
                       timestamp: Date.now(), reason: `Cancel Order #${orderId.slice(0,6)} (${order.customerName})`
                   });
               }
@@ -394,7 +414,20 @@ const AppContent: React.FC = () => {
           </div>
       </div>
       <main className="flex-1 max-w-7xl mx-auto w-full p-4 pb-24 md:pb-10">
-        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} bannerUrl={bannerUrl} onUpdateBanner={handleUpdateBanner} onAddToCart={addToCart} onRemoveFromCart={(id)=>setCart(c=>c.filter(x=>x.id!==id))} onCheckout={doCheckout} />}
+        {/* PASS PROPS BARU KE SHOP VIEW */}
+        {activeView === 'shop' && 
+            <ShopView 
+                items={items} 
+                cart={cart} 
+                isAdmin={isAdmin} 
+                bannerUrl={bannerUrl} 
+                onUpdateBanner={handleUpdateBanner} 
+                onAddToCart={addToCart} 
+                onRemoveFromCart={(id)=>setCart(c=>c.filter(x=>x.id!==id))} 
+                onUpdateCartItem={updateCartItem} // <--- FUNGSI BARU DI PASS KE SINI
+                onCheckout={doCheckout} 
+            />
+        }
         {activeView === 'scan' && <ScanResiView />}
         {activeView === 'chat' && <div className="max-w-2xl mx-auto h-[calc(100vh-140px)]"><ChatView isAdmin={isAdmin} currentCustomerId={isAdmin ? 'ADMIN' : myCustomerId} chatSessions={chatSessions} onSendMessage={handleSendMessage} onMarkAsRead={(cid)=>setChatSessions(prev=>prev.map(s=>s.customerId===cid?{...s, [isAdmin?'unreadAdminCount':'unreadUserCount']:0}:s))} /></div>}
         {activeView === 'inventory' && isAdmin && (
