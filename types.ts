@@ -42,8 +42,8 @@ export interface StockHistory {
   quantity: number;
   previousStock: number;
   currentStock: number;
-  price: number;       // [BARU] Harga Satuan (Statis)
-  totalPrice: number;  // [BARU] Total Harga (Statis)
+  price: number;       
+  totalPrice: number;  
   timestamp: number;
   reason: string;
 }
