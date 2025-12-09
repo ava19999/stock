@@ -49,7 +49,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState('Semua');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
-  // --- STATE KHUSUS ADMIN: MODE TAMPILAN HARGA ---
   const [adminPriceMode, setAdminPriceMode] = useState<'retail' | 'kingFano'>('retail');
   const [showAdminPriceMenu, setShowAdminPriceMenu] = useState(false);
   
@@ -107,7 +106,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
         <div className="flex gap-2">
             <div className="relative w-full group"><div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none"><Search size={18} className="text-gray-400 group-focus-within:text-blue-600 transition-colors" /></div><input type="text" placeholder="Cari sparepart..." className="pl-10 pr-4 py-3 w-full bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm transition-all" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/></div>
             
-            {/* --- ADMIN PRICE SWITCHER --- */}
+            {/* ADMIN PRICE SWITCHER */}
             {isAdmin && (
                 <div className="relative">
                     <button 
@@ -164,14 +163,8 @@ export const ShopView: React.FC<ShopViewProps> = ({
         {viewMode === 'grid' ? (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-6 mt-4">
                 {shopItems.map((item) => {
-                    // --- LOGIKA HARGA KHUSUS ---
-                    // Tentukan mode: Apakah admin sedang mensimulasikan user, atau user asli login
                     const isSpecialView = isAdmin ? (adminPriceMode === 'kingFano') : isKingFano;
-                    
-                    // Cek apakah ada harga khusus yang VALID (> 0)
                     const useSpecialPrice = isSpecialView && item.kingFanoPrice && item.kingFanoPrice > 0;
-                    
-                    // Tentukan harga yang akan ditampilkan (Jika 0/null, kembali ke harga normal)
                     const displayPrice = useSpecialPrice ? item.kingFanoPrice : item.price;
                     
                     return (
@@ -180,7 +173,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
                             {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}} /> : <div className="w-full h-full flex flex-col items-center justify-center text-gray-300"><Car size={32}/><span className="text-[10px] mt-1">No Image</span></div>}
                             <div className="absolute top-2 right-2 bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold text-gray-700 shadow-sm border border-gray-100">{item.quantity} Unit</div>
                             
-                            {/* BADGE HARGA KHUSUS */}
                             {useSpecialPrice && (
                                 <div className="absolute top-2 left-2 bg-purple-600 text-white px-2 py-1 rounded-lg text-[10px] font-bold shadow-sm flex items-center gap-1">
                                     <Crown size={10} fill="white"/> SPECIAL
@@ -248,7 +240,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
       {/* FLOAT BUTTON */}
       <button onClick={() => setIsCartOpen(true)} className="fixed bottom-20 right-4 sm:bottom-8 sm:right-8 bg-gray-900 text-white p-4 rounded-full shadow-xl hover:bg-blue-600 hover:scale-105 active:scale-95 transition-all z-40 flex items-center justify-center group"><ShoppingCart size={24} />{cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-white shadow-sm">{cartItemCount}</span>}</button>
       
-      {/* CART MODAL & CHECKOUT MODAL (SAMA SEPERTI SEBELUMNYA) */}
+      {/* CART MODAL (SEMUA USER BISA TAWAR HARGA) */}
       {isCartOpen && (
         <div className="fixed inset-0 z-[60] flex justify-end">
             <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setIsCartOpen(false)}></div>
@@ -297,25 +289,22 @@ export const ShopView: React.FC<ShopViewProps> = ({
                                     </button>
                                 </div>
 
-                                {/* Harga & Input Harga Khusus (Admin) */}
+                                {/* KOLOM HARGA TAWAR (SEMUA USER) */}
                                 <div className="text-right">
-                                    {isAdmin ? (
-                                        <div className="flex flex-col items-end">
-                                            <div className="relative">
-                                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 font-bold">Rp</span>
-                                                <input 
-                                                    type="number"
-                                                    className="w-24 pl-6 pr-2 py-1 text-right text-xs font-bold border border-blue-200 rounded focus:ring-2 focus:ring-blue-100 outline-none bg-blue-50/50"
-                                                    placeholder={item.price.toString()}
-                                                    value={item.customPrice ?? ''}
-                                                    onChange={(e) => onUpdateCartItem(item.id, { customPrice: e.target.value ? Number(e.target.value) : undefined })}
-                                                />
-                                            </div>
-                                            {item.customPrice && <span className="text-[9px] text-gray-400 line-through mr-1">{formatRupiah(item.price)}</span>}
+                                    <div className="flex flex-col items-end">
+                                        <div className="relative">
+                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 font-bold">Rp</span>
+                                            <input 
+                                                type="number"
+                                                className="w-24 pl-6 pr-2 py-1 text-right text-xs font-bold border border-blue-200 rounded focus:ring-2 focus:ring-blue-100 outline-none bg-blue-50/50"
+                                                placeholder={item.price.toString()}
+                                                value={item.customPrice ?? ''}
+                                                onChange={(e) => onUpdateCartItem(item.id, { customPrice: e.target.value ? Number(e.target.value) : undefined })}
+                                            />
                                         </div>
-                                    ) : (
-                                        <span className="text-sm font-bold text-blue-600">{formatRupiah(item.customPrice ?? item.price)}</span>
-                                    )}
+                                        <span className="text-[9px] text-gray-500 mt-0.5">Harga Tawar</span>
+                                        {item.customPrice && <span className="text-[9px] text-gray-400 line-through mr-1">{formatRupiah(item.price)}</span>}
+                                    </div>
                                 </div>
                             </div>
                         </div>
