@@ -52,8 +52,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   // --- STATE KHUSUS ADMIN: MODE TAMPILAN HARGA ---
   const [adminPriceMode, setAdminPriceMode] = useState<'retail' | 'kingFano'>('retail');
   const [showAdminPriceMenu, setShowAdminPriceMenu] = useState(false);
-  // -----------------------------------------------
-
+  
   const [isCartOpen, setIsCartOpen] = useState(false); 
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false); 
   const [isUploadingBanner, setIsUploadingBanner] = useState(false); 
@@ -108,7 +107,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
         <div className="flex gap-2">
             <div className="relative w-full group"><div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none"><Search size={18} className="text-gray-400 group-focus-within:text-blue-600 transition-colors" /></div><input type="text" placeholder="Cari sparepart..." className="pl-10 pr-4 py-3 w-full bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm transition-all" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/></div>
             
-            {/* --- ADMIN PRICE SWITCHER (NEW) --- */}
+            {/* --- ADMIN PRICE SWITCHER --- */}
             {isAdmin && (
                 <div className="relative">
                     <button 
@@ -165,12 +164,14 @@ export const ShopView: React.FC<ShopViewProps> = ({
         {viewMode === 'grid' ? (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-6 mt-4">
                 {shopItems.map((item) => {
-                    // --- LOGIKA HARGA (ADMIN + USER) ---
-                    // Jika Admin: Ikuti state adminPriceMode
-                    // Jika User: Ikuti prop isKingFano
+                    // --- LOGIKA HARGA KHUSUS ---
+                    // Tentukan mode: Apakah admin sedang mensimulasikan user, atau user asli login
                     const isSpecialView = isAdmin ? (adminPriceMode === 'kingFano') : isKingFano;
                     
+                    // Cek apakah ada harga khusus yang VALID (> 0)
                     const useSpecialPrice = isSpecialView && item.kingFanoPrice && item.kingFanoPrice > 0;
+                    
+                    // Tentukan harga yang akan ditampilkan (Jika 0/null, kembali ke harga normal)
                     const displayPrice = useSpecialPrice ? item.kingFanoPrice : item.price;
                     
                     return (
@@ -192,10 +193,9 @@ export const ShopView: React.FC<ShopViewProps> = ({
                             <p className="text-xs text-gray-500 line-clamp-2 mb-3 leading-relaxed flex-1">{item.description}</p>
                             <div className="mt-auto pt-3 border-t border-gray-50 flex flex-col justify-between gap-2">
                                 <div className="flex flex-col">
-                                    {useSpecialPrice && <span className="text-[10px] text-gray-400 line-through decoration-red-400">{formatRupiah(item.price)}</span>}
+                                    {/* HANYA TAMPILKAN SATU HARGA */}
                                     <span className={`text-sm font-extrabold ${useSpecialPrice ? 'text-purple-700' : 'text-gray-900'}`}>{formatRupiah(displayPrice)}</span>
                                 </div>
-                                {/* PENTING: Override customPrice saat masuk keranjang */}
                                 <button onClick={() => onAddToCart({ ...item, customPrice: displayPrice })} className="bg-gray-900 text-white py-2 px-3 rounded-lg hover:bg-blue-600 active:scale-95 transition-all flex items-center justify-center space-x-1.5 w-full shadow-sm"><Plus size={14} /><span className="text-[10px] sm:text-xs font-bold uppercase tracking-wide">Keranjang</span></button>
                             </div>
                         </div>
@@ -224,7 +224,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
                              </div>
                              <div className="flex justify-between items-end mt-2">
                                  <div>
-                                     {useSpecialPrice && <span className="block text-[9px] text-gray-400 line-through decoration-red-400">{formatRupiah(item.price)}</span>}
+                                     {/* HANYA TAMPILKAN SATU HARGA */}
                                      <span className={`text-sm font-extrabold ${useSpecialPrice ? 'text-purple-700' : 'text-gray-900'}`}>{formatRupiah(displayPrice)}</span>
                                  </div>
                                  <button onClick={() => onAddToCart({ ...item, customPrice: displayPrice })} className="bg-gray-900 text-white p-2 rounded-lg hover:bg-blue-600 active:scale-95 transition-all shadow-sm flex items-center gap-1"><Plus size={14} /><span className="text-[10px] font-bold">Beli</span></button>
@@ -314,7 +314,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
                                             {item.customPrice && <span className="text-[9px] text-gray-400 line-through mr-1">{formatRupiah(item.price)}</span>}
                                         </div>
                                     ) : (
-                                        <span className="text-sm font-bold text-blue-600">{formatRupiah(item.price)}</span>
+                                        <span className="text-sm font-bold text-blue-600">{formatRupiah(item.customPrice ?? item.price)}</span>
                                     )}
                                 </div>
                             </div>
