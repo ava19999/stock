@@ -2,6 +2,13 @@
 import { supabase } from '../lib/supabase';
 import { InventoryItem, InventoryFormData, Order, StockHistory, ChatSession } from '../types';
 
+// Helper untuk notifikasi error database
+const handleDbError = (operation: string, error: any) => {
+  console.error(`${operation} Error:`, error);
+  // Alert hanya muncul jika error serius
+  alert(`Gagal ${operation}: ${error.message || JSON.stringify(error)}`);
+};
+
 // --- INVENTORY SERVICES ---
 
 export const fetchInventoryStats = async () => {
@@ -69,7 +76,6 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
 };
 
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
-    // Ambil 2000 item agar history bisa mengenali harga barang lama
     const res = await fetchInventoryPaginated(1, 2000, '');
     return res.data;
 };
@@ -145,8 +151,8 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
       ecommerce: item.ecommerce,
       last_updated: Date.now() 
     }]);
-    if (error) console.error("Add Error:", error);
-    return !error;
+    if (error) { handleDbError("Add Inventory", error); return false; }
+    return true;
   } catch (e) { console.error(e); return false; }
 };
 
@@ -166,15 +172,17 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
       ecommerce: item.ecommerce,
       last_updated: Date.now()
     }).eq('part_number', item.partNumber);
-    if (error) console.error("Update Inventory Error:", error);
-    return !error;
+    
+    if (error) { handleDbError("Update Stock", error); return false; }
+    return true;
   } catch (e) { console.error(e); return false; }
 };
 
 export const deleteInventory = async (partNumber: string): Promise<boolean> => {
   try {
     const { error } = await supabase.from('inventory').delete().eq('part_number', partNumber);
-    return !error;
+    if (error) { handleDbError("Delete Inventory", error); return false; }
+    return true;
   } catch { return false; }
 };
 
@@ -193,7 +201,7 @@ export const fetchOrders = async (): Promise<Order[]> => {
     return data.map((o: any) => ({
       id: o.id,
       customerName: o.customer_name || 'Guest',
-      items: o.items || [], // JSONB
+      items: o.items || [], 
       totalAmount: Number(o.total_amount) || 0,
       status: o.status,
       timestamp: Number(o.timestamp)
@@ -206,20 +214,21 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
     const { error } = await supabase.from('orders').insert([{
       id: order.id,
       customer_name: order.customerName,
-      items: order.items, // JSONB
+      items: order.items,
       total_amount: order.totalAmount,
       status: order.status,
       timestamp: order.timestamp
     }]);
-    if (error) console.error("Save Order Error:", error);
-    return !error;
+    if (error) { handleDbError("Save Order", error); return false; }
+    return true;
   } catch { return false; }
 };
 
 export const updateOrderStatusService = async (orderId: string, status: string): Promise<boolean> => {
   try {
     const { error } = await supabase.from('orders').update({ status }).eq('id', orderId);
-    return !error;
+    if (error) { handleDbError("Update Order Status", error); return false; }
+    return true;
   } catch { return false; }
 };
 
@@ -254,6 +263,7 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
 
 export const addHistoryLog = async (history: StockHistory): Promise<boolean> => {
   try {
+    // Pastikan kolom 'price' dan 'total_price' sudah dibuat di tabel Database via SQL Editor
     const { error } = await supabase.from('stock_history').insert([{
       id: history.id,
       item_id: history.itemId,
@@ -263,13 +273,17 @@ export const addHistoryLog = async (history: StockHistory): Promise<boolean> => 
       quantity: history.quantity,
       previous_stock: history.previousStock,
       current_stock: history.currentStock,
-      price: history.price,        // [WAJIB] Pastikan kolom ini ada di DB
-      total_price: history.totalPrice, // [WAJIB] Pastikan kolom ini ada di DB
+      price: history.price, 
+      total_price: history.totalPrice,
       timestamp: history.timestamp,
       reason: history.reason
     }]);
-    if (error) console.error("Add History Error (Cek kolom price/total_price):", error);
-    return !error;
+    
+    if (error) { 
+        handleDbError("Save History (Detail Barang Keluar)", error); 
+        return false; 
+    }
+    return true;
   } catch { return false; }
 };
 
@@ -302,6 +316,7 @@ export const saveChatSession = async (session: ChatSession): Promise<boolean> =>
       unread_admin_count: session.unreadAdminCount,
       unread_user_count: session.unreadUserCount
     }]);
-    return !error;
+    if (error) { console.error("Chat Error:", error); return false; }
+    return true;
   } catch { return false; }
 };
