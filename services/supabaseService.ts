@@ -26,7 +26,7 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
     
     price: Number(item.price),
     // --- TAMBAHAN MAPPING ---
-    kingFanoPrice: Number(item.king_fano_price), // Baca dari DB (snake_case) ke App (camelCase)
+    kingFanoPrice: Number(item.king_fano_price || 0), // Baca dari DB (snake_case) ke App (camelCase)
     // ------------------------
     costPrice: Number(item.cost_price),
     
@@ -52,7 +52,7 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
     
     price: Number(data.price),
     // --- TAMBAHAN MAPPING ---
-    kingFanoPrice: Number(data.king_fano_price),
+    kingFanoPrice: Number(data.king_fano_price || 0),
     // ------------------------
     costPrice: Number(data.cost_price),
     
