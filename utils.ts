@@ -49,34 +49,57 @@ export const compressImage = (base64: string, maxWidth = 800, quality = 0.7): Pr
   });
 };
 
-// --- FUNGSI BARU YANG HILANG (PARSE CSV) ---
+// --- FUNGSI PARSE CSV (DIPERBAIKI: Logic Lebih Aman) ---
 export const parseCSV = (text: string) => {
   const lines = text.split('\n').filter(l => l.trim() !== '');
   if (lines.length === 0) return [];
 
+  // Helper untuk memecah baris CSV dengan benar (menangani koma di dalam kutip)
+  const parseLine = (line: string) => {
+      const result = [];
+      let startValueIndex = 0;
+      let inQuotes = false;
+      
+      for (let i = 0; i < line.length; i++) {
+          if (line[i] === '"') {
+              inQuotes = !inQuotes;
+          } else if (line[i] === ',' && !inQuotes) {
+              let val = line.substring(startValueIndex, i).trim();
+              // Bersihkan quotes pembungkus dan unescape double quotes
+              if (val.startsWith('"') && val.endsWith('"')) {
+                  val = val.slice(1, -1).replace(/""/g, '"');
+              }
+              result.push(val);
+              startValueIndex = i + 1;
+          }
+      }
+      // Push nilai terakhir
+      let val = line.substring(startValueIndex).trim();
+      if (val.startsWith('"') && val.endsWith('"')) {
+          val = val.slice(1, -1).replace(/""/g, '"');
+      }
+      result.push(val);
+      return result;
+  };
+
   // Ambil Header
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+  const headers = parseLine(lines[0]);
   
   const result = [];
 
   for (let i = 1; i < lines.length; i++) {
     const currentLine = lines[i];
-    // Regex untuk handle koma di dalam tanda kutip (contoh: "Baut, Mur")
-    const regex = /(?:,|\n|^)("(?:(?("")""|[^"])*)"|[^",\n]*|(?:\n|$))/g;
-    const matches = [];
-    let match;
-    while ((match = regex.exec(currentLine)) !== null) {
-        // Hapus delimiter dan tanda kutip
-        let val = match[1].replace(/^"|"$/g, '').replace(/""/g, '"');
-        if (match[0].startsWith(',')) matches.push(val);
-        else if (matches.length === 0) matches.push(val); // Item pertama
-    }
+    if(!currentLine.trim()) continue;
+    
+    const matches = parseLine(currentLine);
 
-    // Pastikan jumlah kolom sesuai (atau mendekati)
+    // Pastikan jumlah kolom valid
     if (matches.length > 0) {
         const obj: any = {};
         headers.forEach((header, index) => {
-            obj[header] = matches[index] || '';
+            // Bersihkan nama header
+            const cleanHeader = header.replace(/^"|"$/g, '');
+            obj[cleanHeader] = matches[index] || '';
         });
         result.push(obj);
     }
