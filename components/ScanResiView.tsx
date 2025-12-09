@@ -1,4 +1,3 @@
-// FILE: src/components/ScanResiView.tsx
 import React, { useState, useRef } from 'react';
 import { ScanBarcode, Upload, Loader2, Save, ShoppingBag, ClipboardList, CheckCircle, AlertTriangle, FileSpreadsheet } from 'lucide-react';
 import { compressImage, formatRupiah, parseCSV } from '../utils'; 
@@ -111,8 +110,8 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, onSaveBulk, isPr
       {/* TABS NAVIGASI */}
       <div className="flex justify-center mb-6">
           <div className="bg-white p-1 rounded-xl shadow-sm border border-gray-200 inline-flex">
-              <button onClick={() => setActiveTab('import')} className={`px-6 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'import' ? 'bg-green-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}><FileSpreadsheet size={18} /> Import Shopee (Excel/CSV)</button>
-              <button onClick={() => setActiveTab('camera')} className={`px-6 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'camera' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}><ScanBarcode size={18} /> Scan Foto Resi</button>
+              <button onClick={() => setActiveTab('import')} className={`px-6 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'import' ? 'bg-green-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}><FileSpreadsheet size={18} /> Shopee</button>
+              <button onClick={() => setActiveTab('camera')} className={`px-6 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'camera' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}><ScanBarcode size={18} /> Scan Barcode</button>
           </div>
       </div>
 
@@ -209,12 +208,13 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, onSaveBulk, isPr
       {activeTab === 'camera' && (
         <>
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 animate-in fade-in slide-in-from-right-4">
-            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2 mb-2"><ScanBarcode className="text-purple-600" /> Scan Foto Resi</h2>
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2 mb-2"><ScanBarcode className="text-purple-600" /> Scan Barcode</h2>
             <div onClick={() => !analyzing && !isProcessing && fileInputRef.current?.click()} className={`mt-4 border-3 border-dashed rounded-2xl h-64 flex flex-col items-center justify-center cursor-pointer transition-all relative overflow-hidden group ${analyzing ? 'border-purple-300 bg-purple-50' : 'border-gray-300 hover:border-purple-500 hover:bg-gray-50'}`}>
-            {image ? <img src={image} className="w-full h-full object-contain absolute inset-0 opacity-40" /> : <div className="text-center"><Upload size={40} className="mx-auto mb-2 text-purple-400 group-hover:text-purple-600 transition-colors"/><p className="font-medium text-gray-600">Klik Upload Foto Resi</p><p className="text-xs text-gray-400 mt-1">Pastikan Barcode/SKU terlihat</p></div>}
+            {image ? <img src={image} className="w-full h-full object-contain absolute inset-0 opacity-40" /> : <div className="text-center"><Upload size={40} className="mx-auto mb-2 text-purple-400 group-hover:text-purple-600 transition-colors"/><p className="font-medium text-gray-600">Klik Untuk Scan</p><p className="text-xs text-gray-400 mt-1">Arahkan kamera ke Barcode/Resi</p></div>}
             {(analyzing || isProcessing) && <div className="absolute inset-0 bg-white/90 flex flex-col items-center justify-center"><Loader2 size={40} className="animate-spin text-purple-600 mb-2"/><p className="text-sm font-bold text-purple-700 animate-pulse">{analyzing ? 'Menganalisis...' : 'Memproses...'}</p></div>}
             </div>
-            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+            {/* Added capture="environment" to trigger camera directly */}
+            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" capture="environment" onChange={handleImageUpload} />
         </div>
 
         {result && (
