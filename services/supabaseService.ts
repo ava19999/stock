@@ -58,7 +58,7 @@ export const fetchInventoryPaginated = async (page: number = 1, limit: number = 
       shelf: item.shelf || '',
       imageUrl: item.image_url || '',
       ecommerce: item.ecommerce || '',
-      lastUpdated: Number(item.last_updated) || Date.now() // Pastikan dibaca sebagai number
+      lastUpdated: Number(item.last_updated) || Date.now()
     }));
 
     return { data: mappedData, count: count || 0 };
@@ -143,7 +143,6 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
       shelf: item.shelf,
       image_url: item.imageUrl,
       ecommerce: item.ecommerce,
-      // PERBAIKAN: Gunakan Date.now() (Angka) agar sesuai dengan tipe bigint di database
       last_updated: Date.now() 
     }]);
     if (error) console.error("Add Error:", error);
@@ -165,10 +164,9 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
       shelf: item.shelf,
       image_url: item.imageUrl,
       ecommerce: item.ecommerce,
-      // PERBAIKAN: Gunakan Date.now() (Angka)
       last_updated: Date.now()
     }).eq('part_number', item.partNumber);
-    if (error) console.error("Update Error:", error);
+    if (error) console.error("Update Inventory Error:", error);
     return !error;
   } catch (e) { console.error(e); return false; }
 };
@@ -195,7 +193,7 @@ export const fetchOrders = async (): Promise<Order[]> => {
     return data.map((o: any) => ({
       id: o.id,
       customerName: o.customer_name || 'Guest',
-      items: o.items || [], // JSONB otomatis jadi object array
+      items: o.items || [], // JSONB
       totalAmount: Number(o.total_amount) || 0,
       status: o.status,
       timestamp: Number(o.timestamp)
@@ -213,6 +211,7 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
       status: order.status,
       timestamp: order.timestamp
     }]);
+    if (error) console.error("Save Order Error:", error);
     return !error;
   } catch { return false; }
 };
@@ -264,11 +263,12 @@ export const addHistoryLog = async (history: StockHistory): Promise<boolean> => 
       quantity: history.quantity,
       previous_stock: history.previousStock,
       current_stock: history.currentStock,
-      price: history.price,
-      total_price: history.totalPrice,
+      price: history.price,        // [WAJIB] Pastikan kolom ini ada di DB
+      total_price: history.totalPrice, // [WAJIB] Pastikan kolom ini ada di DB
       timestamp: history.timestamp,
       reason: history.reason
     }]);
+    if (error) console.error("Add History Error (Cek kolom price/total_price):", error);
     return !error;
   } catch { return false; }
 };

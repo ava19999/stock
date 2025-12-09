@@ -97,12 +97,13 @@ const AppContent: React.FC = () => {
   };
 
   const addNewHistory = async (newRecord: StockHistory) => {
-      // PERBAIKAN: Menggunakan await untuk memastikan data tersimpan ke DB
+      // PERBAIKAN: await hasil dari DB
       const success = await addHistoryLog(newRecord);
       if (success) {
           setHistory(prev => [newRecord, ...prev]);
       } else {
-          console.error("Gagal menyimpan riwayat. Pastikan tabel stock_history memiliki kolom 'price' dan 'total_price'.");
+          console.error("GAGAL MENYIMPAN HISTORY KE DB. Cek tabel stock_history di Supabase.");
+          showToast("Gagal mencatat riwayat (Cek Database)", 'error');
       }
   };
 
@@ -148,7 +149,6 @@ const AppContent: React.FC = () => {
 
           if (diff !== 0) {
               if (diff > 0) {
-                  // PERBAIKAN: Menambahkan await
                   await addNewHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
                       type: 'in', quantity: diff, previousStock: oldQty, currentStock: newQuantity,
@@ -159,7 +159,6 @@ const AppContent: React.FC = () => {
                   });
               } else {
                   const absDiff = Math.abs(diff);
-                  // PERBAIKAN: Menambahkan await
                   await addNewHistory({
                       id: generateId(), itemId: editItem.id, partNumber: data.partNumber, name: data.name,
                       type: 'out', quantity: absDiff, previousStock: oldQty, currentStock: newQuantity,
@@ -174,15 +173,15 @@ const AppContent: React.FC = () => {
           const success = await updateInventory(updatedItem);
           if (success) { 
               showToast('Update berhasil!'); 
-              setItems(prev => prev.map(i => i.id === editItem.id ? updatedItem : i)); 
+              // Refresh data agar list item terupdate penuh
+              refreshData();
           } else {
-              showToast('Gagal update', 'error');
+              showToast('Gagal update ke Database', 'error');
           }
 
       } else {
-          if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number ada!', 'error'); setLoading(false); return; }
+          if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number sudah ada!', 'error'); setLoading(false); return; }
           
-          // PERBAIKAN: Menambahkan await
           await addNewHistory({ 
               id: generateId(), itemId: data.partNumber, partNumber: data.partNumber, name: data.name, 
               type: 'in', quantity: newQuantity, previousStock: 0, currentStock: newQuantity, 
@@ -197,7 +196,7 @@ const AppContent: React.FC = () => {
               showToast('Tersimpan di Database!');
               refreshData(); 
           } else {
-              showToast('Gagal simpan', 'error');
+              showToast('Gagal simpan ke Database', 'error');
           }
       }
       setIsEditing(false); setEditItem(null); setLoading(false);
@@ -218,7 +217,12 @@ const AppContent: React.FC = () => {
       if(confirm('Hapus Permanen dari Database?')) {
           setLoading(true);
           const success = await deleteInventory(itemToDelete.partNumber);
-          if (success) { showToast('Dihapus'); setItems(prev => prev.filter(i => i.id !== id)); } else { showToast('Gagal hapus', 'error'); }
+          if (success) { 
+              showToast('Dihapus'); 
+              setItems(prev => prev.filter(i => i.id !== id)); 
+          } else { 
+              showToast('Gagal hapus dari DB', 'error'); 
+          }
           setLoading(false);
       }
   }
@@ -244,8 +248,8 @@ const AppContent: React.FC = () => {
       
       if (orderSuccess) {
           const updatedItemsList = [...items];
-          
-          // PERBAIKAN: Menggunakan loop for...of agar bisa menggunakan await
+          let dbError = false;
+
           for (const cartItem of cart) {
               const idx = updatedItemsList.findIndex(i => i.id === cartItem.id);
               if (idx > -1) {
@@ -255,10 +259,12 @@ const AppContent: React.FC = () => {
                   itemToUpdate.quantity = Math.max(0, itemToUpdate.quantity - qtySold);
                   updatedItemsList[idx] = itemToUpdate;
                   
-                  await updateInventory(itemToUpdate);
+                  // Update Stok di DB
+                  const updSuccess = await updateInventory(itemToUpdate);
+                  if (!updSuccess) dbError = true;
 
-                  // PERBAIKAN UTAMA: Tambahkan await di sini agar history tercatat sebelum lanjut
-                  await addNewHistory({
+                  // Catat History di DB
+                  const histSuccess = await addNewHistory({ // Tidak perlu await result, karena addNewHistory void, tapi internalnya async
                       id: generateId(), 
                       itemId: cartItem.id, 
                       partNumber: cartItem.partNumber, 
@@ -274,9 +280,21 @@ const AppContent: React.FC = () => {
                   });
               }
           }
-          setItems(updatedItemsList); setOrders([newOrder, ...orders]); setCart([]); setActiveView('orders'); showToast('Pesanan dibuat, stok terpotong!');
+
+          if (dbError) {
+              showToast('Pesanan dibuat, tapi stok gagal update di DB!', 'error');
+          } else {
+              showToast('Pesanan berhasil dibuat!');
+          }
+
+          // Reset cart & view
+          setCart([]); 
+          setActiveView('orders');
+          
+          // Refresh global data agar Dashboard sinkron
+          await refreshData();
       } else {
-          showToast('Gagal membuat pesanan', 'error');
+          showToast('Gagal membuat pesanan (Database Error)', 'error');
       }
       setLoading(false);
   };
@@ -286,7 +304,7 @@ const AppContent: React.FC = () => {
       if (!order) return;
 
       const success = await updateOrderStatusService(orderId, newStatus);
-      if (!success) { showToast('Gagal update status', 'error'); return; }
+      if (!success) { showToast('Gagal update status di DB', 'error'); return; }
 
       if (newStatus === 'cancelled' && order.status !== 'cancelled') {
           const newItems = [...items];
@@ -301,7 +319,6 @@ const AppContent: React.FC = () => {
 
                   await updateInventory(itemToUpdate);
                   
-                  // PERBAIKAN: Menambahkan await
                   await addNewHistory({
                       id: generateId(), itemId: itemToUpdate.id, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name,
                       type: 'in', quantity: restoreQty,
@@ -313,6 +330,8 @@ const AppContent: React.FC = () => {
               }
           }
           setItems(newItems); showToast('Pesanan dibatalkan, stok dikembalikan.');
+          // Refresh data untuk memastikan sinkronisasi
+          refreshData();
       }
       setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
   };
