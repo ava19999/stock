@@ -18,10 +18,8 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
-  history
+  history, onViewOrders, onAddNew, onEdit, onDelete 
 }) => {
-  // NOTE: Props items/orders tidak dipakai di dashboard utama karena kita fetch sendiri biar realtime
-  
   const [localItems, setLocalItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -46,7 +44,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const loadStats = useCallback(async () => {
     const invStats = await fetchInventoryStats();
-    
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const todayIn = history
@@ -55,7 +52,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const todayOut = history
       .filter(h => h.type === 'out' && h.timestamp >= startOfDay.getTime())
       .reduce((acc, h) => acc + (Number(h.quantity) || 0), 0);
-
     setStats({ ...invStats, todayIn, todayOut });
   }, [history]);
 
@@ -88,21 +84,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return { resi, ecommerce, keterangan };
   };
 
-  // --- LOGIC TAMPIL STOK YANG PINTAR ---
+  // --- LOGIC PINTAR (FIX STOK KOSONG) ---
   const getDisplayStock = (h: StockHistory) => {
-      // 1. Jika ada datanya langsung dari DB, pakai itu
+      // 1. Prioritas: Data asli dari database
       if (h.currentStock !== undefined && h.currentStock !== null) {
           return h.currentStock;
       }
       
-      // 2. Jika kosong (data lama), coba hitung manual: Stok Awal +/- Jumlah
+      // 2. Fallback: Hitung Manual (Stok Awal +/- Qty)
       if (h.previousStock !== undefined && h.previousStock !== null) {
           if (h.type === 'in') return h.previousStock + h.quantity;
           if (h.type === 'out') return Math.max(0, h.previousStock - h.quantity);
       }
 
-      // 3. Menyerah, tampilkan strip
-      return '-';
+      // 3. Terakhir: Tampilkan 0 daripada strip
+      return 0; 
   };
 
   // --- HISTORY MODAL (GLOBAL) ---
@@ -195,8 +191,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         <td className="p-3 align-top text-right font-mono text-gray-600 text-xs">{formatRupiah(price)}</td>
                                         <td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(total)}</td>
                                         
-                                        {/* BAGIAN INI SUDAH DIPERBAIKI: Menggunakan helper getDisplayStock */}
-                                        <td className="p-3 align-top text-right font-mono text-gray-600 font-bold bg-gray-50">
+                                        {/* BAGIAN STOK YG DIPERBAIKI (PAKAI HELPER) */}
+                                        <td className="p-3 align-top text-right font-mono text-gray-600 bg-gray-50 font-bold">
                                             {getDisplayStock(h)}
                                         </td>
 
@@ -212,10 +208,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
     );
   };
-
-  // ... (Sisa Render utama Dashboard, Stats, List Item tetap sama) ...
-  // Silakan copy paste bagian render return dari file sebelumnya, atau biarkan jika Anda hanya mengganti bagian atas dan Modal.
-  // Agar aman, saya sertakan render utama di bawah ini:
 
   return (
     <div className="space-y-4 pb-24">
@@ -234,7 +226,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div className="mt-6">
         <div className="flex justify-between items-center mb-4">
             <div className="flex items-center gap-3"><h2 className="text-base font-bold text-gray-800">Daftar Barang</h2><span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{totalCount} Item</span></div>
-            <div className="flex gap-2"><div className="bg-white rounded-lg p-1 flex shadow-sm border border-gray-100"><button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={16}/></button><button onClick={() => setViewMode('list')} className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><List size={16}/></button></div><button onClick={() => setTotalPages(p => p), setPage(p => p)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-md active:scale-95 transition-all flex items-center gap-1.5 cursor-default">+ Barang</button></div>
+            <div className="flex gap-2"><div className="bg-white rounded-lg p-1 flex shadow-sm border border-gray-100"><button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={16}/></button><button onClick={() => setViewMode('list')} className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><List size={16}/></button></div><button onClick={onAddNew} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-md active:scale-95 transition-all flex items-center gap-1.5">+ Barang</button></div>
         </div>
         <div className="relative mb-4"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} /><input type="text" placeholder="Cari (Tekan Enter atau Tunggu)..." onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm" /></div>
 

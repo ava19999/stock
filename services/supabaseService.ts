@@ -2,10 +2,8 @@
 import { supabase } from '../lib/supabase';
 import { InventoryItem, InventoryFormData, Order, StockHistory, ChatSession } from '../types';
 
-// Helper error
 const handleDbError = (op: string, err: any) => {
   console.error(`${op} Error:`, err);
-  // alert(`Gagal ${op}: ${err.message}`); // Uncomment jika ingin popup error
 };
 
 // --- INVENTORY ---
@@ -14,7 +12,8 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
   const { data, error } = await supabase
     .from('inventory')
     .select('*')
-    .order('last_updated', { ascending: false });
+    .order('last_updated', { ascending: false })
+    .limit(100);
 
   if (error) { console.error(error); return []; }
 
@@ -39,6 +38,7 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
 export const getItemById = async (id: string): Promise<InventoryItem | null> => {
   const { data, error } = await supabase.from('inventory').select('*').eq('id', id).single();
   if (error || !data) return null;
+  
   return {
     id: data.id,
     partNumber: data.part_number,
@@ -83,7 +83,6 @@ export const fetchInventoryStats = async () => {
 export const fetchShopItems = async (page: number, limit: number, search: string, cat: string) => {
     let all = await fetchInventory();
     all = all.filter(i => i.quantity > 0 && i.price > 0);
-    
     if (cat !== 'Semua') all = all.filter(i => (i.description || '').includes(`[${cat}]`));
     if (search) {
         const s = search.toLowerCase();
@@ -130,7 +129,6 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
     ecommerce: item.ecommerce,
     last_updated: Date.now()
   }).eq('id', item.id);
-  
   if (error) { handleDbError("Update Stok", error); return false; }
   return true;
 };
@@ -145,28 +143,25 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
 
 export const fetchOrders = async (): Promise<Order[]> => {
     const { data } = await supabase.from('orders').select('*').order('timestamp', { ascending: false }).limit(100);
-    // Mapping balik dari DB (snake_case) ke App (camelCase) saat ambil data
     return (data || []).map((o: any) => ({
         id: o.id, 
-        customerName: o.customer_name,  // <-- Perhatikan ini
+        customerName: o.customer_name,
         items: o.items, 
-        totalAmount: Number(o.total_amount), // <-- Perhatikan ini
+        totalAmount: Number(o.total_amount),
         status: o.status, 
         timestamp: Number(o.timestamp)
     }));
 };
 
 export const saveOrder = async (order: Order): Promise<boolean> => {
-    // [PERBAIKAN PENTING]: Mapping App (camelCase) -> DB (snake_case)
     const { error } = await supabase.from('orders').insert([{
         id: order.id, 
-        customer_name: order.customerName, // Jangan salah ketik 'customerName'
+        customer_name: order.customerName,
         items: order.items,
-        total_amount: order.totalAmount,   // Jangan salah ketik 'totalAmount'
+        total_amount: order.totalAmount,
         status: order.status, 
         timestamp: order.timestamp
     }]);
-    
     if (error) { handleDbError("Simpan Order", error); return false; }
     return true;
 };
@@ -177,7 +172,7 @@ export const updateOrderStatusService = async (id: string, status: string): Prom
     return true;
 };
 
-// --- HISTORY ---
+// --- HISTORY (BAGIAN PENTING YANG DIPERBAIKI) ---
 
 export const fetchHistory = async (): Promise<StockHistory[]> => {
     const { data } = await supabase.from('stock_history').select('*').order('timestamp', { ascending: false }).limit(200);
@@ -189,7 +184,10 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
         type: h.type,
         quantity: h.quantity, 
         previousStock: h.previous_stock, 
-        currentStock: h.current_stock,
+        
+        // [PERBAIKAN] Pastikan membaca kolom current_stock dari DB
+        currentStock: h.current_stock, 
+        
         price: h.price, 
         totalPrice: h.total_price, 
         timestamp: h.timestamp, 
@@ -198,7 +196,6 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
 };
 
 export const addHistoryLog = async (h: StockHistory): Promise<boolean> => {
-    // Mapping App -> DB
     const { error } = await supabase.from('stock_history').insert([{
         id: h.id, 
         item_id: h.itemId, 
@@ -207,7 +204,10 @@ export const addHistoryLog = async (h: StockHistory): Promise<boolean> => {
         type: h.type,
         quantity: h.quantity, 
         previous_stock: h.previousStock, 
-        current_stock: h.current_stock,
+        
+        // [PERBAIKAN] Pastikan baris ini ada agar data terkirim ke DB!
+        current_stock: h.currentStock, 
+        
         price: h.price, 
         total_price: h.totalPrice, 
         timestamp: h.timestamp, 
