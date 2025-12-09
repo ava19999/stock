@@ -13,7 +13,7 @@ import {
   fetchOrders, saveOrder, updateOrderStatusService,
   fetchHistory, addHistoryLog,
   fetchChatSessions, saveChatSession
-} from './services/supabaseService';
+} from './services/firebaseService';
 import { generateId } from './utils';
 import { Home, MessageSquare, Package, ShieldCheck, User, CheckCircle, XCircle, ClipboardList, LogOut, ArrowRight, CloudLightning, RefreshCw, KeyRound, ShoppingCart, Car, ScanBarcode } from 'lucide-react';
 
