@@ -197,6 +197,7 @@ const AppContent: React.FC = () => {
                   const dealPrice = cartItem.customPrice ?? currentItem.price;
                   const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                   await updateInventory(itemToUpdate);
+                  // Format: Order #123 (Nama) -> Dashboard akan otomatis deteksi nama dalam kurung
                   await addNewHistory({
                       id: generateId(), itemId: cartItem.id, partNumber: cartItem.partNumber, name: cartItem.name,
                       type: 'out', quantity: qtySold, previousStock: currentItem.quantity, currentStock: itemToUpdate.quantity,
@@ -215,14 +216,26 @@ const AppContent: React.FC = () => {
       if (await updateOrderStatusService(orderId, newStatus)) {
           if (newStatus === 'cancelled' && order.status !== 'cancelled') {
               
-              // --- PERBAIKAN: Ambil Info Resi & Via dari Nama Pelanggan ---
+              // --- PERBAIKAN: Ambil Nama Murni & Info Tambahan ---
+              // Tujuannya agar format menjadi: Retur Order #123 (Budi) (Resi:...) (Via:...)
+              let pureName = order.customerName;
               let extraInfo = '';
-              const resiMatch = order.customerName.match(/\(Resi: (.*?)\)/);
-              if (resiMatch) extraInfo += ` (Resi: ${resiMatch[1]})`;
+              
+              // Pisahkan Resi dan Via dari nama (jika ada)
+              const resiMatch = pureName.match(/\(Resi: (.*?)\)/);
+              if (resiMatch) {
+                  extraInfo += ` (Resi: ${resiMatch[1]})`;
+                  pureName = pureName.replace(/\(Resi:.*?\)/, '');
+              }
 
-              const viaMatch = order.customerName.match(/\(Via: (.*?)\)/);
-              if (viaMatch) extraInfo += ` (Via: ${viaMatch[1]})`;
-              // ------------------------------------------------------------
+              const viaMatch = pureName.match(/\(Via: (.*?)\)/);
+              if (viaMatch) {
+                  extraInfo += ` (Via: ${viaMatch[1]})`;
+                  pureName = pureName.replace(/\(Via:.*?\)/, '');
+              }
+              
+              pureName = pureName.trim();
+              // ---------------------------------------------------
 
               for (const orderItem of order.items) {
                   const currentItem = await getItemById(orderItem.id);
@@ -231,7 +244,7 @@ const AppContent: React.FC = () => {
                       const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: currentItem.quantity + restoreQty, lastUpdated: Date.now() };
                       await updateInventory(itemToUpdate);
                       
-                      // Masukkan extraInfo ke dalam reason agar Dashboard bisa membacanya
+                      // FORMAT PENTING: Nama Customer harus di dalam kurung '(...)' agar terbaca Dashboard
                       await addNewHistory({
                           id: generateId(), 
                           itemId: itemToUpdate.id, 
@@ -244,7 +257,7 @@ const AppContent: React.FC = () => {
                           price: orderItem.customPrice ?? orderItem.price, 
                           totalPrice: (orderItem.customPrice ?? orderItem.price) * restoreQty, 
                           timestamp: Date.now(), 
-                          reason: `Retur Order #${orderId.slice(0,6)}${extraInfo}` // <-- Format Khusus
+                          reason: `Retur Order #${orderId.slice(0,6)} (${pureName})${extraInfo}` 
                       });
                   }
               }
@@ -314,12 +327,13 @@ const AppContent: React.FC = () => {
                 const updateData = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                 await updateInventory(updateData);
                 
-                // Format disesuaikan dengan Dashboard.tsx agar terbaca di Detail Riwayat
+                // --- PERBAIKAN: Masukkan Nama Customer ke Reason dalam kurung '(...)' ---
+                // Format: Scan Resi (Nama) (Resi:...) (Via:...)
                 await addHistoryLog({
                     id: generateId(), itemId: item.id, partNumber: item.partNumber, name: item.name,
                     type: 'out', quantity: qtySold, previousStock: currentItem.quantity, currentStock: updateData.quantity,
                     price: item.price, totalPrice: item.price * qtySold, timestamp: Date.now(), 
-                    reason: `Scan Resi (Resi: ${data.resi || '-'}) (Via: ${data.ecommerce || '-'})`
+                    reason: `Scan Resi (${data.customerName || 'Tamu'}) (Resi: ${data.resi || '-'}) (Via: ${data.ecommerce || '-'})`
                 });
             }
         }
