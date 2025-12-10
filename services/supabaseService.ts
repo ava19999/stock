@@ -6,11 +6,11 @@ const handleDbError = (op: string, err: any) => {
   console.error(`${op} Error:`, err);
 };
 
-// Update Mapping: Tambahkan sku
+// ... mapDbToInventoryItem, fetchInventory, dll (TETAP SAMA) ...
 const mapDbToInventoryItem = (item: any): InventoryItem => ({
     id: item.id,
     partNumber: item.part_number,
-    sku: item.sku || '', // <--- MAPPING SKU
+    sku: item.sku || '',
     name: item.name,
     description: item.description,
     price: Number(item.price),
@@ -26,9 +26,6 @@ const mapDbToInventoryItem = (item: any): InventoryItem => ({
     lastUpdated: Number(item.last_updated)
 });
 
-// ... fetchInventory, getItemById, fetchInventoryPaginated, fetchInventoryStats, fetchShopItems TETAP SAMA ...
-// Hanya pastikan mapDbToInventoryItem di atas sudah diupdate.
-
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
   const { data, error } = await supabase.from('inventory').select('*').order('last_updated', { ascending: false });
   if (error) { console.error(error); return []; }
@@ -43,7 +40,6 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
 
 export const fetchInventoryPaginated = async (page: number, limit: number, search: string, filter: string = 'all') => {
     let query = supabase.from('inventory').select('*', { count: 'exact' });
-    // Update pencarian agar bisa cari via SKU juga
     if (search) {
         query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,sku.ilike.%${search}%`);
     }
@@ -79,11 +75,10 @@ export const fetchShopItems = async (page: number, limit: number, search: string
     return { data: (data || []).map(mapDbToInventoryItem), count: count || 0 };
 };
 
-// Update Add: Tambahkan SKU
 export const addInventory = async (item: InventoryFormData): Promise<boolean> => {
   const { error } = await supabase.from('inventory').insert([{
     part_number: item.partNumber,
-    sku: item.sku, // <--- TAMBAHKAN INI
+    sku: item.sku,
     name: item.name,
     description: item.description,
     price: item.price,
@@ -102,10 +97,9 @@ export const addInventory = async (item: InventoryFormData): Promise<boolean> =>
   return true;
 };
 
-// Update Update: Tambahkan SKU
 export const updateInventory = async (item: InventoryItem): Promise<boolean> => {
   const { error } = await supabase.from('inventory').update({
-    sku: item.sku, // <--- TAMBAHKAN INI
+    sku: item.sku,
     name: item.name,
     description: item.description,
     price: item.price,
@@ -125,7 +119,6 @@ export const updateInventory = async (item: InventoryItem): Promise<boolean> => 
   return true;
 };
 
-// ... deleteInventory, fetchOrders, saveOrder, updateOrderStatusService, fetchHistory, addHistoryLog, fetchChatSessions, saveChatSession TETAP SAMA ...
 export const deleteInventory = async (id: string): Promise<boolean> => {
   const { error } = await supabase.from('inventory').delete().eq('id', id);
   if (error) { handleDbError("Hapus Barang", error); return false; }
@@ -147,11 +140,19 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
     return true;
 };
 
-export const updateOrderStatusService = async (id: string, status: string): Promise<boolean> => {
-    const { error } = await supabase.from('orders').update({ status }).eq('id', id);
+// --- UPDATE FUNGSI INI (Tambahkan parameter timestamp) ---
+export const updateOrderStatusService = async (id: string, status: string, timestamp?: number): Promise<boolean> => {
+    const updateData: any = { status };
+    // Jika timestamp diberikan (saat masuk history), update field timestamp di DB
+    if (timestamp) {
+        updateData.timestamp = timestamp;
+    }
+
+    const { error } = await supabase.from('orders').update(updateData).eq('id', id);
     if (error) { handleDbError("Update Order", error); return false; }
     return true;
 };
+// ---------------------------------------------------------
 
 export const fetchHistory = async (): Promise<StockHistory[]> => {
     const { data } = await supabase.from('stock_history').select('*').order('timestamp', { ascending: false }).limit(200);

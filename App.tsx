@@ -190,19 +190,16 @@ const AppContent: React.FC = () => {
       
       setLoading(true);
       if (await saveOrder(newOrder)) {
-          // --- PERUBAHAN: TIDAK ADA PENGURANGAN STOK SAAT CHECKOUT (PESANAN BARU) ---
-          // Stok hanya akan berkurang saat status berubah menjadi 'processing'
-          
           showToast('Pesanan berhasil dibuat!'); setCart([]); setActiveView('orders'); await refreshData();
       } else { showToast('Gagal membuat pesanan', 'error'); }
       setLoading(false);
   };
 
+  // --- LOGIC UTAMA: UPDATE STATUS + TIMESTAMP BARU JIKA MASUK HISTORY ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
 
-      // Persiapan data pelanggan untuk history
       let pureName = order.customerName;
       let extraInfo = '';
       const resiMatch = pureName.match(/\(Resi: (.*?)\)/);
@@ -211,9 +208,15 @@ const AppContent: React.FC = () => {
       if (viaMatch) { extraInfo += ` (Via: ${viaMatch[1]})`; pureName = pureName.replace(/\(Via:.*?\)/, ''); }
       pureName = pureName.trim();
 
-      // --- LOGIC 1: PENDING -> PROCESSING (KURANGI STOK) ---
+      // Tentukan apakah perlu update timestamp (Hanya jika masuk ke History: Completed/Cancelled)
+      let updateTime = undefined;
+      if (newStatus === 'completed' || newStatus === 'cancelled') {
+          updateTime = Date.now(); // Pake waktu sekarang
+      }
+
+      // --- LOGIC 1: PENDING -> PROCESSING (KURANGI STOK, TIMESTAMP TIDAK BERUBAH) ---
       if (order.status === 'pending' && newStatus === 'processing') {
-          if (await updateOrderStatusService(orderId, newStatus)) {
+          if (await updateOrderStatusService(orderId, newStatus)) { 
               for (const orderItem of order.items) {
                   const currentItem = await getItemById(orderItem.id);
                   if (currentItem) {
@@ -234,11 +237,10 @@ const AppContent: React.FC = () => {
               setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
           }
       }
-      // --- LOGIC 2: BATAL / RETUR (KEMBALIKAN STOK HANYA JIKA SUDAH DIPROSES) ---
+      // --- LOGIC 2: BATAL / RETUR (UPDATE TIMESTAMP + KEMBALIKAN STOK) ---
       else if (newStatus === 'cancelled' && order.status !== 'cancelled') {
-          if (await updateOrderStatusService(orderId, newStatus)) {
-              // HANYA kembalikan stok jika status sebelumnya BUKAN 'pending'
-              // (Artinya stok sudah pernah dipotong saat masuk 'processing')
+          // Pass 'updateTime' agar timestamp di DB diperbarui
+          if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
               if (order.status !== 'pending') {
                   for (const orderItem of order.items) {
                       const currentItem = await getItemById(orderItem.id);
@@ -260,13 +262,15 @@ const AppContent: React.FC = () => {
                   showToast('Pesanan dibatalkan (Stok belum dipotong).');
               }
               refreshData();
-              setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
+              // Update state lokal dengan timestamp baru
+              setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus, timestamp: updateTime || x.timestamp } : x));
           }
       }
-      // --- LOGIC 3: PERUBAHAN STATUS LAIN (MISAL PROCESSING -> COMPLETED) ---
+      // --- LOGIC 3: PROCESSING -> COMPLETED (UPDATE TIMESTAMP) ---
       else {
-          if (await updateOrderStatusService(orderId, newStatus)) {
-              setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
+          // Pass 'updateTime' agar timestamp di DB diperbarui
+          if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
+              setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus, timestamp: updateTime || x.timestamp } : x));
           }
       }
   };
@@ -319,9 +323,6 @@ const AppContent: React.FC = () => {
     }
 
     const totalAmount = matchedCartItems.reduce((sum, item) => sum + (item.price * item.cartQuantity), 0);
-    
-    // --- PENTING: SCAN RESI LANGSUNG STATUS 'processing' AGAR STOK TERPOTONG ---
-    // Karena barang yang discan resinya diasumsikan sudah siap kirim/dipacking.
     const newOrder: Order = { id: generateId(), customerName: finalCustomerName, items: matchedCartItems, totalAmount: totalAmount, status: 'processing', timestamp: Date.now() };
 
     if (await saveOrder(newOrder)) {
