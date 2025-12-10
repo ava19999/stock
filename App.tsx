@@ -214,16 +214,37 @@ const AppContent: React.FC = () => {
       if (!order) return;
       if (await updateOrderStatusService(orderId, newStatus)) {
           if (newStatus === 'cancelled' && order.status !== 'cancelled') {
+              
+              // --- PERBAIKAN: Ambil Info Resi & Via dari Nama Pelanggan ---
+              let extraInfo = '';
+              const resiMatch = order.customerName.match(/\(Resi: (.*?)\)/);
+              if (resiMatch) extraInfo += ` (Resi: ${resiMatch[1]})`;
+
+              const viaMatch = order.customerName.match(/\(Via: (.*?)\)/);
+              if (viaMatch) extraInfo += ` (Via: ${viaMatch[1]})`;
+              // ------------------------------------------------------------
+
               for (const orderItem of order.items) {
                   const currentItem = await getItemById(orderItem.id);
                   if (currentItem) {
                       const restoreQty = orderItem.cartQuantity;
                       const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: currentItem.quantity + restoreQty, lastUpdated: Date.now() };
                       await updateInventory(itemToUpdate);
+                      
+                      // Masukkan extraInfo ke dalam reason agar Dashboard bisa membacanya
                       await addNewHistory({
-                          id: generateId(), itemId: itemToUpdate.id, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name,
-                          type: 'in', quantity: restoreQty, previousStock: itemToUpdate.quantity - restoreQty, currentStock: itemToUpdate.quantity,
-                          price: orderItem.customPrice ?? orderItem.price, totalPrice: (orderItem.customPrice ?? orderItem.price) * restoreQty, timestamp: Date.now(), reason: `Retur Order #${orderId.slice(0,6)}`
+                          id: generateId(), 
+                          itemId: itemToUpdate.id, 
+                          partNumber: itemToUpdate.partNumber, 
+                          name: itemToUpdate.name,
+                          type: 'in', 
+                          quantity: restoreQty, 
+                          previousStock: itemToUpdate.quantity - restoreQty, 
+                          currentStock: itemToUpdate.quantity,
+                          price: orderItem.customPrice ?? orderItem.price, 
+                          totalPrice: (orderItem.customPrice ?? orderItem.price) * restoreQty, 
+                          timestamp: Date.now(), 
+                          reason: `Retur Order #${orderId.slice(0,6)}${extraInfo}` // <-- Format Khusus
                       });
                   }
               }
@@ -293,16 +314,13 @@ const AppContent: React.FC = () => {
                 const updateData = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                 await updateInventory(updateData);
                 
-                // --- PERBAIKAN DI SINI (FORMAT REASON) ---
                 // Format disesuaikan dengan Dashboard.tsx agar terbaca di Detail Riwayat
                 await addHistoryLog({
                     id: generateId(), itemId: item.id, partNumber: item.partNumber, name: item.name,
                     type: 'out', quantity: qtySold, previousStock: currentItem.quantity, currentStock: updateData.quantity,
                     price: item.price, totalPrice: item.price * qtySold, timestamp: Date.now(), 
-                    // Format khusus yang dibaca oleh Dashboard: (Resi: ...) (Via: ...)
                     reason: `Scan Resi (Resi: ${data.resi || '-'}) (Via: ${data.ecommerce || '-'})`
                 });
-                // ----------------------------------------
             }
         }
         
