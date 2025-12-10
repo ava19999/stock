@@ -155,7 +155,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   return (
     <div className="space-y-4 pb-24">
       
-      {/* --- GLOBAL HISTORY MODAL --- */}
+      {/* --- GLOBAL HISTORY MODAL (DETAIL RIWAYAT MASUK/KELUAR) --- */}
       {showHistoryDetail && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 duration-300 flex flex-col max-h-[90vh]">
@@ -172,12 +172,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <thead className="bg-gray-100 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
                             <tr>
                                 <th className="p-3 border-b border-gray-200 w-28">Tanggal</th>
+                                {/* KOLOM RESI & ECOMMERCE DIKEMBALIKAN */}
+                                <th className="p-3 border-b border-gray-200 w-32">Resi</th>
+                                <th className="p-3 border-b border-gray-200 w-32">E-Commerce</th>
                                 <th className="p-3 border-b border-gray-200 w-32">No. Part</th>
                                 <th className="p-3 border-b border-gray-200">Nama Barang</th>
                                 <th className="p-3 border-b border-gray-200 text-right w-20">Qty</th>
                                 <th className="p-3 border-b border-gray-200 text-right w-32">Harga Satuan</th>
                                 <th className="p-3 border-b border-gray-200 text-right w-32">Total Harga</th>
-                                <th className="p-3 border-b border-gray-200 w-64">Keterangan</th>
+                                <th className="p-3 border-b border-gray-200 w-48">Keterangan</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 text-sm">
@@ -186,33 +189,42 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 const total = h.totalPrice || (price * (Number(h.quantity) || 0));
                                 const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
                                 
-                                // --- LOGIC UTAMA PERBAIKAN ---
-                                let mainText = customer !== '-' ? customer : keterangan;
-                                
-                                // Jika ini Detail Masuk (Retur) dan ada nama customer -> Format: "Retur Order [Nama]"
+                                // Logic Text Keterangan
+                                let mainText = keterangan;
                                 if (showHistoryDetail === 'in' && customer !== '-' && keterangan.toLowerCase().includes('retur')) {
                                     mainText = `Retur Order ${customer}`;
+                                } else if (customer !== '-') {
+                                    mainText = customer;
                                 }
-                                // -----------------------------
 
                                 return (
                                     <tr key={h.id} className="hover:bg-blue-50 transition-colors">
                                         <td className="p-3 text-gray-600 whitespace-nowrap align-top"><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div></td>
+                                        
+                                        {/* KOLOM RESI KEMBALI */}
+                                        <td className="p-3 align-top">
+                                            <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${resi !== '-' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-300'}`}>{resi}</span>
+                                        </td>
+                                        
+                                        {/* KOLOM E-COMMERCE KEMBALI */}
+                                        <td className="p-3 align-top">
+                                            <span className={`inline-block px-2 py-1 rounded text-xs font-medium flex items-center gap-1 w-fit ${ecommerce !== '-' ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'text-gray-300'}`}>
+                                                {ecommerce !== '-' && <ShoppingBag size={10} />}
+                                                {ecommerce}
+                                            </span>
+                                        </td>
+
                                         <td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber || '-'}</td>
                                         <td className="p-3 font-medium text-gray-800 max-w-[200px] align-top"><div className="line-clamp-2">{h.name || 'Unknown Item'}</div></td>
                                         <td className={`p-3 text-right font-bold align-top ${showHistoryDetail==='in'?'text-green-600':'text-red-600'}`}>{showHistoryDetail==='in' ? '+' : '-'}{h.quantity}</td>
                                         <td className="p-3 text-right text-gray-600 font-mono align-top text-xs">{formatRupiah(price)}</td>
                                         <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">{formatRupiah(total)}</td>
                                         
-                                        {/* KOLOM KETERANGAN */}
-                                        <td className="p-3 align-top text-gray-700">
-                                            <div className="font-bold text-gray-900 text-xs mb-1.5 flex items-center gap-1.5">
+                                        {/* KOLOM KETERANGAN (Cuma Teks Utama/Nama) */}
+                                        <td className="p-3 align-top text-gray-700 font-medium text-xs">
+                                            <div className="flex items-center gap-1.5">
                                                 {customer !== '-' && <User size={12} className="text-gray-400"/>}
                                                 {mainText}
-                                            </div>
-                                            <div className="flex flex-wrap gap-1">
-                                                {resi !== '-' && (<div className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] border border-blue-100">Resi: {resi}</div>)}
-                                                {ecommerce !== '-' && (<div className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-100"><ShoppingBag size={8}/> {ecommerce}</div>)}
                                             </div>
                                         </td>
                                     </tr>
@@ -226,7 +238,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
-      {/* --- ITEM HISTORY MODAL (DIPERBARUI JUGA) --- */}
+      {/* --- ITEM HISTORY MODAL (RIWAYAT BARANG SPESIFIK) --- */}
       {selectedItemHistory && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
@@ -273,14 +285,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     const price = h.price || 0;
                                     const total = h.totalPrice || (price * (Number(h.quantity) || 0));
                                     
-                                    // --- LOGIC UTAMA PERBAIKAN ---
+                                    // Logic Text
                                     let mainText = customer !== '-' ? customer : keterangan;
-                                    
-                                    // Logic khusus untuk menampilkan "Retur Order [Nama]" di detail riwayat item juga
                                     if (h.type === 'in' && customer !== '-' && keterangan.toLowerCase().includes('retur')) {
                                         mainText = `Retur Order ${customer}`;
                                     }
-                                    // -----------------------------
 
                                     return (
                                         <tr key={h.id} className="hover:bg-gray-50 transition-colors">
@@ -290,6 +299,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             <td className="p-3 align-top text-right font-mono text-gray-600 text-xs">{formatRupiah(price)}</td>
                                             <td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(total)}</td>
                                             <td className="p-3 align-top text-right font-mono text-gray-600">{h.currentStock}</td>
+                                            
+                                            {/* KETERANGAN DI ITEM HISTORY (TETAP MENYATU KARENA KOLOM TERBATAS) */}
                                             <td className="p-3 align-top text-gray-700">
                                                 <div className="font-bold text-gray-900 text-xs mb-1.5 flex items-center gap-1.5">
                                                     {customer !== '-' && <User size={12} className="text-gray-400"/>}
@@ -311,7 +322,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
       
-      {/* STATS */}
+      {/* STATS (TIDAK BERUBAH) */}
       <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide snap-x md:grid md:grid-cols-5 md:gap-4 md:overflow-visible md:mx-0 md:px-0 md:pb-0">
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Package size={32} className="text-blue-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Package size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Item</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalItems, false)}</div></div>
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Layers size={32} className="text-purple-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Layers size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Stok</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalStock, false)}</div></div>
@@ -324,30 +335,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="flex justify-between items-center mb-4">
             <div className="flex items-center gap-3"><h2 className="text-base font-bold text-gray-800">Daftar Barang</h2><span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{totalCount} Item</span></div>
             <div className="flex gap-2">
-                {/* --- TOMBOL FILTER (BARU) --- */}
                 <div className="bg-white rounded-lg p-1 flex shadow-sm border border-gray-100 items-center">
-                    <button 
-                        onClick={() => setFilterType('all')} 
-                        className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${filterType === 'all' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
-                    >
-                        Semua
-                    </button>
-                    <button 
-                        onClick={() => setFilterType('low')} 
-                        className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${filterType === 'low' ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
-                        title="Stok Kurang dari 4"
-                    >
-                        <AlertTriangle size={12}/> Menipis
-                    </button>
-                    <button 
-                        onClick={() => setFilterType('empty')} 
-                        className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${filterType === 'empty' ? 'bg-red-100 text-red-700 border border-red-200' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
-                        title="Stok Habis (0)"
-                    >
-                        <AlertCircle size={12}/> Habis
-                    </button>
+                    <button onClick={() => setFilterType('all')} className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${filterType === 'all' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>Semua</button>
+                    <button onClick={() => setFilterType('low')} className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${filterType === 'low' ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`} title="Stok Kurang dari 4"><AlertTriangle size={12}/> Menipis</button>
+                    <button onClick={() => setFilterType('empty')} className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 ${filterType === 'empty' ? 'bg-red-100 text-red-700 border border-red-200' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`} title="Stok Habis (0)"><AlertCircle size={12}/> Habis</button>
                 </div>
-                {/* --------------------------- */}
                 
                 <div className="bg-white rounded-lg p-1 flex shadow-sm border border-gray-100 ml-2">
                     <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={16}/></button>
