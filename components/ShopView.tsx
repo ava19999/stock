@@ -1,8 +1,8 @@
 // FILE: src/components/ShopView.tsx
-import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { InventoryItem, CartItem } from '../types';
 import { fetchShopItems } from '../services/supabaseService'; 
-import { ShoppingCart, Search, Plus, Minus, X, Tag, Car, Package, Camera, Loader2, Sparkles, LayoutGrid, List, Check, ZoomIn, Move, ChevronLeft, ChevronRight, ShoppingBag, Crown, ChevronDown, Eye } from 'lucide-react';
+import { ShoppingCart, Search, Plus, Minus, X, Tag, Car, Package, Camera, Loader2, Sparkles, LayoutGrid, List, Check, ZoomIn, Move, ChevronLeft, ChevronRight, Crown, ChevronDown, Eye } from 'lucide-react';
 import { formatRupiah, compressImage } from '../utils';
 
 interface ImageCropperProps { imageSrc: string; onConfirm: (croppedBase64: string) => void; onCancel: () => void; }
@@ -46,7 +46,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   const [totalPages, setTotalPages] = useState(1);
   
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('Semua');
+  // const [selectedCategory, setSelectedCategory] = useState('Semua'); // REMOVED: Filter category
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
   const [adminPriceMode, setAdminPriceMode] = useState<'retail' | 'kingFano'>('retail');
@@ -65,11 +65,12 @@ export const ShopView: React.FC<ShopViewProps> = ({
 
   const loadShopData = useCallback(async () => {
     setLoading(true);
-    const { data, count } = await fetchShopItems(page, 20, searchTerm, selectedCategory);
+    // Always pass 'Semua' as category to fetch all items
+    const { data, count } = await fetchShopItems(page, 20, searchTerm, 'Semua');
     setShopItems(data);
     setTotalPages(Math.ceil(count / 20));
     setLoading(false);
-  }, [page, searchTerm, selectedCategory]);
+  }, [page, searchTerm]); // Removed selectedCategory dependency
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -77,7 +78,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
         loadShopData();
     }, 500);
     return () => clearTimeout(timer);
-  }, [searchTerm, selectedCategory]);
+  }, [searchTerm]); // Removed selectedCategory dependency
 
   useEffect(() => {
     loadShopData();
@@ -89,7 +90,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   const cartTotal = cart.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0); 
   const cartItemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
 
-  const carCategories = ['Semua', 'Honda', 'Toyota', 'Suzuki', 'Nissan', 'Daihatsu', 'Mitsubishi', 'Wuling', 'Mazda'];
+  // const carCategories = ['Semua', 'Honda', 'Toyota', 'Suzuki', 'Nissan', 'Daihatsu', 'Mitsubishi', 'Wuling', 'Mazda']; // REMOVED
 
   return (
     <div className="relative min-h-full pb-20" onClick={() => setShowAdminPriceMenu(false)}>
@@ -101,7 +102,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
           {isAdmin && (<div className="absolute top-3 right-3 z-10"><button onClick={() => bannerInputRef.current?.click()} disabled={isUploadingBanner} className="bg-white/90 backdrop-blur text-gray-800 px-3 py-2 rounded-lg text-xs font-bold shadow-md hover:bg-white flex items-center gap-2 transition-all active:scale-95">{isUploadingBanner ? <Loader2 size={14} className="animate-spin"/> : <Camera size={14}/>}{isUploadingBanner ? 'Upload...' : 'Ganti Banner'}</button><input type="file" ref={bannerInputRef} className="hidden" accept="image/*" onChange={handleFileSelect} /></div>)}
       </div>
 
-      {/* FILTER BAR */}
+      {/* FILTER BAR (MODIFIED: Removed Car Category Tabs) */}
       <div className="sticky top-[64px] z-30 bg-gray-50/95 backdrop-blur-sm pt-2 pb-2 -mx-2 px-2 md:mx-0 md:px-0 space-y-3 border-b border-gray-200/50">
         <div className="flex gap-2">
             <div className="relative w-full group"><div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none"><Search size={18} className="text-gray-400 group-focus-within:text-blue-600 transition-colors" /></div><input type="text" placeholder="Cari sparepart..." className="pl-10 pr-4 py-3 w-full bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm transition-all" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/></div>
@@ -144,13 +145,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
             
             <div className="bg-white rounded-xl p-1 flex shadow-sm border border-gray-200"><button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={18}/></button><button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><List size={18}/></button></div>
         </div>
-        <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar scroll-smooth">
-            {carCategories.map(cat => (
-                <button key={cat} onClick={() => setSelectedCategory(cat)} className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition-all whitespace-nowrap ${selectedCategory === cat ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:text-blue-600'}`}>
-                    {cat === 'Semua' ? 'Semua Mobil' : cat}
-                </button>
-            ))}
-        </div>
+        {/* REMOVED: Car Category Buttons ScrollView */}
       </div>
 
       {/* ITEMS LIST */}
