@@ -1,7 +1,7 @@
 // FILE: src/components/OrderManagement.tsx
 import React, { useState, useMemo, useEffect } from 'react';
 import { Order, OrderStatus } from '../types';
-import { Clock, CheckCircle, Package, Truck, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag } from 'lucide-react';
+import { Clock, CheckCircle, Package, Truck, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X } from 'lucide-react';
 import { formatRupiah } from '../utils';
 
 interface OrderManagementProps {
@@ -12,6 +12,9 @@ interface OrderManagementProps {
 export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], onUpdateStatus }) => {
   const [activeTab, setActiveTab] = useState<'pending' | 'processing' | 'history'>('pending');
   
+  // State untuk pencarian (Resi / Nama / E-commerce)
+  const [searchTerm, setSearchTerm] = useState('');
+
   // State untuk menyimpan catatan/keterangan
   const [orderNotes, setOrderNotes] = useState<Record<string, string>>({});
 
@@ -26,6 +29,11 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     }
   }, []);
 
+  // Reset search term saat ganti tab
+  useEffect(() => {
+      setSearchTerm('');
+  }, [activeTab]);
+
   const handleNoteChange = (orderId: string, text: string) => {
       const newNotes = { ...orderNotes, [orderId]: text };
       setOrderNotes(newNotes);
@@ -37,17 +45,34 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const filteredOrders = useMemo(() => {
     return safeOrders.filter(o => {
       if (!o) return false;
-      if (activeTab === 'pending') return o.status === 'pending';
-      if (activeTab === 'processing') return o.status === 'processing';
-      if (activeTab === 'history') return o.status === 'completed' || o.status === 'cancelled';
-      return false;
+      
+      // Filter by Tab
+      let matchesTab = false;
+      if (activeTab === 'pending') matchesTab = o.status === 'pending';
+      if (activeTab === 'processing') matchesTab = o.status === 'processing';
+      if (activeTab === 'history') matchesTab = o.status === 'completed' || o.status === 'cancelled';
+      
+      if (!matchesTab) return false;
+
+      // Filter by Search (Hanya aktif di tab 'processing' dan 'history')
+      if ((activeTab === 'processing' || activeTab === 'history') && searchTerm.trim() !== '') {
+          const lowerSearch = searchTerm.toLowerCase();
+          // Cari di ID, Nama Customer (yg berisi Resi & Via), atau Item
+          return (
+              o.id.toLowerCase().includes(lowerSearch) ||
+              o.customerName.toLowerCase().includes(lowerSearch) ||
+              o.items.some(item => item.name.toLowerCase().includes(lowerSearch))
+          );
+      }
+
+      return true;
     }).sort((a, b) => {
         const timeA = a.timestamp || 0;
         const timeB = b.timestamp || 0;
         if (activeTab !== 'history') return timeA - timeB; 
         return timeB - timeA; 
     });
-  }, [safeOrders, activeTab]);
+  }, [safeOrders, activeTab, searchTerm]);
 
   const getStatusColor = (status: OrderStatus) => {
     switch (status) {
@@ -107,19 +132,21 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 min-h-[80vh] flex flex-col overflow-hidden">
       
       {/* Header */}
-      <div className="px-6 py-5 border-b border-gray-100">
-        <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-           <ClipboardList className="text-purple-600" />
-           Manajemen Pesanan
-        </h2>
-        <p className="text-xs text-gray-500 mt-1">Kelola pesanan masuk dan pengiriman barang.</p>
+      <div className="px-6 py-5 border-b border-gray-100 bg-white flex justify-between items-center">
+        <div>
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+            <ClipboardList className="text-purple-600" />
+            Manajemen Pesanan
+            </h2>
+            <p className="text-xs text-gray-500 mt-1">Kelola pesanan masuk dan pengiriman barang.</p>
+        </div>
       </div>
 
       {/* Tabs Navigasi */}
       <div className="flex border-b border-gray-100 bg-gray-50/50">
           {[
               { id: 'pending', label: 'Pesanan Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' },
-              { id: 'processing', label: 'Siap Dikirim', icon: Package, count: safeOrders.filter(o=>o?.status==='processing').length, color: 'text-blue-600' },
+              { id: 'processing', label: 'Dikirim', icon: Package, count: safeOrders.filter(o=>o?.status==='processing').length, color: 'text-blue-600' }, // Label Diubah jadi Dikirim
               { id: 'history', label: 'Riwayat', icon: CheckCircle, count: 0, color: 'text-gray-600' }
           ].map((tab: any) => (
               <button
@@ -135,6 +162,27 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
               </button>
           ))}
       </div>
+
+      {/* Search Bar (Hanya muncul di tab Dikirim & Riwayat) */}
+      {(activeTab === 'processing' || activeTab === 'history') && (
+          <div className="px-6 py-3 bg-gray-50 border-b border-gray-100 animate-in slide-in-from-top-2">
+              <div className="relative max-w-md">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                  <input 
+                      type="text" 
+                      placeholder="Cari Resi, Nama Pembeli, atau E-Commerce..." 
+                      className="w-full pl-10 pr-10 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-purple-100 focus:border-purple-400 outline-none transition-all"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                  {searchTerm && (
+                      <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                          <X size={14} />
+                      </button>
+                  )}
+              </div>
+          </div>
+      )}
       
       {/* Table View */}
       <div className="flex-1 overflow-x-auto p-4 bg-gray-50">
@@ -162,7 +210,9 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                         <tr>
                             <td colSpan={11} className="p-12 text-center text-gray-400">
                                 <ClipboardList size={48} className="opacity-20 mx-auto mb-3" />
-                                <p className="font-medium">Tidak ada data pesanan</p>
+                                <p className="font-medium">
+                                    {searchTerm ? 'Tidak ditemukan pesanan yang cocok' : 'Tidak ada data pesanan'}
+                                </p>
                             </td>
                         </tr>
                     ) : (
@@ -175,8 +225,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                             if (items.length === 0) return null;
 
                             return items.map((item, index) => {
-                                // --- PERBAIKAN DI SINI ---
-                                // Gunakan customPrice jika ada, kalau tidak pakai harga normal
                                 const dealPrice = item.customPrice ?? item.price ?? 0;
                                 const dealTotal = dealPrice * (item.cartQuantity || 0);
                                 const hasCustomPrice = item.customPrice !== undefined && item.customPrice !== item.price;
@@ -216,7 +264,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                     <td className="p-4 align-top text-gray-700 font-medium max-w-[250px]">{item.name || 'Item Tanpa Nama'}</td>
                                     <td className="p-4 align-top text-right font-bold text-gray-800">{item.cartQuantity || 0}</td>
                                     
-                                    {/* HARGA SATUAN (Tampilkan label jika harga khusus) */}
+                                    {/* HARGA SATUAN */}
                                     <td className="p-4 align-top text-right text-gray-500 font-mono text-xs">
                                         <div className={hasCustomPrice ? "text-orange-600 font-bold" : ""}>
                                             {formatRupiah(dealPrice)}
@@ -241,7 +289,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                     {getStatusLabel(order.status)}
                                                 </div>
                                                 <div className="text-[10px] text-gray-400 font-medium">Total Order:</div>
-                                                {/* Total Order diambil dari data order yang sudah dihitung saat checkout */}
                                                 <div className="text-sm font-extrabold text-purple-700">{formatRupiah(order.totalAmount || 0)}</div>
                                             </td>
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
