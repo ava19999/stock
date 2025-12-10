@@ -5,7 +5,7 @@ import { fetchInventoryPaginated, fetchInventoryStats } from '../services/supaba
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
   ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin, FileText,
-  LayoutGrid, List, ShoppingBag, History, X, ChevronLeft, Loader2, AlertTriangle, AlertCircle
+  LayoutGrid, List, ShoppingBag, History, X, ChevronLeft, Loader2, AlertTriangle, AlertCircle, User
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -88,16 +88,40 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID').format(n);
   };
 
+  // --- LOGIC PARSING KETERANGAN (DIPERBAIKI) ---
   const parseHistoryReason = (reason: string) => {
       let resi = '-';
       let ecommerce = '-';
+      let customer = '-'; // Variabel baru untuk nama customer
       let keterangan = reason || '';
+
+      // 1. Ekstrak Resi: (Resi: XYZ)
       const resiMatch = keterangan.match(/\(Resi: (.*?)\)/);
-      if (resiMatch && resiMatch[1]) { resi = resiMatch[1]; keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, ''); }
+      if (resiMatch && resiMatch[1]) { 
+          resi = resiMatch[1]; 
+          keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, ''); 
+      }
+
+      // 2. Ekstrak Via: (Via: Shopee)
       const viaMatch = keterangan.match(/\(Via: (.*?)\)/);
-      if (viaMatch && viaMatch[1]) { ecommerce = viaMatch[1]; keterangan = keterangan.replace(/\s*\(Via:.*?\)/, ''); }
-      if (keterangan.toLowerCase().includes('cancel order')) { keterangan = 'Retur'; }
-      return { resi, ecommerce, keterangan: keterangan.trim() };
+      if (viaMatch && viaMatch[1]) { 
+          ecommerce = viaMatch[1]; 
+          keterangan = keterangan.replace(/\s*\(Via:.*?\)/, ''); 
+      }
+
+      // 3. Ekstrak Nama Customer: (Budi) 
+      // Mengambil teks dalam kurung yang tersisa (karena Resi & Via sudah dihapus)
+      const nameMatch = keterangan.match(/\((.*?)\)/);
+      if (nameMatch && nameMatch[1]) {
+          customer = nameMatch[1];
+          keterangan = keterangan.replace(/\s*\(.*?\)/, ''); // Hapus nama dari teks utama
+      }
+
+      // Cleanup
+      if (keterangan.toLowerCase().includes('cancel order')) { keterangan = 'Retur Pesanan'; }
+      if (!keterangan.trim()) keterangan = 'Info Stok';
+
+      return { resi, ecommerce, customer, keterangan: keterangan.trim() };
   };
 
   const filteredItemHistory = useMemo(() => {
@@ -109,11 +133,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
     if (itemHistorySearch.trim() !== '') {
         const lowerSearch = itemHistorySearch.toLowerCase();
         itemHistory = itemHistory.filter(h => {
-            const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
+            const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
             return (
                 keterangan.toLowerCase().includes(lowerSearch) || 
                 resi.toLowerCase().includes(lowerSearch) || 
                 ecommerce.toLowerCase().includes(lowerSearch) ||
+                customer.toLowerCase().includes(lowerSearch) ||
                 h.reason.toLowerCase().includes(lowerSearch)
             );
         });
@@ -153,7 +178,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             {filteredGlobalHistory.map((h) => {
                                 const price = h.price || 0; 
                                 const total = h.totalPrice || (price * (Number(h.quantity) || 0));
-                                const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
+                                const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
                                 
                                 return (
                                     <tr key={h.id} className="hover:bg-blue-50 transition-colors">
@@ -161,7 +186,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         <td className="p-3 align-top"><span className={`inline-block px-2 py-1 rounded text-xs font-medium ${resi !== '-' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-300'}`}>{resi}</span></td>
                                         <td className="p-3 align-top"><span className={`inline-block px-2 py-1 rounded text-xs font-medium flex items-center gap-1 w-fit ${ecommerce !== '-' ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'text-gray-300'}`}>{ecommerce !== '-' && <ShoppingBag size={10} />}{ecommerce}</span></td>
                                         <td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber || '-'}</td>
-                                        <td className="p-3 font-medium text-gray-800 max-w-[200px] align-top"><div className="line-clamp-2">{h.name || 'Unknown Item'}</div></td>
+                                        <td className="p-3 font-medium text-gray-800 max-w-[200px] align-top">
+                                            <div className="line-clamp-2">{h.name || 'Unknown Item'}</div>
+                                            {customer !== '-' && <div className="text-[10px] text-gray-500 flex items-center gap-1 mt-1"><User size={10}/> {customer}</div>}
+                                        </td>
                                         <td className={`p-3 text-right font-bold align-top ${showHistoryDetail==='in'?'text-green-600':'text-red-600'}`}>{showHistoryDetail==='in' ? '+' : '-'}{h.quantity}</td>
                                         <td className="p-3 text-right text-gray-600 font-mono align-top text-xs">{formatRupiah(price)}</td>
                                         <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">{formatRupiah(total)}</td>
@@ -177,7 +205,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
-      {/* --- ITEM HISTORY MODAL --- */}
+      {/* --- ITEM HISTORY MODAL (DIPERBARUI) --- */}
       {selectedItemHistory && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
@@ -216,11 +244,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     ) : (
                         <table className="w-full text-left border-collapse">
                             <thead className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
-                                <tr><th className="p-3 border-b border-gray-200 w-32">Tanggal</th><th className="p-3 border-b border-gray-200 w-24 text-center">Tipe</th><th className="p-3 border-b border-gray-200 w-20 text-right">Jml</th><th className="p-3 border-b border-gray-200 w-28 text-right">Harga</th><th className="p-3 border-b border-gray-200 w-28 text-right">Total</th><th className="p-3 border-b border-gray-200 w-24 text-right">Stok Akhir</th><th className="p-3 border-b border-gray-200">Keterangan / Resi</th></tr>
+                                <tr><th className="p-3 border-b border-gray-200 w-32">Tanggal</th><th className="p-3 border-b border-gray-200 w-24 text-center">Tipe</th><th className="p-3 border-b border-gray-200 w-20 text-right">Jml</th><th className="p-3 border-b border-gray-200 w-28 text-right">Harga</th><th className="p-3 border-b border-gray-200 w-28 text-right">Total</th><th className="p-3 border-b border-gray-200 w-24 text-right">Stok Akhir</th><th className="p-3 border-b border-gray-200">Keterangan & Pembeli</th></tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100 text-sm">
                                 {filteredItemHistory.map(h => {
-                                    const { resi, ecommerce, keterangan } = parseHistoryReason(h.reason);
+                                    // PANGGIL PARSE FUNCTION DI SINI
+                                    const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
                                     const price = h.price || 0;
                                     const total = h.totalPrice || (price * (Number(h.quantity) || 0));
 
@@ -232,7 +261,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             <td className="p-3 align-top text-right font-mono text-gray-600 text-xs">{formatRupiah(price)}</td>
                                             <td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(total)}</td>
                                             <td className="p-3 align-top text-right font-mono text-gray-600">{h.currentStock}</td>
-                                            <td className="p-3 align-top text-gray-700"><div className="font-medium text-xs mb-1">{keterangan}</div>{resi !== '-' && (<div className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] border border-blue-100 mr-1">Resi: {resi}</div>)}{ecommerce !== '-' && (<div className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-100"><ShoppingBag size={8}/> {ecommerce}</div>)}</td>
+                                            
+                                            {/* --- TAMPILAN KETERANGAN DIPERBAIKI --- */}
+                                            <td className="p-3 align-top text-gray-700">
+                                                <div className="font-bold text-gray-800 text-xs mb-1">{keterangan}</div>
+                                                
+                                                {customer !== '-' && (
+                                                    <div className="flex items-center gap-1.5 text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded-md w-fit mb-1.5 border border-gray-200">
+                                                        <User size={12} className="text-blue-500"/> 
+                                                        <span className="font-medium">{customer}</span>
+                                                    </div>
+                                                )}
+
+                                                <div className="flex flex-wrap gap-1">
+                                                    {resi !== '-' && (<div className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] border border-blue-100">Resi: {resi}</div>)}
+                                                    {ecommerce !== '-' && (<div className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-100"><ShoppingBag size={8}/> {ecommerce}</div>)}
+                                                </div>
+                                            </td>
+                                            {/* -------------------------------------- */}
                                         </tr>
                                     );
                                 })}
