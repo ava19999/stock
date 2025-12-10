@@ -190,21 +190,9 @@ const AppContent: React.FC = () => {
       
       setLoading(true);
       if (await saveOrder(newOrder)) {
-          for (const cartItem of cart) {
-              const currentItem = await getItemById(cartItem.id);
-              if (currentItem) {
-                  const qtySold = cartItem.cartQuantity;
-                  const dealPrice = cartItem.customPrice ?? currentItem.price;
-                  const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
-                  await updateInventory(itemToUpdate);
-                  // Format: Order #123 (Nama) -> Dashboard akan otomatis deteksi nama dalam kurung
-                  await addNewHistory({
-                      id: generateId(), itemId: cartItem.id, partNumber: cartItem.partNumber, name: cartItem.name,
-                      type: 'out', quantity: qtySold, previousStock: currentItem.quantity, currentStock: itemToUpdate.quantity,
-                      price: dealPrice, totalPrice: dealPrice * qtySold, timestamp: Date.now(), reason: `Order #${newOrder.id.slice(0,6)} (${name})`
-                  });
-              }
-          }
+          // --- PERUBAHAN: TIDAK ADA PENGURANGAN STOK SAAT CHECKOUT (PESANAN BARU) ---
+          // Stok hanya akan berkurang saat status berubah menjadi 'processing'
+          
           showToast('Pesanan berhasil dibuat!'); setCart([]); setActiveView('orders'); await refreshData();
       } else { showToast('Gagal membuat pesanan', 'error'); }
       setLoading(false);
@@ -213,57 +201,73 @@ const AppContent: React.FC = () => {
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
-      if (await updateOrderStatusService(orderId, newStatus)) {
-          if (newStatus === 'cancelled' && order.status !== 'cancelled') {
-              
-              // --- PERBAIKAN: Ambil Nama Murni & Info Tambahan ---
-              // Tujuannya agar format menjadi: Retur Order #123 (Budi) (Resi:...) (Via:...)
-              let pureName = order.customerName;
-              let extraInfo = '';
-              
-              // Pisahkan Resi dan Via dari nama (jika ada)
-              const resiMatch = pureName.match(/\(Resi: (.*?)\)/);
-              if (resiMatch) {
-                  extraInfo += ` (Resi: ${resiMatch[1]})`;
-                  pureName = pureName.replace(/\(Resi:.*?\)/, '');
-              }
 
-              const viaMatch = pureName.match(/\(Via: (.*?)\)/);
-              if (viaMatch) {
-                  extraInfo += ` (Via: ${viaMatch[1]})`;
-                  pureName = pureName.replace(/\(Via:.*?\)/, '');
-              }
-              
-              pureName = pureName.trim();
-              // ---------------------------------------------------
+      // Persiapan data pelanggan untuk history
+      let pureName = order.customerName;
+      let extraInfo = '';
+      const resiMatch = pureName.match(/\(Resi: (.*?)\)/);
+      if (resiMatch) { extraInfo += ` (Resi: ${resiMatch[1]})`; pureName = pureName.replace(/\(Resi:.*?\)/, ''); }
+      const viaMatch = pureName.match(/\(Via: (.*?)\)/);
+      if (viaMatch) { extraInfo += ` (Via: ${viaMatch[1]})`; pureName = pureName.replace(/\(Via:.*?\)/, ''); }
+      pureName = pureName.trim();
 
+      // --- LOGIC 1: PENDING -> PROCESSING (KURANGI STOK) ---
+      if (order.status === 'pending' && newStatus === 'processing') {
+          if (await updateOrderStatusService(orderId, newStatus)) {
               for (const orderItem of order.items) {
                   const currentItem = await getItemById(orderItem.id);
                   if (currentItem) {
-                      const restoreQty = orderItem.cartQuantity;
-                      const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: currentItem.quantity + restoreQty, lastUpdated: Date.now() };
-                      await updateInventory(itemToUpdate);
+                      const qtySold = orderItem.cartQuantity;
+                      const dealPrice = orderItem.customPrice ?? currentItem.price;
+                      const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                       
-                      // FORMAT PENTING: Nama Customer harus di dalam kurung '(...)' agar terbaca Dashboard
+                      await updateInventory(itemToUpdate);
                       await addNewHistory({
-                          id: generateId(), 
-                          itemId: itemToUpdate.id, 
-                          partNumber: itemToUpdate.partNumber, 
-                          name: itemToUpdate.name,
-                          type: 'in', 
-                          quantity: restoreQty, 
-                          previousStock: itemToUpdate.quantity - restoreQty, 
-                          currentStock: itemToUpdate.quantity,
-                          price: orderItem.customPrice ?? orderItem.price, 
-                          totalPrice: (orderItem.customPrice ?? orderItem.price) * restoreQty, 
-                          timestamp: Date.now(), 
-                          reason: `Retur Order #${orderId.slice(0,6)} (${pureName})${extraInfo}` 
+                          id: generateId(), itemId: currentItem.id, partNumber: currentItem.partNumber, name: currentItem.name,
+                          type: 'out', quantity: qtySold, previousStock: currentItem.quantity, currentStock: itemToUpdate.quantity,
+                          price: dealPrice, totalPrice: dealPrice * qtySold, timestamp: Date.now(), 
+                          reason: `Order #${orderId.slice(0,6)} (${pureName})${extraInfo}`
                       });
                   }
               }
-              showToast('Pesanan dibatalkan, stok dikembalikan.'); refreshData();
+              showToast('Pesanan diproses, stok berkurang.'); refreshData();
+              setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
           }
-          setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
+      }
+      // --- LOGIC 2: BATAL / RETUR (KEMBALIKAN STOK HANYA JIKA SUDAH DIPROSES) ---
+      else if (newStatus === 'cancelled' && order.status !== 'cancelled') {
+          if (await updateOrderStatusService(orderId, newStatus)) {
+              // HANYA kembalikan stok jika status sebelumnya BUKAN 'pending'
+              // (Artinya stok sudah pernah dipotong saat masuk 'processing')
+              if (order.status !== 'pending') {
+                  for (const orderItem of order.items) {
+                      const currentItem = await getItemById(orderItem.id);
+                      if (currentItem) {
+                          const restoreQty = orderItem.cartQuantity;
+                          const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: currentItem.quantity + restoreQty, lastUpdated: Date.now() };
+                          
+                          await updateInventory(itemToUpdate);
+                          await addNewHistory({
+                              id: generateId(), itemId: itemToUpdate.id, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name,
+                              type: 'in', quantity: restoreQty, previousStock: itemToUpdate.quantity - restoreQty, currentStock: itemToUpdate.quantity,
+                              price: orderItem.customPrice ?? orderItem.price, totalPrice: (orderItem.customPrice ?? orderItem.price) * restoreQty, timestamp: Date.now(), 
+                              reason: `Retur Order #${orderId.slice(0,6)} (${pureName})${extraInfo}`
+                          });
+                      }
+                  }
+                  showToast('Pesanan dibatalkan, stok dikembalikan.');
+              } else {
+                  showToast('Pesanan dibatalkan (Stok belum dipotong).');
+              }
+              refreshData();
+              setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
+          }
+      }
+      // --- LOGIC 3: PERUBAHAN STATUS LAIN (MISAL PROCESSING -> COMPLETED) ---
+      else {
+          if (await updateOrderStatusService(orderId, newStatus)) {
+              setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
+          }
       }
   };
 
@@ -282,7 +286,6 @@ const AppContent: React.FC = () => {
     if (!data.items || data.items.length === 0) { showToast("Gagal: Tidak ada item terdeteksi.", 'error'); return; }
     setLoading(true);
 
-    // Format Nama Pelanggan Lengkap (Agar terlihat di Order Management)
     let finalCustomerName = data.customerName || 'Pelanggan';
     if (data.resi) finalCustomerName += ` (Resi: ${data.resi})`;
     if (data.ecommerce) finalCustomerName += ` (Via: ${data.ecommerce})`;
@@ -290,10 +293,9 @@ const AppContent: React.FC = () => {
     const matchedCartItems: CartItem[] = [];
     const unmatchedItems: string[] = [];
 
-    // --- MATCHING LOGIC (SKU Induk -> Database SKU) ---
+    // Matching Logic...
     for (const scannedItem of data.items) {
         if (!scannedItem.sku) { unmatchedItems.push(`${scannedItem.name} (Tanpa SKU)`); continue; }
-        // Cari barang di database yang SKU-nya COCOK (Case Insensitive)
         const foundItem = items.find(i => 
             (i.sku && i.sku.trim().toLowerCase() === scannedItem.sku.trim().toLowerCase()) || 
             (i.partNumber && i.partNumber.toLowerCase() === scannedItem.sku.trim().toLowerCase())
@@ -303,7 +305,7 @@ const AppContent: React.FC = () => {
             matchedCartItems.push({
                 ...foundItem,
                 cartQuantity: scannedItem.qty || 1,
-                customPrice: foundItem.price // Selalu pakai harga database
+                customPrice: foundItem.price 
             });
         } else {
             unmatchedItems.push(`${scannedItem.name} (SKU: ${scannedItem.sku})`);
@@ -317,7 +319,10 @@ const AppContent: React.FC = () => {
     }
 
     const totalAmount = matchedCartItems.reduce((sum, item) => sum + (item.price * item.cartQuantity), 0);
-    const newOrder: Order = { id: generateId(), customerName: finalCustomerName, items: matchedCartItems, totalAmount: totalAmount, status: 'pending', timestamp: Date.now() };
+    
+    // --- PENTING: SCAN RESI LANGSUNG STATUS 'processing' AGAR STOK TERPOTONG ---
+    // Karena barang yang discan resinya diasumsikan sudah siap kirim/dipacking.
+    const newOrder: Order = { id: generateId(), customerName: finalCustomerName, items: matchedCartItems, totalAmount: totalAmount, status: 'processing', timestamp: Date.now() };
 
     if (await saveOrder(newOrder)) {
         for (const item of matchedCartItems) {
@@ -327,8 +332,6 @@ const AppContent: React.FC = () => {
                 const updateData = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                 await updateInventory(updateData);
                 
-                // --- PERBAIKAN: Masukkan Nama Customer ke Reason dalam kurung '(...)' ---
-                // Format: Scan Resi (Nama) (Resi:...) (Via:...)
                 await addHistoryLog({
                     id: generateId(), itemId: item.id, partNumber: item.partNumber, name: item.name,
                     type: 'out', quantity: qtySold, previousStock: currentItem.quantity, currentStock: updateData.quantity,
@@ -339,7 +342,7 @@ const AppContent: React.FC = () => {
         }
         
         if (unmatchedItems.length > 0) showToast(`Sukses Sebagian! ${unmatchedItems.length} SKU dilewati.`, 'error');
-        else showToast('Pesanan Berhasil Disimpan!', 'success');
+        else showToast('Scan Resi Berhasil! Stok Terupdate.', 'success');
         
         if (activeView === 'scan') setActiveView('orders');
         await refreshData();
