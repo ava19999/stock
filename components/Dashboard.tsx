@@ -42,7 +42,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    // [PENTING] Mengirim parameter filterType ke service
     const { data, count } = await fetchInventoryPaginated(page, 50, searchTerm, filterType);
     setLocalItems(data);
     setTotalCount(count);
@@ -88,38 +87,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID').format(n);
   };
 
-  // --- LOGIC PARSING KETERANGAN (DIPERBAIKI) ---
+  // --- PARSE HISTORY REASON ---
   const parseHistoryReason = (reason: string) => {
       let resi = '-';
       let ecommerce = '-';
-      let customer = '-'; // Variabel baru untuk nama customer
+      let customer = '-';
       let keterangan = reason || '';
 
-      // 1. Ekstrak Resi: (Resi: XYZ)
+      // Ekstrak Resi
       const resiMatch = keterangan.match(/\(Resi: (.*?)\)/);
       if (resiMatch && resiMatch[1]) { 
           resi = resiMatch[1]; 
           keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, ''); 
       }
 
-      // 2. Ekstrak Via: (Via: Shopee)
+      // Ekstrak E-Commerce
       const viaMatch = keterangan.match(/\(Via: (.*?)\)/);
       if (viaMatch && viaMatch[1]) { 
           ecommerce = viaMatch[1]; 
           keterangan = keterangan.replace(/\s*\(Via:.*?\)/, ''); 
       }
 
-      // 3. Ekstrak Nama Customer: (Budi) 
-      // Mengambil teks dalam kurung yang tersisa (karena Resi & Via sudah dihapus)
+      // Ekstrak Nama Customer (text dalam kurung tersisa)
       const nameMatch = keterangan.match(/\((.*?)\)/);
       if (nameMatch && nameMatch[1]) {
           customer = nameMatch[1];
-          keterangan = keterangan.replace(/\s*\(.*?\)/, ''); // Hapus nama dari teks utama
+          keterangan = keterangan.replace(/\s*\(.*?\)/, '');
       }
 
-      // Cleanup
+      // Cleanup sisa teks
       if (keterangan.toLowerCase().includes('cancel order')) { keterangan = 'Retur Pesanan'; }
-      if (!keterangan.trim()) keterangan = 'Info Stok';
+      if (!keterangan.trim()) keterangan = 'Transaksi';
 
       return { resi, ecommerce, customer, keterangan: keterangan.trim() };
   };
@@ -172,7 +170,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 {filteredGlobalHistory.length === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Belum ada riwayat.</div> : (
                     <table className="w-full text-left border-collapse">
                         <thead className="bg-gray-100 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
-                            <tr><th className="p-3 border-b border-gray-200 w-28">Tanggal</th><th className="p-3 border-b border-gray-200 w-32">Resi</th><th className="p-3 border-b border-gray-200 w-32">E-Commerce</th><th className="p-3 border-b border-gray-200 w-32">No. Part</th><th className="p-3 border-b border-gray-200">Nama Barang</th><th className="p-3 border-b border-gray-200 text-right w-20">Qty</th><th className="p-3 border-b border-gray-200 text-right w-32">Harga Satuan</th><th className="p-3 border-b border-gray-200 text-right w-32">Total Harga</th>{showHistoryDetail === 'in' && <th className="p-3 border-b border-gray-200 w-48">Keterangan</th>}</tr>
+                            <tr>
+                                <th className="p-3 border-b border-gray-200 w-28">Tanggal</th>
+                                <th className="p-3 border-b border-gray-200 w-32">No. Part</th>
+                                <th className="p-3 border-b border-gray-200">Nama Barang</th>
+                                <th className="p-3 border-b border-gray-200 text-right w-20">Qty</th>
+                                <th className="p-3 border-b border-gray-200 text-right w-32">Harga Satuan</th>
+                                <th className="p-3 border-b border-gray-200 text-right w-32">Total Harga</th>
+                                <th className="p-3 border-b border-gray-200 w-64">Keterangan</th>
+                            </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 text-sm">
                             {filteredGlobalHistory.map((h) => {
@@ -180,20 +186,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 const total = h.totalPrice || (price * (Number(h.quantity) || 0));
                                 const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
                                 
+                                // --- LOGIC UTAMA PERBAIKAN ---
+                                let mainText = customer !== '-' ? customer : keterangan;
+                                
+                                // Jika ini Detail Masuk (Retur) dan ada nama customer -> Format: "Retur Order [Nama]"
+                                if (showHistoryDetail === 'in' && customer !== '-' && keterangan.toLowerCase().includes('retur')) {
+                                    mainText = `Retur Order ${customer}`;
+                                }
+                                // -----------------------------
+
                                 return (
                                     <tr key={h.id} className="hover:bg-blue-50 transition-colors">
                                         <td className="p-3 text-gray-600 whitespace-nowrap align-top"><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div></td>
-                                        <td className="p-3 align-top"><span className={`inline-block px-2 py-1 rounded text-xs font-medium ${resi !== '-' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-300'}`}>{resi}</span></td>
-                                        <td className="p-3 align-top"><span className={`inline-block px-2 py-1 rounded text-xs font-medium flex items-center gap-1 w-fit ${ecommerce !== '-' ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'text-gray-300'}`}>{ecommerce !== '-' && <ShoppingBag size={10} />}{ecommerce}</span></td>
                                         <td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber || '-'}</td>
-                                        <td className="p-3 font-medium text-gray-800 max-w-[200px] align-top">
-                                            <div className="line-clamp-2">{h.name || 'Unknown Item'}</div>
-                                            {customer !== '-' && <div className="text-[10px] text-gray-500 flex items-center gap-1 mt-1"><User size={10}/> {customer}</div>}
-                                        </td>
+                                        <td className="p-3 font-medium text-gray-800 max-w-[200px] align-top"><div className="line-clamp-2">{h.name || 'Unknown Item'}</div></td>
                                         <td className={`p-3 text-right font-bold align-top ${showHistoryDetail==='in'?'text-green-600':'text-red-600'}`}>{showHistoryDetail==='in' ? '+' : '-'}{h.quantity}</td>
                                         <td className="p-3 text-right text-gray-600 font-mono align-top text-xs">{formatRupiah(price)}</td>
                                         <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">{formatRupiah(total)}</td>
-                                        {showHistoryDetail === 'in' && <td className="p-3 align-top text-xs">{keterangan}</td>}
+                                        
+                                        {/* KOLOM KETERANGAN */}
+                                        <td className="p-3 align-top text-gray-700">
+                                            <div className="font-bold text-gray-900 text-xs mb-1.5 flex items-center gap-1.5">
+                                                {customer !== '-' && <User size={12} className="text-gray-400"/>}
+                                                {mainText}
+                                            </div>
+                                            <div className="flex flex-wrap gap-1">
+                                                {resi !== '-' && (<div className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] border border-blue-100">Resi: {resi}</div>)}
+                                                {ecommerce !== '-' && (<div className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-100"><ShoppingBag size={8}/> {ecommerce}</div>)}
+                                            </div>
+                                        </td>
                                     </tr>
                                 );
                             })}
@@ -205,7 +226,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
-      {/* --- ITEM HISTORY MODAL (DIPERBARUI) --- */}
+      {/* --- ITEM HISTORY MODAL (DIPERBARUI JUGA) --- */}
       {selectedItemHistory && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
@@ -244,14 +265,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     ) : (
                         <table className="w-full text-left border-collapse">
                             <thead className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
-                                <tr><th className="p-3 border-b border-gray-200 w-32">Tanggal</th><th className="p-3 border-b border-gray-200 w-24 text-center">Tipe</th><th className="p-3 border-b border-gray-200 w-20 text-right">Jml</th><th className="p-3 border-b border-gray-200 w-28 text-right">Harga</th><th className="p-3 border-b border-gray-200 w-28 text-right">Total</th><th className="p-3 border-b border-gray-200 w-24 text-right">Stok Akhir</th><th className="p-3 border-b border-gray-200">Keterangan & Pembeli</th></tr>
+                                <tr><th className="p-3 border-b border-gray-200 w-32">Tanggal</th><th className="p-3 border-b border-gray-200 w-24 text-center">Tipe</th><th className="p-3 border-b border-gray-200 w-20 text-right">Jml</th><th className="p-3 border-b border-gray-200 w-28 text-right">Harga</th><th className="p-3 border-b border-gray-200 w-28 text-right">Total</th><th className="p-3 border-b border-gray-200 w-24 text-right">Stok Akhir</th><th className="p-3 border-b border-gray-200">Keterangan</th></tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100 text-sm">
                                 {filteredItemHistory.map(h => {
-                                    // PANGGIL PARSE FUNCTION DI SINI
                                     const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
                                     const price = h.price || 0;
                                     const total = h.totalPrice || (price * (Number(h.quantity) || 0));
+                                    
+                                    // --- LOGIC UTAMA PERBAIKAN ---
+                                    let mainText = customer !== '-' ? customer : keterangan;
+                                    
+                                    // Logic khusus untuk menampilkan "Retur Order [Nama]" di detail riwayat item juga
+                                    if (h.type === 'in' && customer !== '-' && keterangan.toLowerCase().includes('retur')) {
+                                        mainText = `Retur Order ${customer}`;
+                                    }
+                                    // -----------------------------
 
                                     return (
                                         <tr key={h.id} className="hover:bg-gray-50 transition-colors">
@@ -261,24 +290,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             <td className="p-3 align-top text-right font-mono text-gray-600 text-xs">{formatRupiah(price)}</td>
                                             <td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(total)}</td>
                                             <td className="p-3 align-top text-right font-mono text-gray-600">{h.currentStock}</td>
-                                            
-                                            {/* --- TAMPILAN KETERANGAN DIPERBAIKI --- */}
                                             <td className="p-3 align-top text-gray-700">
-                                                <div className="font-bold text-gray-800 text-xs mb-1">{keterangan}</div>
-                                                
-                                                {customer !== '-' && (
-                                                    <div className="flex items-center gap-1.5 text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded-md w-fit mb-1.5 border border-gray-200">
-                                                        <User size={12} className="text-blue-500"/> 
-                                                        <span className="font-medium">{customer}</span>
-                                                    </div>
-                                                )}
-
+                                                <div className="font-bold text-gray-900 text-xs mb-1.5 flex items-center gap-1.5">
+                                                    {customer !== '-' && <User size={12} className="text-gray-400"/>}
+                                                    {mainText}
+                                                </div>
                                                 <div className="flex flex-wrap gap-1">
                                                     {resi !== '-' && (<div className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] border border-blue-100">Resi: {resi}</div>)}
                                                     {ecommerce !== '-' && (<div className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-100"><ShoppingBag size={8}/> {ecommerce}</div>)}
                                                 </div>
                                             </td>
-                                            {/* -------------------------------------- */}
                                         </tr>
                                     );
                                 })}
