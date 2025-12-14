@@ -11,7 +11,7 @@ import { ScanResiView } from './components/ScanResiView';
 import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
 import { ResiAnalysisResult } from './services/geminiService';
 
-// --- IMPORT LOGIKA DATABASE BARU ---
+// --- IMPORT LOGIKA BARU ---
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory, getItemById,
   fetchOrders, saveOrder, updateOrderStatusService,
@@ -127,12 +127,12 @@ const AppContent: React.FC = () => {
       const newQuantity = Number(data.quantity) || 0;
       let updatedItem: InventoryItem = { ...editItem, ...data, quantity: newQuantity, initialStock: data.initialStock || 0, qtyIn: data.qtyIn || 0, qtyOut: data.qtyOut || 0, lastUpdated: Date.now() };
 
-      // Catatan: Pencatatan ke tabel 'barang_masuk' / 'barang_keluar' sekarang ditangani langsung oleh komponen ItemForm.tsx
-      // Di sini kita hanya menyimpan data Master Inventory (Stok Akhir, Harga, dll)
       if (editItem) {
+          // History pencatatan sudah ditangani oleh ItemForm
           if (await updateInventory(updatedItem)) { showToast('Update berhasil!'); refreshData(); }
       } else {
           if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number sudah ada!', 'error'); setLoading(false); return; }
+          // History pencatatan sudah ditangani oleh ItemForm
           if (await addInventory(data)) { showToast('Tersimpan!'); refreshData(); }
       }
       setIsEditing(false); setEditItem(null); setLoading(false);
@@ -175,7 +175,7 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- LOGIC BARU: UPDATE STATUS PESANAN (Mencatat ke barang_keluar / barang_masuk) ---
+  // --- LOGIC BARU: UPDATE STATUS & HISTORY ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -189,13 +189,12 @@ const AppContent: React.FC = () => {
       pureName = pureName.trim();
 
       let updateTime = undefined;
-      const today = new Date().toISOString().split('T')[0]; // Format Tanggal untuk DB Baru
+      const today = new Date().toISOString().split('T')[0];
 
       if (newStatus === 'completed' || newStatus === 'cancelled') {
           updateTime = Date.now();
       }
 
-      // --- KASUS 1: PENDING -> PROCESSING (Stok Berkurang -> Catat Barang Keluar) ---
       if (order.status === 'pending' && newStatus === 'processing') {
           if (await updateOrderStatusService(orderId, newStatus)) { 
               for (const orderItem of order.items) {
@@ -230,7 +229,6 @@ const AppContent: React.FC = () => {
               setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
           }
       }
-      // --- KASUS 2: BATAL / RETUR (Stok Kembali -> Catat Barang Masuk) ---
       else if (newStatus === 'cancelled' && order.status !== 'cancelled') {
           if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
               if (order.status !== 'pending') {
@@ -242,7 +240,7 @@ const AppContent: React.FC = () => {
                           
                           await updateInventory(itemToUpdate);
                           
-                          // LOGIKA BARU: Simpan ke tabel barang_masuk (sebagai Retur)
+                          // LOGIKA BARU: Simpan ke tabel barang_masuk (RETUR)
                           await addBarangMasuk({
                               tanggal: today,
                               tempo: 'RETUR',
@@ -267,7 +265,6 @@ const AppContent: React.FC = () => {
               setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus, timestamp: updateTime || x.timestamp } : x));
           }
       }
-      // --- KASUS 3: LAINNYA (Processing -> Completed) ---
       else {
           if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
               setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus, timestamp: updateTime || x.timestamp } : x));
@@ -285,7 +282,7 @@ const AppContent: React.FC = () => {
     await saveChatSession(updatedSession);
   };
 
-  // --- LOGIC BARU: SAVE SCAN RESI (Mencatat ke barang_keluar) ---
+  // --- LOGIC BARU: SAVE SCAN RESI ---
   const handleSaveScannedOrder = async (data: ResiAnalysisResult | any) => {
     if (!data.items || data.items.length === 0) { showToast("Gagal: Tidak ada item terdeteksi.", 'error'); return; }
     setLoading(true);
@@ -405,6 +402,8 @@ const AppContent: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+      
+      {/* HEADER ATAS (NAVIGASI DESKTOP) */}
       <div className="bg-white border-b px-4 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm backdrop-blur-md bg-white/90">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')}>
               <div className={`${isAdmin ? 'bg-purple-600' : 'bg-blue-600'} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform`}>{isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />}</div>
@@ -417,7 +416,26 @@ const AppContent: React.FC = () => {
           </div>
           <div className="flex items-center gap-2">
               <button onClick={() => { refreshData(); showToast('Data diperbarui'); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors active:scale-90"><CloudLightning size={20} className={loading ? 'animate-spin text-blue-500' : 'text-gray-500'}/></button>
-              {isAuthenticated && <button onClick={handleLogout} className="p-2 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-full transition-colors active:scale-90"><LogOut size={20}/></button>}
+              
+              {/* NAVIGASI DESKTOP (Tampil di Layar Besar) */}
+              {isAdmin ? (
+                  <>
+                    <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><ShoppingCart size={18}/> Beranda</button>
+                    <button onClick={() => setActiveView('scan')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='scan'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><ScanBarcode size={18}/> Scan Resi</button>
+                    <button onClick={() => setActiveView('inventory')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='inventory'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><Package size={18}/> Gudang</button>
+                    <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><ClipboardList size={18}/> Pesanan {pendingOrdersCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{pendingOrdersCount}</span>}</button>
+                    <button onClick={() => setActiveView('chat')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='chat'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><MessageSquare size={18}/> Chat {unreadChatCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{unreadChatCount}</span>}</button>
+                  </>
+              ) : (
+                  <>
+                    <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-blue-50 text-blue-700 ring-1 ring-blue-200':'text-gray-500 hover:bg-gray-50'}`}><Home size={18}/> Belanja</button>
+                    <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-blue-50 text-blue-700 ring-1 ring-blue-200':'text-gray-500 hover:bg-gray-50'}`}><ClipboardList size={18}/> Pesanan {myPendingOrdersCount > 0 && <span className="bg-orange-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{myPendingOrdersCount}</span>}</button>
+                    <button onClick={() => setActiveView('chat')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='chat'?'bg-blue-50 text-blue-700 ring-1 ring-blue-200':'text-gray-500 hover:bg-gray-50'}`}><MessageSquare size={18}/> Chat</button>
+                  </>
+              )}
+
+              <div className="h-8 w-px bg-gray-200 mx-2"></div>
+              <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 text-gray-500 hover:bg-red-50 hover:text-red-600 rounded-lg transition-all" title="Keluar"><span className="text-xs font-semibold hidden lg:inline">{loginName}</span><LogOut size={20} /></button>
           </div>
       </div>
 
@@ -438,7 +456,7 @@ const AppContent: React.FC = () => {
         )}
       </div>
 
-      {/* --- NAVIGASI BAWAH ORIGINAL (RESTORED) --- */}
+      {/* --- NAVIGASI BAWAH ORIGINAL (MOBILE) --- */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pb-safe z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
         <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-3'} h-16`}>
             {isAdmin ? (
