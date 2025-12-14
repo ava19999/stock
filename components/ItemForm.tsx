@@ -125,10 +125,10 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
           </div>
           <div className="w-full lg:w-2/3 space-y-5">
             <div className="grid grid-cols-2 gap-4">
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">No. Part</label><input type="text" name="partNumber" required value={formData.partNumber} onChange={handleChange} className="w-full px-4 py-2 border rounded-lg" placeholder="Contoh: 15400-RAF-T01" /></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Lokasi Rak</label><input type="text" name="shelf" required value={formData.shelf} onChange={handleChange} className="w-full px-4 py-2 border rounded-lg" placeholder="RAK A01" /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">No. Part</label><input type="text" name="partNumber" required value={formData.partNumber} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Contoh: 15400-RAF-T01" /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Lokasi Rak</label><input type="text" name="shelf" required value={formData.shelf} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none uppercase" placeholder="Contoh: RAK A01" /></div>
             </div>
-            <div><label className="block text-sm font-medium text-gray-700 mb-1">Nama Barang</label><input type="text" name="name" required value={formData.name} onChange={handleChange} className="w-full px-4 py-2 border rounded-lg" placeholder="Nama sparepart..." /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Nama Barang</label><input type="text" name="name" required value={formData.name} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Nama sparepart..." /></div>
             <div className="grid grid-cols-2 gap-4">
                 <div><label className="block text-sm font-bold text-gray-700 mb-1">Brand</label><input type="text" name="brand" value={formData.brand} onChange={handleChange} className="w-full px-4 py-2 border rounded-lg" placeholder="HONDA..." /></div>
                 <div><label className="block text-sm font-bold text-gray-700 mb-1">Aplikasi</label><input type="text" name="application" value={formData.application} onChange={handleChange} className="w-full px-4 py-2 border rounded-lg" placeholder="JAZZ, CRV..." /></div>

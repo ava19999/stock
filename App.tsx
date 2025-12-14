@@ -11,13 +11,13 @@ import { ScanResiView } from './components/ScanResiView';
 import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
 import { ResiAnalysisResult } from './services/geminiService';
 
-// --- IMPORT BARU (LOGIKA BARU) ---
+// --- IMPORT LOGIKA BARU ---
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory, getItemById,
   fetchOrders, saveOrder, updateOrderStatusService,
   fetchHistory, addHistoryLog,
   fetchChatSessions, saveChatSession,
-  addBarangMasuk, addBarangKeluar // Fungsi baru untuk simpan ke tabel terpisah
+  addBarangMasuk, addBarangKeluar
 } from './services/supabaseService';
 
 import { generateId, formatRupiah } from './utils';
@@ -32,7 +32,6 @@ const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 
 type ActiveView = 'shop' | 'chat' | 'inventory' | 'orders' | 'scan';
 
-// Toast Component (Original Style)
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
   return (
@@ -122,19 +121,16 @@ const AppContent: React.FC = () => {
 
   const handleLogout = () => { setIsAuthenticated(false); setIsAdmin(false); setLoginName(''); setLoginPass(''); localStorage.removeItem('stockmaster_customer_name'); };
 
-  // --- [LOGIKA BARU] HANDLE SAVE ITEM ---
+  // --- LOGIC SAVE ITEM ---
   const handleSaveItem = async (data: InventoryFormData) => {
       setLoading(true);
       const newQuantity = Number(data.quantity) || 0;
       let updatedItem: InventoryItem = { ...editItem, ...data, quantity: newQuantity, initialStock: data.initialStock || 0, qtyIn: data.qtyIn || 0, qtyOut: data.qtyOut || 0, lastUpdated: Date.now() };
 
       if (editItem) {
-          // Note: History sudah dicatat otomatis oleh ItemForm (karena kita sudah update ItemForm untuk kirim data ke barang_masuk/keluar)
-          // Jadi disini kita hanya update data master Inventory
           if (await updateInventory(updatedItem)) { showToast('Update berhasil!'); refreshData(); }
       } else {
           if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number sudah ada!', 'error'); setLoading(false); return; }
-          // Note: History pencatatan barang baru juga sudah di-handle ItemForm
           if (await addInventory(data)) { showToast('Tersimpan!'); refreshData(); }
       }
       setIsEditing(false); setEditItem(null); setLoading(false);
@@ -177,7 +173,7 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- [LOGIKA BARU] UPDATE STATUS & HISTORY (MENGGUNAKAN TABEL BARU) ---
+  // --- LOGIC UPDATE STATUS (DIPERBARUI) ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -191,7 +187,7 @@ const AppContent: React.FC = () => {
       pureName = pureName.trim();
 
       let updateTime = undefined;
-      const today = new Date().toISOString().split('T')[0]; // Format Tanggal String (YYYY-MM-DD)
+      const today = new Date().toISOString().split('T')[0];
 
       if (newStatus === 'completed' || newStatus === 'cancelled') {
           updateTime = Date.now();
@@ -206,8 +202,6 @@ const AppContent: React.FC = () => {
                       const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                       
                       await updateInventory(itemToUpdate);
-                      
-                      // --- SAVE KE TABEL BARANG KELUAR ---
                       await addBarangKeluar({
                           tanggal: today,
                           kodeToko: 'APP',
@@ -241,8 +235,6 @@ const AppContent: React.FC = () => {
                           const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: currentItem.quantity + restoreQty, lastUpdated: Date.now() };
                           
                           await updateInventory(itemToUpdate);
-                          
-                          // --- SAVE KE TABEL BARANG MASUK (RETUR) ---
                           await addBarangMasuk({
                               tanggal: today,
                               tempo: 'RETUR',
@@ -284,16 +276,19 @@ const AppContent: React.FC = () => {
     await saveChatSession(updatedSession);
   };
 
-  // --- [LOGIKA BARU] SAVE HASIL SCAN ---
+  // --- LOGIC SAVE SCAN (DIPERBARUI) ---
   const handleSaveScannedOrder = async (data: ResiAnalysisResult | any) => {
     if (!data.items || data.items.length === 0) { showToast("Gagal: Tidak ada item terdeteksi.", 'error'); return; }
     setLoading(true);
 
     let finalCustomerName = data.customerName || 'Pelanggan';
+    if (data.resi) finalCustomerName += ` (Resi: ${data.resi})`;
+    if (data.ecommerce) finalCustomerName += ` (Via: ${data.ecommerce})`;
+
     const matchedCartItems: CartItem[] = [];
     const unmatchedItems: string[] = [];
 
-    // Simple Matching by Part Number or Name
+    // Simple matching
     for (const scannedItem of data.items) {
         const foundItem = items.find(i => 
             i.name.toLowerCase().includes(scannedItem.name.toLowerCase()) || 
@@ -330,7 +325,6 @@ const AppContent: React.FC = () => {
                 const updateData = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                 await updateInventory(updateData);
                 
-                // --- SAVE KE TABEL BARANG KELUAR ---
                 await addBarangKeluar({
                     tanggal: today,
                     kodeToko: 'SCAN',
@@ -378,7 +372,6 @@ const AppContent: React.FC = () => {
   if (loading && items.length === 0) return <div className="flex flex-col h-screen items-center justify-center bg-white font-sans text-gray-600 space-y-6"><div className="relative"><div className="w-16 h-16 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin"></div><div className="absolute inset-0 flex items-center justify-center"><CloudLightning size={20} className="text-blue-600 animate-pulse" /></div></div><div className="text-center space-y-1"><p className="font-medium text-gray-900">Menghubungkan Database</p><p className="text-xs text-gray-400">Sinkronisasi Supabase...</p></div></div>;
 
   if (!isAuthenticated) {
-      // --- TAMPILAN LOGIN ORIGINAL ---
       return (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 flex items-center justify-center p-4 font-sans">
             {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
@@ -400,30 +393,60 @@ const AppContent: React.FC = () => {
       );
   }
 
-  // --- TAMPILAN DASHBOARD UTAMA ORIGINAL ---
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       
-      {/* HEADER ATAS (NAVIGASI) */}
-      <div className="bg-white border-b px-4 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm backdrop-blur-md bg-white/90">
-          <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')}>
-              <div className={`${isAdmin ? 'bg-purple-600' : 'bg-blue-600'} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform`}>{isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />}</div>
-              <div>
-                  <div className="font-bold leading-none text-gray-900 text-lg">BJW</div>
-                  <div className="text-[10px] font-bold text-gray-600 leading-none mt-0.5">Autopart</div>
-                  <div className="text-[9px] text-gray-400 leading-none">Sukucadang Mobil</div>
-                  <div className={`text-[9px] font-bold mt-1 px-1.5 py-0.5 rounded-md inline-block ${isAdmin ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>{isAdmin ? 'ADMIN ACCESS' : 'STORE FRONT'}</div>
+      {/* HEADER ATAS + NAVIGASI DIPINDAH KE SINI */}
+      <div className="sticky top-0 z-50 bg-white/90 backdrop-blur-md shadow-sm border-b">
+          
+          {/* BARIS 1: LOGO & LOGOUT */}
+          <div className="px-4 py-3 flex justify-between items-center border-b border-gray-100">
+              <div className="flex items-center gap-3">
+                  <div className={`${isAdmin ? 'bg-purple-600' : 'bg-blue-600'} text-white p-2.5 rounded-xl shadow-md`}>
+                      {isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />}
+                  </div>
+                  <div>
+                      <div className="font-bold leading-none text-gray-900 text-lg">BJW Autopart</div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">{isAdmin ? 'ADMIN ACCESS' : 'STORE FRONT'}</div>
+                  </div>
+              </div>
+              <div className="flex items-center gap-2">
+                  <button onClick={() => { refreshData(); showToast('Data diperbarui'); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors active:scale-90"><CloudLightning size={20} className={loading ? 'animate-spin text-blue-500' : 'text-gray-500'}/></button>
+                  {isAuthenticated && <button onClick={handleLogout} className="p-2 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-full transition-colors active:scale-90"><LogOut size={20}/></button>}
               </div>
           </div>
-          <div className="flex items-center gap-2">
-              <button onClick={() => { refreshData(); showToast('Data diperbarui'); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors active:scale-90"><CloudLightning size={20} className={loading ? 'animate-spin text-blue-500' : 'text-gray-500'}/></button>
-              {isAuthenticated && <button onClick={handleLogout} className="p-2 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-full transition-colors active:scale-90"><LogOut size={20}/></button>}
+
+          {/* BARIS 2: NAVIGASI (DASH/ORDER/SCAN/CHAT) - SEKARANG DI ATAS */}
+          <div className="flex justify-around p-1 bg-white">
+            <button onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')} className={`flex-1 flex flex-col items-center p-2 rounded-lg transition-all ${activeView === 'shop' || activeView === 'inventory' ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:bg-gray-50'}`}>
+                {isAdmin ? <Home size={20} /> : <Package size={20} />}
+                <span className="text-[10px] font-bold mt-1">{isAdmin ? 'Dash' : 'Shop'}</span>
+            </button>
+            
+            <button onClick={() => setActiveView('orders')} className={`flex-1 flex flex-col items-center p-2 rounded-lg relative transition-all ${activeView === 'orders' ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:bg-gray-50'}`}>
+                <ClipboardList size={20} />
+                {(isAdmin ? pendingOrdersCount : myPendingOrdersCount) > 0 && <span className="absolute top-1 right-1/4 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}
+                <span className="text-[10px] font-bold mt-1">Order</span>
+            </button>
+
+            {isAdmin && (
+                <button onClick={() => setActiveView('scan')} className={`flex-1 flex flex-col items-center p-2 rounded-lg transition-all ${activeView === 'scan' ? 'text-purple-600 bg-purple-50' : 'text-gray-400 hover:bg-gray-50'}`}>
+                    <ScanBarcode size={20} />
+                    <span className="text-[10px] font-bold mt-1">Scan</span>
+                </button>
+            )}
+
+            <button onClick={() => setActiveView('chat')} className={`flex-1 flex flex-col items-center p-2 rounded-lg relative transition-all ${activeView === 'chat' ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:bg-gray-50'}`}>
+                <MessageSquare size={20} />
+                {unreadChatCount > 0 && <span className="absolute top-1 right-1/4 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}
+                <span className="text-[10px] font-bold mt-1">Chat</span>
+            </button>
           </div>
       </div>
 
       {/* KONTEN UTAMA */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto p-0 pb-10">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
         {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
         {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} onUpdateStatus={handleUpdateStatus} />}
@@ -431,7 +454,6 @@ const AppContent: React.FC = () => {
         {activeView === 'chat' && <ChatView isAdmin={isAdmin} currentCustomerId={isAdmin ? undefined : myCustomerId} sessions={chatSessions} onSendMessage={handleSendMessage} />}
         {activeView === 'scan' && isAdmin && <ScanResiView onSave={handleSaveScannedOrder} onSaveBulk={handleBulkSave} isProcessing={loading} />}
         
-        {/* MODAL FORM EDIT/TAMBAH BARANG */}
         {isEditing && isAdmin && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in">
                 <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl">
@@ -441,32 +463,7 @@ const AppContent: React.FC = () => {
         )}
       </div>
 
-      {/* NAVIGASI BAWAH (ORIGINAL STYLE) */}
-      <div className="bg-white border-t flex justify-around p-2 sticky bottom-0 z-40 safe-area-pb backdrop-blur-md bg-white/90">
-        <button onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')} className={`flex flex-col items-center p-2 rounded-xl transition-all ${activeView === 'shop' || activeView === 'inventory' ? 'text-blue-600 bg-blue-50 scale-105' : 'text-gray-400 hover:bg-gray-50'}`}>
-            {isAdmin ? <Home size={24} strokeWidth={activeView === 'inventory' ? 2.5 : 2} /> : <Package size={24} strokeWidth={activeView === 'shop' ? 2.5 : 2} />}
-            <span className="text-[10px] font-bold mt-1">{isAdmin ? 'Dash' : 'Shop'}</span>
-        </button>
-        
-        <button onClick={() => setActiveView('orders')} className={`flex flex-col items-center p-2 rounded-xl relative transition-all ${activeView === 'orders' ? 'text-blue-600 bg-blue-50 scale-105' : 'text-gray-400 hover:bg-gray-50'}`}>
-            <ClipboardList size={24} strokeWidth={activeView === 'orders' ? 2.5 : 2} />
-            {(isAdmin ? pendingOrdersCount : myPendingOrdersCount) > 0 && <span className="absolute top-1 right-2 w-4 h-4 bg-red-500 rounded-full border-2 border-white flex items-center justify-center text-[8px] font-bold text-white">{(isAdmin ? pendingOrdersCount : myPendingOrdersCount)}</span>}
-            <span className="text-[10px] font-bold mt-1">Order</span>
-        </button>
-
-        {isAdmin && (
-            <button onClick={() => setActiveView('scan')} className={`flex flex-col items-center p-2 rounded-xl transition-all ${activeView === 'scan' ? 'text-purple-600 bg-purple-50 scale-105' : 'text-gray-400 hover:bg-gray-50'}`}>
-                <ScanBarcode size={24} strokeWidth={activeView === 'scan' ? 2.5 : 2} />
-                <span className="text-[10px] font-bold mt-1">Scan</span>
-            </button>
-        )}
-
-        <button onClick={() => setActiveView('chat')} className={`flex flex-col items-center p-2 rounded-xl relative transition-all ${activeView === 'chat' ? 'text-blue-600 bg-blue-50 scale-105' : 'text-gray-400 hover:bg-gray-50'}`}>
-            <MessageSquare size={24} strokeWidth={activeView === 'chat' ? 2.5 : 2} />
-            {unreadChatCount > 0 && <span className="absolute top-1 right-2 w-4 h-4 bg-red-500 rounded-full border-2 border-white flex items-center justify-center text-[8px] font-bold text-white">{unreadChatCount}</span>}
-            <span className="text-[10px] font-bold mt-1">Chat</span>
-        </button>
-      </div>
+      {/* FOOTER KOSONG (KARENA NAVIGASI SUDAH DI ATAS) */}
     </div>
   );
 };
