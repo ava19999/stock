@@ -23,7 +23,7 @@ export type InventoryFormData = Omit<InventoryItem, 'id' | 'lastUpdated'>;
 
 export interface BarangMasuk {
   id?: string;
-  tanggal: string;   // Format String: 'YYYY-MM-DD'
+  tanggal: string;
   tempo: string;
   suplier: string;
   partNumber: string;
@@ -39,10 +39,10 @@ export interface BarangMasuk {
 
 export interface BarangKeluar {
   id?: string;
-  tanggal: string;   // Format String: 'YYYY-MM-DD'
-  kodeToko: string;
-  tempo: string;
-  ecommerce: string;
+  tanggal: string;
+  kodeToko: string;   
+  tempo: string;     
+  ecommerce: string;  
   customer: string;
   partNumber: string;
   name: string;
@@ -56,6 +56,7 @@ export interface BarangKeluar {
   resi: string;
 }
 
+// Interface ini PENTING agar Dashboard lama tetap bisa baca data baru
 export interface StockHistory {
   id: string;
   itemId: string;
@@ -74,7 +75,7 @@ export interface StockHistory {
 export interface Order {
   id: string;
   customerName: string;
-  items: any[];
+  items: CartItem[];
   totalAmount: number;
   status: 'pending' | 'processing' | 'completed' | 'cancelled';
   timestamp: number;

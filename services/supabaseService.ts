@@ -71,7 +71,7 @@ export const fetchShopItems = async (page: number, limit: number, search: string
     return { data: (data || []).map(mapDbToInventoryItem), count: count || 0 };
 };
 
-// --- GABUNGKAN HISTORY DARI 2 TABEL ---
+// --- LOGIC GABUNGAN HISTORY (PENTING UNTUK DASHBOARD) ---
 export const fetchHistory = async (): Promise<StockHistory[]> => {
     const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').order('created_at', { ascending: false }).limit(100);
     const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').order('created_at', { ascending: false }).limit(100);
@@ -84,7 +84,7 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             type: 'in', quantity: Number(m.qty_masuk), previousStock: Number(m.stock_awal),
             currentStock: Number(m.stock_awal) + Number(m.qty_masuk),
             price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
-            timestamp: new Date(m.tanggal).getTime(), // String Date -> Timestamp Number
+            timestamp: new Date(m.tanggal).getTime(),
             reason: `Restock: ${m.suplier} (${m.tempo})`
         });
     });
@@ -131,7 +131,6 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
   return true;
 };
 
-// --- FUNGSI SIMPAN BARANG MASUK ---
 export const addBarangMasuk = async (data: BarangMasuk): Promise<boolean> => {
   const { error } = await supabase.from('barang_masuk').insert([{
     tanggal: data.tanggal, tempo: data.tempo, suplier: data.suplier, part_number: data.partNumber,
@@ -142,7 +141,6 @@ export const addBarangMasuk = async (data: BarangMasuk): Promise<boolean> => {
   return true;
 };
 
-// --- FUNGSI SIMPAN BARANG KELUAR ---
 export const addBarangKeluar = async (data: BarangKeluar): Promise<boolean> => {
   const { error } = await supabase.from('barang_keluar').insert([{
     tanggal: data.tanggal, kode_toko: data.kodeToko, tempo: data.tempo, ecommerce: data.ecommerce,
@@ -154,7 +152,7 @@ export const addBarangKeluar = async (data: BarangKeluar): Promise<boolean> => {
   return true;
 };
 
-// Fungsi fallback untuk kompatibilitas
+// Fallback untuk kode lama yang masih panggil addHistoryLog
 export const addHistoryLog = async (h: StockHistory): Promise<boolean> => {
     const today = new Date().toISOString().split('T')[0];
     if (h.type === 'in') {
