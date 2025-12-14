@@ -84,7 +84,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const n = num || 0;
     if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'M';
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'jt';
-    return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID').format(n);
+    return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(n);
   };
 
   // --- PARSE HISTORY REASON ---
