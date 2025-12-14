@@ -11,13 +11,13 @@ import { ScanResiView } from './components/ScanResiView';
 import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
 import { ResiAnalysisResult } from './services/geminiService';
 
-// IMPORT BARU: addBarangMasuk, addBarangKeluar
+// --- IMPORT BARU (LOGIKA BARU) ---
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory, getItemById,
   fetchOrders, saveOrder, updateOrderStatusService,
   fetchHistory, addHistoryLog,
   fetchChatSessions, saveChatSession,
-  addBarangMasuk, addBarangKeluar
+  addBarangMasuk, addBarangKeluar // Fungsi baru untuk simpan ke tabel terpisah
 } from './services/supabaseService';
 
 import { generateId, formatRupiah } from './utils';
@@ -32,6 +32,7 @@ const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 
 type ActiveView = 'shop' | 'chat' | 'inventory' | 'orders' | 'scan';
 
+// Toast Component (Original Style)
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
   return (
@@ -121,18 +122,19 @@ const AppContent: React.FC = () => {
 
   const handleLogout = () => { setIsAuthenticated(false); setIsAdmin(false); setLoginName(''); setLoginPass(''); localStorage.removeItem('stockmaster_customer_name'); };
 
-  // --- LOGIC SAVE ITEM (DIPERBARUI UNTUK DB BARU) ---
+  // --- [LOGIKA BARU] HANDLE SAVE ITEM ---
   const handleSaveItem = async (data: InventoryFormData) => {
       setLoading(true);
       const newQuantity = Number(data.quantity) || 0;
       let updatedItem: InventoryItem = { ...editItem, ...data, quantity: newQuantity, initialStock: data.initialStock || 0, qtyIn: data.qtyIn || 0, qtyOut: data.qtyOut || 0, lastUpdated: Date.now() };
 
       if (editItem) {
-          // Logic history sudah di-handle oleh ItemForm secara internal
+          // Note: History sudah dicatat otomatis oleh ItemForm (karena kita sudah update ItemForm untuk kirim data ke barang_masuk/keluar)
+          // Jadi disini kita hanya update data master Inventory
           if (await updateInventory(updatedItem)) { showToast('Update berhasil!'); refreshData(); }
       } else {
           if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number sudah ada!', 'error'); setLoading(false); return; }
-          // Logic history sudah di-handle oleh ItemForm secara internal
+          // Note: History pencatatan barang baru juga sudah di-handle ItemForm
           if (await addInventory(data)) { showToast('Tersimpan!'); refreshData(); }
       }
       setIsEditing(false); setEditItem(null); setLoading(false);
@@ -175,17 +177,25 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- LOGIC UPDATE STATUS (DIPERBARUI UNTUK DB BARU) ---
+  // --- [LOGIKA BARU] UPDATE STATUS & HISTORY (MENGGUNAKAN TABEL BARU) ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
 
       let pureName = order.customerName;
+      let extraInfo = '';
       const resiMatch = pureName.match(/\(Resi: (.*?)\)/);
-      let resi = resiMatch ? resiMatch[1] : '-';
-      
-      const updateTime = (newStatus === 'completed' || newStatus === 'cancelled') ? Date.now() : undefined;
-      const today = new Date().toISOString().split('T')[0];
+      if (resiMatch) { extraInfo += ` (Resi: ${resiMatch[1]})`; pureName = pureName.replace(/\(Resi:.*?\)/, ''); }
+      const viaMatch = pureName.match(/\(Via: (.*?)\)/);
+      if (viaMatch) { extraInfo += ` (Via: ${viaMatch[1]})`; pureName = pureName.replace(/\(Via:.*?\)/, ''); }
+      pureName = pureName.trim();
+
+      let updateTime = undefined;
+      const today = new Date().toISOString().split('T')[0]; // Format Tanggal String (YYYY-MM-DD)
+
+      if (newStatus === 'completed' || newStatus === 'cancelled') {
+          updateTime = Date.now();
+      }
 
       if (order.status === 'pending' && newStatus === 'processing') {
           if (await updateOrderStatusService(orderId, newStatus)) { 
@@ -196,11 +206,12 @@ const AppContent: React.FC = () => {
                       const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                       
                       await updateInventory(itemToUpdate);
-                      // SIMPAN KE BARANG KELUAR
+                      
+                      // --- SAVE KE TABEL BARANG KELUAR ---
                       await addBarangKeluar({
                           tanggal: today,
                           kodeToko: 'APP',
-                          tempo: 'AUTO',
+                          tempo: 'MJM',
                           ecommerce: 'APLIKASI',
                           customer: pureName,
                           partNumber: currentItem.partNumber,
@@ -212,7 +223,7 @@ const AppContent: React.FC = () => {
                           qtyKeluar: qtySold,
                           hargaSatuan: orderItem.customPrice ?? orderItem.price,
                           hargaTotal: (orderItem.customPrice ?? orderItem.price) * qtySold,
-                          resi: resi
+                          resi: resiMatch ? resiMatch[1] : '-'
                       });
                   }
               }
@@ -230,11 +241,12 @@ const AppContent: React.FC = () => {
                           const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: currentItem.quantity + restoreQty, lastUpdated: Date.now() };
                           
                           await updateInventory(itemToUpdate);
-                          // SIMPAN KE BARANG MASUK (RETUR)
+                          
+                          // --- SAVE KE TABEL BARANG MASUK (RETUR) ---
                           await addBarangMasuk({
                               tanggal: today,
                               tempo: 'RETUR',
-                              suplier: 'RETUR CUSTOMER',
+                              suplier: `RETUR: ${pureName}`,
                               partNumber: itemToUpdate.partNumber,
                               name: itemToUpdate.name,
                               brand: itemToUpdate.brand,
@@ -272,7 +284,7 @@ const AppContent: React.FC = () => {
     await saveChatSession(updatedSession);
   };
 
-  // --- LOGIC HANDLE SCAN RESI (DIPERBARUI) ---
+  // --- [LOGIKA BARU] SAVE HASIL SCAN ---
   const handleSaveScannedOrder = async (data: ResiAnalysisResult | any) => {
     if (!data.items || data.items.length === 0) { showToast("Gagal: Tidak ada item terdeteksi.", 'error'); return; }
     setLoading(true);
@@ -281,6 +293,7 @@ const AppContent: React.FC = () => {
     const matchedCartItems: CartItem[] = [];
     const unmatchedItems: string[] = [];
 
+    // Simple Matching by Part Number or Name
     for (const scannedItem of data.items) {
         const foundItem = items.find(i => 
             i.name.toLowerCase().includes(scannedItem.name.toLowerCase()) || 
@@ -309,6 +322,7 @@ const AppContent: React.FC = () => {
 
     if (await saveOrder(newOrder)) {
         const today = new Date().toISOString().split('T')[0];
+        
         for (const item of matchedCartItems) {
             const currentItem = await getItemById(item.id);
             if (currentItem) {
@@ -316,6 +330,7 @@ const AppContent: React.FC = () => {
                 const updateData = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                 await updateInventory(updateData);
                 
+                // --- SAVE KE TABEL BARANG KELUAR ---
                 await addBarangKeluar({
                     tanggal: today,
                     kodeToko: 'SCAN',
@@ -336,7 +351,7 @@ const AppContent: React.FC = () => {
             }
         }
         
-        if (unmatchedItems.length > 0) showToast(`Sukses Sebagian! ${unmatchedItems.length} item dilewati.`, 'error');
+        if (unmatchedItems.length > 0) showToast(`Sukses Sebagian! ${unmatchedItems.length} SKU dilewati.`, 'error');
         else showToast('Scan Resi Berhasil! Stok Terupdate.', 'success');
         
         if (activeView === 'scan') setActiveView('orders');
@@ -363,6 +378,7 @@ const AppContent: React.FC = () => {
   if (loading && items.length === 0) return <div className="flex flex-col h-screen items-center justify-center bg-white font-sans text-gray-600 space-y-6"><div className="relative"><div className="w-16 h-16 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin"></div><div className="absolute inset-0 flex items-center justify-center"><CloudLightning size={20} className="text-blue-600 animate-pulse" /></div></div><div className="text-center space-y-1"><p className="font-medium text-gray-900">Menghubungkan Database</p><p className="text-xs text-gray-400">Sinkronisasi Supabase...</p></div></div>;
 
   if (!isAuthenticated) {
+      // --- TAMPILAN LOGIN ORIGINAL ---
       return (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 flex items-center justify-center p-4 font-sans">
             {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
@@ -384,9 +400,12 @@ const AppContent: React.FC = () => {
       );
   }
 
+  // --- TAMPILAN DASHBOARD UTAMA ORIGINAL ---
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+      
+      {/* HEADER ATAS (NAVIGASI) */}
       <div className="bg-white border-b px-4 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm backdrop-blur-md bg-white/90">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')}>
               <div className={`${isAdmin ? 'bg-purple-600' : 'bg-blue-600'} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform`}>{isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />}</div>
@@ -403,6 +422,7 @@ const AppContent: React.FC = () => {
           </div>
       </div>
 
+      {/* KONTEN UTAMA */}
       <div className="flex-1 overflow-y-auto">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
         {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
@@ -411,6 +431,7 @@ const AppContent: React.FC = () => {
         {activeView === 'chat' && <ChatView isAdmin={isAdmin} currentCustomerId={isAdmin ? undefined : myCustomerId} sessions={chatSessions} onSendMessage={handleSendMessage} />}
         {activeView === 'scan' && isAdmin && <ScanResiView onSave={handleSaveScannedOrder} onSaveBulk={handleBulkSave} isProcessing={loading} />}
         
+        {/* MODAL FORM EDIT/TAMBAH BARANG */}
         {isEditing && isAdmin && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in">
                 <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl">
@@ -420,6 +441,7 @@ const AppContent: React.FC = () => {
         )}
       </div>
 
+      {/* NAVIGASI BAWAH (ORIGINAL STYLE) */}
       <div className="bg-white border-t flex justify-around p-2 sticky bottom-0 z-40 safe-area-pb backdrop-blur-md bg-white/90">
         <button onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')} className={`flex flex-col items-center p-2 rounded-xl transition-all ${activeView === 'shop' || activeView === 'inventory' ? 'text-blue-600 bg-blue-50 scale-105' : 'text-gray-400 hover:bg-gray-50'}`}>
             {isAdmin ? <Home size={24} strokeWidth={activeView === 'inventory' ? 2.5 : 2} /> : <Package size={24} strokeWidth={activeView === 'shop' ? 2.5 : 2} />}
