@@ -11,13 +11,13 @@ import { ScanResiView } from './components/ScanResiView';
 import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
 import { ResiAnalysisResult } from './services/geminiService';
 
-// --- IMPORT LOGIKA BARU ---
+// --- IMPORT LOGIKA DATABASE BARU ---
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory, getItemById,
   fetchOrders, saveOrder, updateOrderStatusService,
   fetchHistory, addHistoryLog,
   fetchChatSessions, saveChatSession,
-  addBarangMasuk, addBarangKeluar
+  addBarangMasuk, addBarangKeluar // <--- Fungsi Baru
 } from './services/supabaseService';
 
 import { generateId, formatRupiah } from './utils';
@@ -121,12 +121,14 @@ const AppContent: React.FC = () => {
 
   const handleLogout = () => { setIsAuthenticated(false); setIsAdmin(false); setLoginName(''); setLoginPass(''); localStorage.removeItem('stockmaster_customer_name'); };
 
-  // --- LOGIC SAVE ITEM ---
+  // --- LOGIC BARU: SAVE ITEM (Master Data Saja) ---
   const handleSaveItem = async (data: InventoryFormData) => {
       setLoading(true);
       const newQuantity = Number(data.quantity) || 0;
       let updatedItem: InventoryItem = { ...editItem, ...data, quantity: newQuantity, initialStock: data.initialStock || 0, qtyIn: data.qtyIn || 0, qtyOut: data.qtyOut || 0, lastUpdated: Date.now() };
 
+      // Catatan: Pencatatan ke tabel 'barang_masuk' / 'barang_keluar' sekarang ditangani langsung oleh komponen ItemForm.tsx
+      // Di sini kita hanya menyimpan data Master Inventory (Stok Akhir, Harga, dll)
       if (editItem) {
           if (await updateInventory(updatedItem)) { showToast('Update berhasil!'); refreshData(); }
       } else {
@@ -173,7 +175,7 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- LOGIC UPDATE STATUS (DIPERBARUI) ---
+  // --- LOGIC BARU: UPDATE STATUS PESANAN (Mencatat ke barang_keluar / barang_masuk) ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -187,12 +189,13 @@ const AppContent: React.FC = () => {
       pureName = pureName.trim();
 
       let updateTime = undefined;
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toISOString().split('T')[0]; // Format Tanggal untuk DB Baru
 
       if (newStatus === 'completed' || newStatus === 'cancelled') {
           updateTime = Date.now();
       }
 
+      // --- KASUS 1: PENDING -> PROCESSING (Stok Berkurang -> Catat Barang Keluar) ---
       if (order.status === 'pending' && newStatus === 'processing') {
           if (await updateOrderStatusService(orderId, newStatus)) { 
               for (const orderItem of order.items) {
@@ -202,6 +205,8 @@ const AppContent: React.FC = () => {
                       const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                       
                       await updateInventory(itemToUpdate);
+                      
+                      // LOGIKA BARU: Simpan ke tabel barang_keluar
                       await addBarangKeluar({
                           tanggal: today,
                           kodeToko: 'APP',
@@ -225,6 +230,7 @@ const AppContent: React.FC = () => {
               setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
           }
       }
+      // --- KASUS 2: BATAL / RETUR (Stok Kembali -> Catat Barang Masuk) ---
       else if (newStatus === 'cancelled' && order.status !== 'cancelled') {
           if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
               if (order.status !== 'pending') {
@@ -235,6 +241,8 @@ const AppContent: React.FC = () => {
                           const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: currentItem.quantity + restoreQty, lastUpdated: Date.now() };
                           
                           await updateInventory(itemToUpdate);
+                          
+                          // LOGIKA BARU: Simpan ke tabel barang_masuk (sebagai Retur)
                           await addBarangMasuk({
                               tanggal: today,
                               tempo: 'RETUR',
@@ -259,6 +267,7 @@ const AppContent: React.FC = () => {
               setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus, timestamp: updateTime || x.timestamp } : x));
           }
       }
+      // --- KASUS 3: LAINNYA (Processing -> Completed) ---
       else {
           if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
               setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus, timestamp: updateTime || x.timestamp } : x));
@@ -276,7 +285,7 @@ const AppContent: React.FC = () => {
     await saveChatSession(updatedSession);
   };
 
-  // --- LOGIC SAVE SCAN (DIPERBARUI) ---
+  // --- LOGIC BARU: SAVE SCAN RESI (Mencatat ke barang_keluar) ---
   const handleSaveScannedOrder = async (data: ResiAnalysisResult | any) => {
     if (!data.items || data.items.length === 0) { showToast("Gagal: Tidak ada item terdeteksi.", 'error'); return; }
     setLoading(true);
@@ -288,7 +297,6 @@ const AppContent: React.FC = () => {
     const matchedCartItems: CartItem[] = [];
     const unmatchedItems: string[] = [];
 
-    // Simple matching
     for (const scannedItem of data.items) {
         const foundItem = items.find(i => 
             i.name.toLowerCase().includes(scannedItem.name.toLowerCase()) || 
@@ -325,6 +333,7 @@ const AppContent: React.FC = () => {
                 const updateData = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                 await updateInventory(updateData);
                 
+                // LOGIKA BARU: Simpan ke tabel barang_keluar
                 await addBarangKeluar({
                     tanggal: today,
                     kodeToko: 'SCAN',
@@ -396,57 +405,23 @@ const AppContent: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
-      
-      {/* HEADER ATAS + NAVIGASI DIPINDAH KE SINI */}
-      <div className="sticky top-0 z-50 bg-white/90 backdrop-blur-md shadow-sm border-b">
-          
-          {/* BARIS 1: LOGO & LOGOUT */}
-          <div className="px-4 py-3 flex justify-between items-center border-b border-gray-100">
-              <div className="flex items-center gap-3">
-                  <div className={`${isAdmin ? 'bg-purple-600' : 'bg-blue-600'} text-white p-2.5 rounded-xl shadow-md`}>
-                      {isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />}
-                  </div>
-                  <div>
-                      <div className="font-bold leading-none text-gray-900 text-lg">BJW Autopart</div>
-                      <div className="text-[10px] text-gray-500 mt-0.5">{isAdmin ? 'ADMIN ACCESS' : 'STORE FRONT'}</div>
-                  </div>
-              </div>
-              <div className="flex items-center gap-2">
-                  <button onClick={() => { refreshData(); showToast('Data diperbarui'); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors active:scale-90"><CloudLightning size={20} className={loading ? 'animate-spin text-blue-500' : 'text-gray-500'}/></button>
-                  {isAuthenticated && <button onClick={handleLogout} className="p-2 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-full transition-colors active:scale-90"><LogOut size={20}/></button>}
+      <div className="bg-white border-b px-4 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm backdrop-blur-md bg-white/90">
+          <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')}>
+              <div className={`${isAdmin ? 'bg-purple-600' : 'bg-blue-600'} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform`}>{isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />}</div>
+              <div>
+                  <div className="font-bold leading-none text-gray-900 text-lg">BJW</div>
+                  <div className="text-[10px] font-bold text-gray-600 leading-none mt-0.5">Autopart</div>
+                  <div className="text-[9px] text-gray-400 leading-none">Sukucadang Mobil</div>
+                  <div className={`text-[9px] font-bold mt-1 px-1.5 py-0.5 rounded-md inline-block ${isAdmin ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>{isAdmin ? 'ADMIN ACCESS' : 'STORE FRONT'}</div>
               </div>
           </div>
-
-          {/* BARIS 2: NAVIGASI (DASH/ORDER/SCAN/CHAT) - SEKARANG DI ATAS */}
-          <div className="flex justify-around p-1 bg-white">
-            <button onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')} className={`flex-1 flex flex-col items-center p-2 rounded-lg transition-all ${activeView === 'shop' || activeView === 'inventory' ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:bg-gray-50'}`}>
-                {isAdmin ? <Home size={20} /> : <Package size={20} />}
-                <span className="text-[10px] font-bold mt-1">{isAdmin ? 'Dash' : 'Shop'}</span>
-            </button>
-            
-            <button onClick={() => setActiveView('orders')} className={`flex-1 flex flex-col items-center p-2 rounded-lg relative transition-all ${activeView === 'orders' ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:bg-gray-50'}`}>
-                <ClipboardList size={20} />
-                {(isAdmin ? pendingOrdersCount : myPendingOrdersCount) > 0 && <span className="absolute top-1 right-1/4 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}
-                <span className="text-[10px] font-bold mt-1">Order</span>
-            </button>
-
-            {isAdmin && (
-                <button onClick={() => setActiveView('scan')} className={`flex-1 flex flex-col items-center p-2 rounded-lg transition-all ${activeView === 'scan' ? 'text-purple-600 bg-purple-50' : 'text-gray-400 hover:bg-gray-50'}`}>
-                    <ScanBarcode size={20} />
-                    <span className="text-[10px] font-bold mt-1">Scan</span>
-                </button>
-            )}
-
-            <button onClick={() => setActiveView('chat')} className={`flex-1 flex flex-col items-center p-2 rounded-lg relative transition-all ${activeView === 'chat' ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:bg-gray-50'}`}>
-                <MessageSquare size={20} />
-                {unreadChatCount > 0 && <span className="absolute top-1 right-1/4 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}
-                <span className="text-[10px] font-bold mt-1">Chat</span>
-            </button>
+          <div className="flex items-center gap-2">
+              <button onClick={() => { refreshData(); showToast('Data diperbarui'); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors active:scale-90"><CloudLightning size={20} className={loading ? 'animate-spin text-blue-500' : 'text-gray-500'}/></button>
+              {isAuthenticated && <button onClick={handleLogout} className="p-2 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-full transition-colors active:scale-90"><LogOut size={20}/></button>}
           </div>
       </div>
 
-      {/* KONTEN UTAMA */}
-      <div className="flex-1 overflow-y-auto p-0 pb-10">
+      <div className="flex-1 overflow-y-auto">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
         {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
         {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} onUpdateStatus={handleUpdateStatus} />}
@@ -463,7 +438,29 @@ const AppContent: React.FC = () => {
         )}
       </div>
 
-      {/* FOOTER KOSONG (KARENA NAVIGASI SUDAH DI ATAS) */}
+      {/* --- NAVIGASI BAWAH ORIGINAL (RESTORED) --- */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pb-safe z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+        <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-3'} h-16`}>
+            {isAdmin ? (
+                <>
+                    <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><ShoppingCart size={22} className={activeView==='shop'?'fill-purple-100':''} /><span className="text-[10px] font-medium">Beranda</span></button>
+                    <button onClick={()=>setActiveView('scan')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='scan'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><ScanBarcode size={22} className={activeView==='scan'?'text-purple-600':''} /><span className="text-[10px] font-medium">Scan</span></button>
+                    <button onClick={()=>setActiveView('inventory')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='inventory'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><Package size={22} className={activeView==='inventory'?'fill-purple-100':''} /><span className="text-[10px] font-medium">Gudang</span></button>
+                    <button onClick={()=>setActiveView('orders')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='orders'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><div className="relative"><ClipboardList size={22} className={activeView==='orders'?'fill-purple-100':''} />{pendingOrdersCount>0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}</div><span className="text-[10px] font-medium">Pesanan</span></button>
+                    <button onClick={()=>setActiveView('chat')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='chat'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><div className="relative"><MessageSquare size={22} className={activeView==='chat'?'fill-purple-100':''} />{unreadChatCount>0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}</div><span className="text-[10px] font-medium">Chat</span></button>
+                </>
+            ) : (
+                <>
+                    <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}><Home size={22} className={activeView==='shop'?'fill-blue-100':''} /><span className="text-[10px] font-medium">Belanja</span></button>
+                    <button onClick={()=>setActiveView('orders')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='orders'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}>
+                        <div className="relative"><ClipboardList size={22} className={activeView==='orders'?'fill-blue-100':''} />{myPendingOrdersCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-white"></span>}</div>
+                        <span className="text-[10px] font-medium">Pesanan</span>
+                    </button>
+                    <button onClick={()=>setActiveView('chat')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='chat'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}><MessageSquare size={22} className={activeView==='chat'?'fill-blue-100':''} /><span className="text-[10px] font-medium">Chat</span></button>
+                </>
+            )}
+        </div>
+      </div>
     </div>
   );
 };
