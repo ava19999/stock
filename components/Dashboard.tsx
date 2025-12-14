@@ -1,7 +1,7 @@
 // FILE: src/components/Dashboard.tsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
-import { fetchInventoryPaginated, fetchInventoryStats } from '../services/supabaseService';
+import { fetchInventoryPaginated, fetchInventoryStats, fetchHistoryLogsPaginated } from '../services/supabaseService';
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
   ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin, FileText,
@@ -40,6 +40,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
   
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
+  // State untuk Detail History Paginated
+  const [historyDetailData, setHistoryDetailData] = useState<StockHistory[]>([]);
+  const [historyDetailPage, setHistoryDetailPage] = useState(1);
+  const [historyDetailTotalPages, setHistoryDetailTotalPages] = useState(1);
+  const [historyDetailSearch, setHistoryDetailSearch] = useState('');
+  const [historyDetailLoading, setHistoryDetailLoading] = useState(false);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     const { data, count } = await fetchInventoryPaginated(page, 50, searchTerm, filterType);
@@ -66,6 +73,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadStats(); }, [loadStats]);
+
+  // Effect khusus untuk memuat data history saat modal dibuka
+  useEffect(() => {
+    if (showHistoryDetail) {
+      setHistoryDetailLoading(true);
+      const timer = setTimeout(async () => {
+          const { data, count } = await fetchHistoryLogsPaginated(showHistoryDetail, historyDetailPage, 50, historyDetailSearch);
+          setHistoryDetailData(data);
+          setHistoryDetailTotalPages(Math.ceil(count / 50));
+          setHistoryDetailLoading(false);
+      }, 500);
+      return () => clearTimeout(timer);
+    } else {
+        setHistoryDetailData([]);
+        setHistoryDetailPage(1);
+        setHistoryDetailSearch('');
+    }
+  }, [showHistoryDetail, historyDetailPage, historyDetailSearch]);
+
 
   useEffect(() => {
     if (!selectedItemHistory) {
@@ -144,18 +170,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return itemHistory;
   }, [history, selectedItemHistory, itemHistorySearch]);
 
-  const filteredGlobalHistory = useMemo(() => {
-    if (!showHistoryDetail) return [];
-    return history.filter(h => h.type === showHistoryDetail)
-                  .sort((a, b) => b.timestamp - a.timestamp)
-                  .slice(0, 100);
-  }, [history, showHistoryDetail]);
-
-
   return (
     <div className="space-y-4 pb-24">
       
       {/* --- GLOBAL HISTORY MODAL (DETAIL RIWAYAT MASUK/KELUAR) --- */}
+      
       {showHistoryDetail && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 duration-300 flex flex-col max-h-[90vh]">
@@ -166,13 +185,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </h3>
                 <button onClick={() => setShowHistoryDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm font-medium">Tutup</button>
             </div>
+            
+            {/* SEARCH & PAGINATION HEADER */}
+            <div className="p-3 bg-white border-b border-gray-100 flex gap-3 justify-between items-center">
+                <div className="relative flex-1 max-w-md">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <input 
+                        type="text" 
+                        placeholder={showHistoryDetail === 'in' ? "Cari Nama Barang, Part No, Supplier..." : "Cari Barang, Customer, Resi, E-Commerce..."}
+                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                        value={historyDetailSearch}
+                        onChange={(e) => { setHistoryDetailSearch(e.target.value); setHistoryDetailPage(1); }}
+                    />
+                </div>
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setHistoryDetailPage(p => Math.max(1, p - 1))} disabled={historyDetailPage === 1} className="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-30"><ChevronLeft size={16}/></button>
+                    <span className="text-xs font-bold text-gray-600">Hal {historyDetailPage} / {historyDetailTotalPages || 1}</span>
+                    <button onClick={() => setHistoryDetailPage(p => Math.min(historyDetailTotalPages, p + 1))} disabled={historyDetailPage === historyDetailTotalPages || historyDetailTotalPages === 0} className="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-30"><ChevronRight size={16}/></button>
+                </div>
+            </div>
+
             <div className="overflow-auto flex-1 p-0">
-                {filteredGlobalHistory.length === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Belum ada riwayat.</div> : (
+                {historyDetailLoading ? (
+                    <div className="flex flex-col items-center justify-center h-64 text-blue-500">
+                        <Loader2 size={32} className="animate-spin mb-2"/>
+                        <p className="text-xs font-medium">Memuat Data...</p>
+                    </div>
+                ) : historyDetailData.length === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Belum ada riwayat.</div> : (
                     <table className="w-full text-left border-collapse">
                         <thead className="bg-gray-100 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
                             <tr>
                                 <th className="p-3 border-b border-gray-200 w-28">Tanggal</th>
-                                {/* KOLOM RESI & ECOMMERCE DIKEMBALIKAN */}
                                 <th className="p-3 border-b border-gray-200 w-32">Resi</th>
                                 <th className="p-3 border-b border-gray-200 w-32">E-Commerce</th>
                                 <th className="p-3 border-b border-gray-200 w-32">No. Part</th>
@@ -184,7 +227,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 text-sm">
-                            {filteredGlobalHistory.map((h) => {
+                            {historyDetailData.map((h) => {
                                 const price = h.price || 0; 
                                 const total = h.totalPrice || (price * (Number(h.quantity) || 0));
                                 const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
@@ -201,12 +244,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     <tr key={h.id} className="hover:bg-blue-50 transition-colors">
                                         <td className="p-3 text-gray-600 whitespace-nowrap align-top"><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div></td>
                                         
-                                        {/* KOLOM RESI KEMBALI */}
                                         <td className="p-3 align-top">
                                             <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${resi !== '-' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-300'}`}>{resi}</span>
                                         </td>
                                         
-                                        {/* KOLOM E-COMMERCE KEMBALI */}
                                         <td className="p-3 align-top">
                                             <span className={`inline-block px-2 py-1 rounded text-xs font-medium flex items-center gap-1 w-fit ${ecommerce !== '-' ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'text-gray-300'}`}>
                                                 {ecommerce !== '-' && <ShoppingBag size={10} />}
@@ -220,7 +261,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         <td className="p-3 text-right text-gray-600 font-mono align-top text-xs">{formatRupiah(price)}</td>
                                         <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">{formatRupiah(total)}</td>
                                         
-                                        {/* KOLOM KETERANGAN (Cuma Teks Utama/Nama) */}
                                         <td className="p-3 align-top text-gray-700 font-medium text-xs">
                                             <div className="flex items-center gap-1.5">
                                                 {customer !== '-' && <User size={12} className="text-gray-400"/>}

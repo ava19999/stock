@@ -85,7 +85,7 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             currentStock: Number(m.stock_awal) + Number(m.qty_masuk),
             price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
             timestamp: new Date(m.tanggal).getTime(),
-            reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})` // UPDATE: Menggunakan m.ecommerce
+            reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`
         });
     });
 
@@ -133,16 +133,7 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
 
 export const addBarangMasuk = async (data: BarangMasuk): Promise<boolean> => {
   const { error } = await supabase.from('barang_masuk').insert([{
-    tanggal: data.tanggal, tempo: data.tempo, suplier: data.ecommerce, // UPDATE: suplier diganti ecommerce (nama field di parameter) tapi key DB tetap suplier? 
-    // Tunggu, jika DB sudah diubah menjadi ecommerce, maka baris ini harus:
-    // ecommerce: data.ecommerce,
-    // Jika hanya mengubah di kode front-end untuk *menampilkan* tapi DB masih 'suplier', maka:
-    // suplier: data.ecommerce
-    // 
-    // Berdasarkan request "ubah saja kolom... jadi e-commerce", saya asumsikan Anda juga mengubah struktur DB-nya.
-    // Jadi di bawah ini saya gunakan 'ecommerce' sebagai nama kolom DB.
-    ecommerce: data.ecommerce, 
-    part_number: data.partNumber,
+    tanggal: data.tanggal, tempo: data.tempo, ecommerce: data.ecommerce, part_number: data.partNumber,
     name: data.name, brand: data.brand, application: data.application, rak: data.rak,
     stock_awal: data.stockAwal, qty_masuk: data.qtyMasuk, harga_satuan: data.hargaSatuan, harga_total: data.hargaTotal
   }]);
@@ -166,8 +157,7 @@ export const addHistoryLog = async (h: StockHistory): Promise<boolean> => {
     const today = new Date().toISOString().split('T')[0];
     if (h.type === 'in') {
         return addBarangMasuk({
-            tanggal: today, tempo: 'AUTO', ecommerce: 'SYSTEM', // UPDATE: ecommerce
-            partNumber: h.partNumber, name: h.name,
+            tanggal: today, tempo: 'AUTO', ecommerce: 'SYSTEM', partNumber: h.partNumber, name: h.name,
             brand: '-', application: '-', rak: '-', stockAwal: h.previousStock, qtyMasuk: h.quantity,
             hargaSatuan: h.price, hargaTotal: h.totalPrice
         });
@@ -209,4 +199,59 @@ export const saveChatSession = async (s: ChatSession): Promise<boolean> => {
         customer_id: s.customerId, customer_name: s.customerName, messages: s.messages, last_message: s.lastMessage, last_timestamp: s.lastTimestamp, unread_admin_count: s.unreadAdminCount, unread_user_count: s.unreadUserCount
     }]);
     return !error;
+};
+
+// --- FUNGSI BARU: PAGINATION & SEARCH HISTORY ---
+export const fetchHistoryLogsPaginated = async (
+  type: 'in' | 'out',
+  page: number,
+  limit: number,
+  search: string
+) => {
+  const table = type === 'in' ? 'barang_masuk' : 'barang_keluar';
+  let query = supabase.from(table).select('*', { count: 'exact' });
+
+  if (search) {
+    // Logic Pencarian di Supabase
+    if (type === 'in') {
+      // Cari di: Name, Part Number, E-Commerce (Supplier)
+      query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%`);
+    } else {
+      // Cari di: Name, Part Number, E-Commerce, Customer, Resi
+      query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,customer.ilike.%${search}%,resi.ilike.%${search}%`);
+    }
+  }
+
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+
+  const { data, error, count } = await query
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  if (error) {
+    console.error(`Error fetching ${table}:`, error);
+    return { data: [], count: 0 };
+  }
+
+  const mappedData: StockHistory[] = (data || []).map((item: any) => ({
+    id: item.id,
+    itemId: item.part_number,
+    partNumber: item.part_number,
+    name: item.name,
+    type: type,
+    quantity: type === 'in' ? Number(item.qty_masuk) : Number(item.qty_keluar),
+    previousStock: Number(item.stock_awal),
+    currentStock: type === 'in' 
+        ? Number(item.stock_awal) + Number(item.qty_masuk) 
+        : Number(item.stock_awal) - Number(item.qty_keluar),
+    price: Number(item.harga_satuan),
+    totalPrice: Number(item.harga_total),
+    timestamp: new Date(item.created_at || item.tanggal).getTime(), 
+    reason: type === 'in' 
+        ? `Restock (Via: ${item.ecommerce}) (${item.tempo})`
+        : `${item.customer} (Via: ${item.ecommerce}) (Resi: ${item.resi || '-'})`
+  }));
+
+  return { data: mappedData, count: count || 0 };
 };
