@@ -21,7 +21,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
   });
 
   const [transactionInfo, setTransactionInfo] = useState({
-    suplier: '', tempo: 'MJM', customer: 'MANUAL GUDANG', store: 'OFFLINE', kodeToko: 'GDG'
+    ecommerce: '', tempo: 'MJM', customer: 'MANUAL GUDANG', store: 'OFFLINE', kodeToko: 'GDG'
   });
 
   const [activePriceType, setActivePriceType] = useState<'retail' | 'kingFano'>('retail');
@@ -56,7 +56,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
     else if (name === 'brand') processedValue = value.toUpperCase();
     else if (['price', 'kingFanoPrice', 'costPrice', 'initialStock', 'qtyIn', 'qtyOut'].includes(name)) processedValue = parseFloat(value) || 0;
     
-    if (['suplier', 'customer', 'store', 'tempo', 'kodeToko'].includes(name)) {
+    if (['ecommerce', 'customer', 'store', 'tempo', 'kodeToko'].includes(name)) {
         setTransactionInfo(prev => ({ ...prev, [name]: value }));
     } else {
         setFormData(prev => ({ ...prev, [name]: processedValue }));
@@ -90,7 +90,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
     
     if (formData.qtyIn > 0) {
         await addBarangMasuk({
-            tanggal: today, tempo: transactionInfo.tempo, suplier: transactionInfo.suplier || 'TANPA NAMA',
+            tanggal: today, tempo: transactionInfo.tempo, ecommerce: transactionInfo.ecommerce || 'TANPA NAMA',
             partNumber: formData.partNumber, name: formData.name, brand: formData.brand, application: formData.application,
             rak: formData.shelf, stockAwal: formData.initialStock, qtyMasuk: formData.qtyIn,
             hargaSatuan: formData.costPrice, hargaTotal: formData.qtyIn * formData.costPrice
@@ -154,7 +154,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
                     <div><label className="block text-[10px] font-bold text-blue-800">Akhir</label><input type="number" readOnly value={formData.quantity} className="w-full bg-blue-100 border rounded text-center font-bold text-blue-900 text-sm" /></div>
                 </div>
                 {(formData.qtyIn > 0 || formData.qtyOut > 0) && (<div className="mb-3"><label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Tempo</label><input type="text" name="tempo" value={transactionInfo.tempo} onChange={handleChange} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="MJM / CASH / UTANG" /></div>)}
-                {formData.qtyIn > 0 && (<div className="bg-green-50 p-2 rounded border border-green-100"><label className="block text-xs font-bold text-green-800">Supplier</label><input type="text" name="suplier" value={transactionInfo.suplier} onChange={handleChange} className="w-full border rounded text-sm" required /></div>)}
+                {formData.qtyIn > 0 && (<div className="bg-green-50 p-2 rounded border border-green-100"><label className="block text-xs font-bold text-green-800">E-Commerce / Supplier</label><input type="text" name="ecommerce" value={transactionInfo.ecommerce} onChange={handleChange} className="w-full border rounded text-sm" required /></div>)}
                 {formData.qtyOut > 0 && (<div className="bg-red-50 p-2 rounded border border-red-100 grid grid-cols-2 gap-2"><div><label className="block text-xs font-bold text-red-800">Toko</label><select name="store" value={transactionInfo.store} onChange={handleChange} className="w-full border rounded text-sm"><option value="OFFLINE">OFFLINE</option><option value="TIKTOK">TIKTOK</option><option value="SHOPEE">SHOPEE</option></select></div><div><label className="block text-xs font-bold text-red-800">Customer</label><input type="text" name="customer" value={transactionInfo.customer} onChange={handleChange} className="w-full border rounded text-sm" /></div></div>)}
             </div>
           </div>

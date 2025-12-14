@@ -85,7 +85,7 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             currentStock: Number(m.stock_awal) + Number(m.qty_masuk),
             price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
             timestamp: new Date(m.tanggal).getTime(),
-            reason: `Restock: ${m.suplier} (${m.tempo})`
+            reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})` // UPDATE: Menggunakan m.ecommerce
         });
     });
 
@@ -133,7 +133,16 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
 
 export const addBarangMasuk = async (data: BarangMasuk): Promise<boolean> => {
   const { error } = await supabase.from('barang_masuk').insert([{
-    tanggal: data.tanggal, tempo: data.tempo, suplier: data.suplier, part_number: data.partNumber,
+    tanggal: data.tanggal, tempo: data.tempo, suplier: data.ecommerce, // UPDATE: suplier diganti ecommerce (nama field di parameter) tapi key DB tetap suplier? 
+    // Tunggu, jika DB sudah diubah menjadi ecommerce, maka baris ini harus:
+    // ecommerce: data.ecommerce,
+    // Jika hanya mengubah di kode front-end untuk *menampilkan* tapi DB masih 'suplier', maka:
+    // suplier: data.ecommerce
+    // 
+    // Berdasarkan request "ubah saja kolom... jadi e-commerce", saya asumsikan Anda juga mengubah struktur DB-nya.
+    // Jadi di bawah ini saya gunakan 'ecommerce' sebagai nama kolom DB.
+    ecommerce: data.ecommerce, 
+    part_number: data.partNumber,
     name: data.name, brand: data.brand, application: data.application, rak: data.rak,
     stock_awal: data.stockAwal, qty_masuk: data.qtyMasuk, harga_satuan: data.hargaSatuan, harga_total: data.hargaTotal
   }]);
@@ -157,7 +166,8 @@ export const addHistoryLog = async (h: StockHistory): Promise<boolean> => {
     const today = new Date().toISOString().split('T')[0];
     if (h.type === 'in') {
         return addBarangMasuk({
-            tanggal: today, tempo: 'AUTO', suplier: 'SYSTEM', partNumber: h.partNumber, name: h.name,
+            tanggal: today, tempo: 'AUTO', ecommerce: 'SYSTEM', // UPDATE: ecommerce
+            partNumber: h.partNumber, name: h.name,
             brand: '-', application: '-', rak: '-', stockAwal: h.previousStock, qtyMasuk: h.quantity,
             hargaSatuan: h.price, hargaTotal: h.totalPrice
         });
