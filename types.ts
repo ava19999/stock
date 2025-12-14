@@ -3,15 +3,17 @@
 export interface InventoryItem {
   id: string;
   partNumber: string;
-  sku?: string;          // <--- KOLOM BARU (SKU Induk)
+  // SKU Dihapus
   name: string;
-  description: string;
+  
+  brand: string;        // Menggantikan peran SKU/Brand
+  application: string;  // Menggantikan Description
+
   quantity: number; 
   shelf: string;
   
   price: number;           
   kingFanoPrice: number;   
-  
   costPrice: number;       
   ecommerce: string;
   imageUrl: string;
@@ -24,7 +26,6 @@ export interface InventoryItem {
 
 export type InventoryFormData = Omit<InventoryItem, 'id' | 'lastUpdated'>;
 
-// ... interface lainnya tetap sama
 export interface CartItem extends InventoryItem {
   cartQuantity: number;
   customPrice?: number;

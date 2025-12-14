@@ -1,9 +1,10 @@
 // FILE: src/components/ItemForm.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
-import { analyzeInventoryImage, generateDescription } from '../services/geminiService';
+import { analyzeInventoryImage } from '../services/geminiService'; 
 import { compressImage } from '../utils';
-import { Camera, Upload, Sparkles, X, Save, Loader2, Box, ChevronDown, Check, Crown, Tag, Barcode } from 'lucide-react';
+import { Camera, Upload, X, Save, Loader2, Box, ChevronDown, Check, Crown, Tag } from 'lucide-react'; 
+// (Barcode dihapus dari import icon karena SKU hilang)
 
 interface ItemFormProps {
   initialData?: InventoryItem;
@@ -14,9 +15,11 @@ interface ItemFormProps {
 export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCancel }) => {
   const [formData, setFormData] = useState<InventoryFormData>({
     partNumber: '',
-    sku: '', // <--- Default Kosong
+    // sku: '',  <-- HAPUS
     name: '',
-    description: '',
+    brand: '',       // Brand menggantikan posisi strategis SKU
+    application: '', // Application menggantikan Description
+    
     price: 0,
     kingFanoPrice: 0, 
     costPrice: 0,
@@ -32,16 +35,18 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
   const [activePriceType, setActivePriceType] = useState<'retail' | 'kingFano'>('retail');
   const [showPriceMenu, setShowPriceMenu] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isGeneratingDesc, setIsGeneratingDesc] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (initialData) {
       setFormData({
         partNumber: initialData.partNumber,
-        sku: initialData.sku || '', // <--- Load SKU
+        // sku: initialData.sku <-- HAPUS
         name: initialData.name,
-        description: initialData.description,
+        
+        brand: initialData.brand || '',
+        application: initialData.application || '',
+        
         price: initialData.price,
         kingFanoPrice: initialData.kingFanoPrice || 0,
         costPrice: initialData.costPrice || 0,
@@ -71,6 +76,8 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
     let processedValue: string | number = value;
     if (name === 'shelf') {
         processedValue = value.toUpperCase().replace(/-/g, ' ');
+    } else if (name === 'brand') {
+        processedValue = value.toUpperCase();
     } else if (['price', 'kingFanoPrice', 'costPrice', 'initialStock', 'qtyIn', 'qtyOut'].includes(name)) {
         processedValue = parseFloat(value) || 0;
     }
@@ -99,11 +106,11 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
           setIsAnalyzing(true);
           try {
             const analysis = await analyzeInventoryImage(compressedBase64);
-            if (analysis.suggestedName || analysis.suggestedDescription) {
+            if (analysis.suggestedName) {
                setFormData(prev => ({
                  ...prev,
                  name: analysis.suggestedName || prev.name,
-                 description: analysis.suggestedDescription || prev.description,
+                 // Jika ada logic AI baru, bisa diupdate disini
                  shelf: analysis.suggestedShelfCategory ? analysis.suggestedShelfCategory.toUpperCase().replace(/-/g, ' ') : prev.shelf
                }));
             }
@@ -112,15 +119,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
       } catch (error) { console.error("Gagal memproses gambar", error); }
     };
     reader.readAsDataURL(file);
-  };
-
-  const handleGenerateDescription = async () => {
-    if (!formData.name) return;
-    setIsGeneratingDesc(true);
-    try {
-      const desc = await generateDescription(formData.name, formData.partNumber);
-      if (desc) setFormData(prev => ({ ...prev, description: desc }));
-    } finally { setIsGeneratingDesc(false); }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -173,6 +171,13 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
               <input type="text" name="name" required value={formData.name} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Nama sparepart..." />
             </div>
 
+            {/* --- BRAND (PENGGANTI POSISI SKU) --- */}
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">Brand / Merk</label>
+              <input type="text" name="brand" value={formData.brand} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none uppercase" placeholder="HONDA, TOYOTA, DAIHATSU..." />
+            </div>
+            {/* ------------------------------------ */}
+
             <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
@@ -215,34 +220,26 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
             </div>
 
             <div className="space-y-4">
-                {/* --- INPUT SKU BARU DI SINI --- */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                        <Barcode size={14} className="text-gray-500"/> SKU Induk / Barcode
-                    </label>
-                    <input 
-                        type="text" 
-                        name="sku" 
-                        value={formData.sku || ''} 
-                        onChange={handleChange} 
-                        className="w-full px-4 py-2 border border-blue-200 bg-blue-50/20 rounded-lg outline-none font-mono text-blue-700 placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500/20" 
-                        placeholder="Contoh: SKU-001-A (Samakan dengan Shopee)" 
-                    />
-                    <p className="text-[10px] text-gray-400 mt-1">Kode ini akan digunakan untuk pencocokan otomatis saat scan resi.</p>
-                </div>
-                {/* ----------------------------- */}
+                {/* SKU DIHAPUS DARI SINI */}
 
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">E-Commerce Link / Nama Toko</label>
                     <input type="text" name="ecommerce" value={formData.ecommerce} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none" placeholder="Misal: Tokopedia - Jaya Abadi" />
                 </div>
+                
+                {/* --- APLIKASI (PENGGANTI DESKRIPSI) --- */}
                 <div>
-                    <div className="flex justify-between items-center mb-1">
-                        <label className="block text-sm font-medium text-gray-700">Deskripsi</label>
-                        <button type="button" onClick={handleGenerateDescription} disabled={!formData.name || isGeneratingDesc} className="text-xs flex items-center text-blue-600 hover:text-blue-800 disabled:opacity-50">{isGeneratingDesc ? <Loader2 size={12} className="animate-spin mr-1"/> : <Sparkles size={12} className="mr-1"/>} Generate Deskripsi AI</button>
-                    </div>
-                    <textarea name="description" rows={3} value={formData.description} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none resize-none" placeholder="Deskripsi detail barang..." />
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Aplikasi Kendaraan / Keterangan</label>
+                    <input 
+                        type="text" 
+                        name="application" 
+                        value={formData.application} 
+                        onChange={handleChange} 
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none" 
+                        placeholder="Contoh: CRV G3, JAZZ RS, INNOVA REBORN..." 
+                    />
                 </div>
+                {/* -------------------------------------- */}
             </div>
           </div>
         </div>
