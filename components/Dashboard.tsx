@@ -74,7 +74,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadStats(); }, [loadStats]);
 
-  // Effect khusus untuk memuat data history saat modal dibuka
   useEffect(() => {
     if (showHistoryDetail) {
       setHistoryDetailLoading(true);
@@ -169,6 +168,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
     return itemHistory;
   }, [history, selectedItemHistory, itemHistorySearch]);
+
+  const filteredGlobalHistory = useMemo(() => {
+    if (!showHistoryDetail) return [];
+    return history.filter(h => h.type === showHistoryDetail)
+                  .sort((a, b) => b.timestamp - a.timestamp)
+                  .slice(0, 100);
+  }, [history, showHistoryDetail]);
+
 
   return (
     <div className="space-y-4 pb-24">
@@ -402,7 +409,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20"><span className="bg-white/90 text-gray-800 text-[10px] font-bold px-2 py-1 rounded-full shadow-sm flex items-center gap-1"><History size={10}/> Riwayat</span></div>
                         </div>
                         <div className="p-2.5 flex-1 flex flex-col">
-                          <div className="mb-2"><h3 className="font-bold text-gray-900 text-sm leading-tight line-clamp-2 min-h-[2.4em] mb-1">{item.name || 'Tanpa Nama'}</h3><p className="text-xs text-gray-500 font-mono truncate bg-gray-50 inline-block px-1 rounded">{item.partNumber || '-'}</p><div className="mt-1.5 flex items-start gap-1.5"><FileText size={10} className="text-gray-400 mt-0.5 flex-shrink-0" /><p className="text-xs text-gray-600 leading-snug line-clamp-2 min-h-[2.5em]">{item.description || "-"}</p></div></div>
+                          <div className="mb-2"><h3 className="font-bold text-gray-900 text-sm leading-tight line-clamp-2 min-h-[2.4em] mb-1">{item.name || 'Tanpa Nama'}</h3><p className="text-xs text-gray-500 font-mono truncate bg-gray-50 inline-block px-1 rounded">{item.partNumber || '-'}</p><div className="text-xs text-gray-500 mb-3 flex-1 flex flex-col gap-0.5 mt-1.5"><div className="truncate">App: <span className="font-bold text-gray-900">{item.application || "-"}</span></div><div className="truncate">Brand: <span className="font-bold text-gray-900">{item.brand || "-"}</span></div></div></div>
                           <div className="mt-auto pt-2 border-t border-gray-50 space-y-2">
                              <div className="flex justify-between items-end"><div className="text-sm font-bold text-blue-700 truncate">{formatCompactNumber(item.price)}</div><div className="flex items-center text-xs text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200"><MapPin size={9} className="mr-0.5 text-gray-500"/>{item.shelf || '-'}</div></div>
                              <div className="grid grid-cols-2 gap-1.5"><button onClick={() => onEdit(item)} className="flex items-center justify-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded text-[10px] font-bold transition-colors"><Edit size={10} /> Edit</button><button onClick={() => onDelete(item.id)} className="flex items-center justify-center gap-1 bg-red-50 hover:bg-red-100 text-red-700 py-1.5 rounded text-[10px] font-bold transition-colors"><Trash2 size={10} /> Hapus</button></div>
@@ -418,7 +425,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <div className="w-14 h-14 flex-shrink-0 bg-gray-50 rounded-md overflow-hidden border border-gray-100 relative cursor-pointer group-hover:ring-2 group-hover:ring-blue-200 transition-all" onClick={() => setSelectedItemHistory(item)}>
                                 {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}/> : <div className="w-full h-full flex items-center justify-center text-gray-300"><Package size={20} /></div>}
                             </div>
-                            <div className="flex-1 min-w-0"><h3 className="font-bold text-gray-900 text-sm truncate">{item.name || 'Tanpa Nama'}</h3><div className="flex items-center gap-3 mt-1"><p className="text-xs text-gray-500 font-mono truncate bg-gray-50 px-1.5 py-0.5 rounded">{item.partNumber || '-'}</p><div className="flex items-center text-xs text-gray-600"><MapPin size={10} className="mr-0.5 text-gray-400"/>{item.shelf || '-'}</div></div><p className="text-xs text-gray-500 truncate mt-1">{item.description || "-"}</p></div>
+                            <div className="flex-1 min-w-0"><h3 className="font-bold text-gray-900 text-sm truncate">{item.name || 'Tanpa Nama'}</h3><div className="flex items-center gap-3 mt-1"><p className="text-xs text-gray-500 font-mono truncate bg-gray-50 px-1.5 py-0.5 rounded">{item.partNumber || '-'}</p><div className="flex items-center text-xs text-gray-600"><MapPin size={10} className="mr-0.5 text-gray-400"/>{item.shelf || '-'}</div></div><div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-x-3 gap-y-1"><span>App: <span className="font-bold text-gray-900">{item.application || "-"}</span></span><span>Brand: <span className="font-bold text-gray-900">{item.brand || "-"}</span></span></div></div>
                             <div className="flex flex-col items-end gap-2 pl-3 border-l border-gray-50 ml-1"><div className="text-right"><div className="text-sm font-bold text-blue-700">{formatCompactNumber(item.price)}</div><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm border inline-block mt-0.5 ${item.quantity === 0 ? 'bg-black text-white border-gray-600' : item.quantity < 4 ? 'bg-orange-500 text-white border-orange-600' : 'bg-green-50 text-green-700 border-green-100'}`}>{item.quantity === 0 ? 'HABIS' : item.quantity + ' Unit'}</span></div><div className="flex gap-1.5"><button onClick={() => onEdit(item)} className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md transition-colors"><Edit size={14} /></button><button onClick={() => onDelete(item.id)} className="p-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-md transition-colors"><Trash2 size={14} /></button></div></div>
                         </div>
                     ))}
