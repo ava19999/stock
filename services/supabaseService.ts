@@ -28,17 +28,49 @@ const mapBaseItem = (item: any): InventoryItem => ({
     ecommerce: ''
 });
 
-// --- HELPER: AMBIL HARGA TERAKHIR (AUTO) ---
-const fetchLatestPrices = async () => {
-    const { data, error } = await supabase
+// --- HELPER: AMBIL HARGA DARI HISTORY (OPTIMAL) ---
+
+// 1. Ambil Harga Modal (Cost) dari BARANG MASUK
+const fetchLatestCostPrices = async (partNumbers?: string[]) => {
+    let query = supabase
         .from('barang_masuk')
         .select('part_number, harga_satuan')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }); // Paling baru
 
+    if (partNumbers && partNumbers.length > 0) {
+        query = query.in('part_number', partNumbers);
+    }
+
+    const { data, error } = await query;
     if (error || !data) return {};
 
     const priceMap: Record<string, number> = {};
     data.forEach((row: any) => {
+        // Simpan harga pertama yang ditemukan (karena urut descending, ini yang terbaru)
+        if (row.part_number && priceMap[row.part_number] === undefined) {
+            priceMap[row.part_number] = Number(row.harga_satuan) || 0;
+        }
+    });
+    return priceMap;
+};
+
+// 2. Ambil Harga Jual (Price) dari BARANG KELUAR
+const fetchLatestSellingPrices = async (partNumbers?: string[]) => {
+    let query = supabase
+        .from('barang_keluar')
+        .select('part_number, harga_satuan')
+        .order('created_at', { ascending: false }); // Paling baru
+
+    if (partNumbers && partNumbers.length > 0) {
+        query = query.in('part_number', partNumbers);
+    }
+
+    const { data, error } = await query;
+    if (error || !data) return {};
+
+    const priceMap: Record<string, number> = {};
+    data.forEach((row: any) => {
+        // Simpan harga pertama yang ditemukan
         if (row.part_number && priceMap[row.part_number] === undefined) {
             priceMap[row.part_number] = Number(row.harga_satuan) || 0;
         }
@@ -52,15 +84,23 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
   const { data: baseData, error } = await supabase.from(TABLE_NAME).select('*').order('date', { ascending: false });
   if (error) { console.error(error); return []; }
 
-  const priceMap = await fetchLatestPrices();
+  // Ambil map harga modal & jual
+  const costMap = await fetchLatestCostPrices();
+  const sellMap = await fetchLatestSellingPrices();
 
   return (baseData || []).map((item) => {
       const mapped = mapBaseItem(item);
-      const foundPrice = priceMap[item.part_number];
-      if (foundPrice !== undefined) {
-          mapped.costPrice = foundPrice;
-          mapped.price = foundPrice; 
+      
+      // Set Harga Modal dari Barang Masuk
+      if (costMap[item.part_number] !== undefined) {
+          mapped.costPrice = costMap[item.part_number];
       }
+
+      // Set Harga Jual dari Barang Keluar
+      if (sellMap[item.part_number] !== undefined) {
+          mapped.price = sellMap[item.part_number];
+      }
+
       return mapped;
   });
 };
@@ -71,8 +111,8 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
 
   const mapped = mapBaseItem(data);
 
-  // Cari harga terakhir
-  const { data: priceData } = await supabase
+  // Cari harga modal terakhir (Barang Masuk)
+  const { data: costData } = await supabase
       .from('barang_masuk')
       .select('harga_satuan')
       .eq('part_number', mapped.partNumber)
@@ -80,10 +120,23 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
       .limit(1)
       .single();
 
-  if (priceData) {
-      mapped.costPrice = Number(priceData.harga_satuan) || 0;
-      mapped.price = mapped.costPrice;
+  if (costData) {
+      mapped.costPrice = Number(costData.harga_satuan) || 0;
   }
+
+  // Cari harga jual terakhir (Barang Keluar)
+  const { data: sellData } = await supabase
+      .from('barang_keluar')
+      .select('harga_satuan')
+      .eq('part_number', mapped.partNumber)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+  if (sellData) {
+      mapped.price = Number(sellData.harga_satuan) || 0;
+  }
+
   return mapped;
 };
 
@@ -106,25 +159,19 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
 
     const baseItems = (data || []).map(mapBaseItem);
 
+    // Optimasi: Hanya ambil harga untuk item yang ditampilkan
     if (baseItems.length > 0) {
         const partNumbers = baseItems.map(i => i.partNumber).filter(Boolean);
-        const { data: priceData } = await supabase
-            .from('barang_masuk')
-            .select('part_number, harga_satuan')
-            .in('part_number', partNumbers)
-            .order('created_at', { ascending: false });
-
-        const priceMap: Record<string, number> = {};
-        (priceData || []).forEach((row: any) => {
-            if (priceMap[row.part_number] === undefined) {
-                priceMap[row.part_number] = Number(row.harga_satuan) || 0;
-            }
-        });
+        
+        const costMap = await fetchLatestCostPrices(partNumbers);
+        const sellMap = await fetchLatestSellingPrices(partNumbers);
 
         baseItems.forEach(item => {
-            if (priceMap[item.partNumber] !== undefined) {
-                item.costPrice = priceMap[item.partNumber];
-                item.price = item.costPrice;
+            if (costMap[item.partNumber] !== undefined) {
+                item.costPrice = costMap[item.partNumber];
+            }
+            if (sellMap[item.partNumber] !== undefined) {
+                item.price = sellMap[item.partNumber];
             }
         });
     }
@@ -134,7 +181,7 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
 
 export const fetchInventoryStats = async () => {
     const { data: items } = await supabase.from(TABLE_NAME).select('part_number, quantity');
-    const priceMap = await fetchLatestPrices();
+    const costMap = await fetchLatestCostPrices();
     
     const all = items || [];
     let totalStock = 0;
@@ -142,9 +189,9 @@ export const fetchInventoryStats = async () => {
 
     all.forEach((item: any) => {
         const qty = Number(item.quantity) || 0;
-        const price = priceMap[item.part_number] || 0;
+        const cost = costMap[item.part_number] || 0;
         totalStock += qty;
-        totalAsset += (qty * price);
+        totalAsset += (qty * cost);
     });
 
     return { totalItems: all.length, totalStock, totalAsset };
@@ -159,7 +206,20 @@ export const fetchShopItems = async (page: number, limit: number, search: string
     
     const { data, error, count } = await query.range(from, to);
     if (error) return { data: [], count: 0 };
-    return { data: (data || []).map(mapBaseItem), count: count || 0 };
+    
+    // Jika Shop butuh harga jual aktual dari history, gunakan logika mapping
+    const baseItems = (data || []).map(mapBaseItem);
+    if (baseItems.length > 0) {
+        const partNumbers = baseItems.map(i => i.partNumber).filter(Boolean);
+        const sellMap = await fetchLatestSellingPrices(partNumbers);
+        baseItems.forEach(item => {
+            if (sellMap[item.partNumber] !== undefined) {
+                item.price = sellMap[item.partNumber];
+            }
+        });
+    }
+
+    return { data: baseItems, count: count || 0 };
 };
 
 export const addInventory = async (item: InventoryFormData): Promise<string | null> => {
@@ -347,4 +407,9 @@ export const fetchPriceHistoryBySource = async (partNumber: string) => {
     });
 
     return Object.values(uniqueSources);
+};
+export const clearBarangKeluar = async (): Promise<boolean> => {
+    const { error } = await supabase.from('barang_keluar').delete().neq('id', 0);
+    if (error) { console.error("Gagal hapus barang keluar:", error); return false; }
+    return true;
 };
