@@ -7,7 +7,6 @@ const TABLE_NAME = 'base'; // Tabel data barang master
 const handleDbError = (op: string, err: any) => { console.error(`${op} Error:`, err); };
 
 // --- HELPER: MAPPING ---
-// Kita pisahkan mapping dasar, nanti harga di-isi terpisah
 const mapBaseItem = (item: any): InventoryItem => ({
     id: item.id,
     partNumber: item.part_number,
@@ -19,7 +18,7 @@ const mapBaseItem = (item: any): InventoryItem => ({
     imageUrl: item.image_url || '',
     lastUpdated: item.date ? new Date(item.date).getTime() : Date.now(),
     
-    // Default 0 dulu, nanti di-update dari barang_masuk
+    // Default 0, nanti di-update dari history
     price: 0, 
     kingFanoPrice: 0,
     costPrice: 0, 
@@ -29,10 +28,8 @@ const mapBaseItem = (item: any): InventoryItem => ({
     ecommerce: ''
 });
 
-// --- HELPER: AMBIL HARGA TERAKHIR ---
-// Fungsi ini mengambil semua harga terakhir dari barang_masuk sekaligus agar performa cepat
+// --- HELPER: AMBIL HARGA TERAKHIR (AUTO) ---
 const fetchLatestPrices = async () => {
-    // Ambil part_number dan harga_satuan, urutkan dari yang paling baru (created_at desc)
     const { data, error } = await supabase
         .from('barang_masuk')
         .select('part_number, harga_satuan')
@@ -40,11 +37,8 @@ const fetchLatestPrices = async () => {
 
     if (error || !data) return {};
 
-    // Buat Map: part_number -> harga
-    // Karena data sudah urut DESC, yang pertama ketemu adalah yang terbaru
     const priceMap: Record<string, number> = {};
     data.forEach((row: any) => {
-        // Hanya simpan jika belum ada (berarti ini yang paling baru)
         if (row.part_number && priceMap[row.part_number] === undefined) {
             priceMap[row.part_number] = Number(row.harga_satuan) || 0;
         }
@@ -55,38 +49,29 @@ const fetchLatestPrices = async () => {
 // --- INVENTORY FUNCTIONS ---
 
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
-  // 1. Ambil Data Barang dari Base
-  const { data: baseData, error } = await supabase
-      .from(TABLE_NAME)
-      .select('*')
-      .order('date', { ascending: false });
-      
+  const { data: baseData, error } = await supabase.from(TABLE_NAME).select('*').order('date', { ascending: false });
   if (error) { console.error(error); return []; }
 
-  // 2. Ambil Data Harga dari Barang Masuk (Lookup)
   const priceMap = await fetchLatestPrices();
 
-  // 3. Gabungkan
   return (baseData || []).map((item) => {
       const mapped = mapBaseItem(item);
       const foundPrice = priceMap[item.part_number];
-      
       if (foundPrice !== undefined) {
-          mapped.costPrice = foundPrice; // Harga Modal dari Barang Masuk
-          mapped.price = foundPrice;     // (Opsional) Jika harga jual mau disamakan dulu
+          mapped.costPrice = foundPrice;
+          mapped.price = foundPrice; 
       }
       return mapped;
   });
 };
 
 export const getItemById = async (id: string): Promise<InventoryItem | null> => {
-  // 1. Ambil Barang
   const { data, error } = await supabase.from(TABLE_NAME).select('*').eq('id', id).single();
   if (error || !data) return null;
 
   const mapped = mapBaseItem(data);
 
-  // 2. Cari harga terakhir khusus item ini
+  // Cari harga terakhir
   const { data: priceData } = await supabase
       .from('barang_masuk')
       .select('harga_satuan')
@@ -99,7 +84,6 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
       mapped.costPrice = Number(priceData.harga_satuan) || 0;
       mapped.price = mapped.costPrice;
   }
-
   return mapped;
 };
 
@@ -116,18 +100,14 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
     const from = (page - 1) * limit;
     const to = from + limit - 1;
     
-    // Ambil data base paginated
     const { data, error, count } = await query.order('date', { ascending: false }).range(from, to);
     
     if (error) { console.error("Error fetching inventory:", error); return { data: [], count: 0 }; }
 
     const baseItems = (data || []).map(mapBaseItem);
 
-    // Optimasi: Ambil harga HANYA untuk item yang sedang ditampilkan (10-50 item)
     if (baseItems.length > 0) {
         const partNumbers = baseItems.map(i => i.partNumber).filter(Boolean);
-        
-        // Query harga barang_masuk untuk list part_number ini
         const { data: priceData } = await supabase
             .from('barang_masuk')
             .select('part_number, harga_satuan')
@@ -136,17 +116,15 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
 
         const priceMap: Record<string, number> = {};
         (priceData || []).forEach((row: any) => {
-             // Yang pertama ketemu adalah yang terbaru (karena sort desc)
             if (priceMap[row.part_number] === undefined) {
                 priceMap[row.part_number] = Number(row.harga_satuan) || 0;
             }
         });
 
-        // Gabungkan harga ke item
         baseItems.forEach(item => {
             if (priceMap[item.partNumber] !== undefined) {
                 item.costPrice = priceMap[item.partNumber];
-                item.price = item.costPrice; // Set harga jual default sama dgn modal (bisa diubah logicnya)
+                item.price = item.costPrice;
             }
         });
     }
@@ -155,7 +133,6 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
 };
 
 export const fetchInventoryStats = async () => {
-    // Stats sekarang bisa menghitung estimasi aset berdasarkan harga terakhir
     const { data: items } = await supabase.from(TABLE_NAME).select('part_number, quantity');
     const priceMap = await fetchLatestPrices();
     
@@ -170,11 +147,7 @@ export const fetchInventoryStats = async () => {
         totalAsset += (qty * price);
     });
 
-    return {
-        totalItems: all.length,
-        totalStock,
-        totalAsset
-    };
+    return { totalItems: all.length, totalStock, totalAsset };
 };
 
 export const fetchShopItems = async (page: number, limit: number, search: string, cat: string) => {
@@ -186,24 +159,14 @@ export const fetchShopItems = async (page: number, limit: number, search: string
     
     const { data, error, count } = await query.range(from, to);
     if (error) return { data: [], count: 0 };
-
-    // Mapping standar (Shop mungkin butuh loading cepat, bisa skip lookup harga jika berat, 
-    // tapi jika mau menampilkan harga, gunakan logika yang sama dengan fetchInventoryPaginated)
-    // Di sini saya biarkan 0 agar cepat, kecuali Anda mau Shop juga ambil harga dari history.
-    // Jika Shop butuh harga, copas logika dari fetchInventoryPaginated ke sini.
     return { data: (data || []).map(mapBaseItem), count: count || 0 };
 };
 
 export const addInventory = async (item: InventoryFormData): Promise<string | null> => {
   const { data, error } = await supabase.from(TABLE_NAME).insert([{
-    part_number: item.partNumber, 
-    name: item.name, 
-    brand: item.brand, 
-    application: item.application,
-    quantity: item.quantity, 
-    shelf: item.shelf, 
-    image_url: item.imageUrl, 
-    date: new Date().toISOString() 
+    part_number: item.partNumber, name: item.name, brand: item.brand, 
+    application: item.application, quantity: item.quantity, shelf: item.shelf, 
+    image_url: item.imageUrl, date: new Date().toISOString() 
   }]).select().single();
 
   if (error) { handleDbError("Tambah Barang ke Base", error); return null; }
@@ -212,12 +175,8 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
 
 export const updateInventory = async (item: InventoryItem): Promise<boolean> => {
   const { error } = await supabase.from(TABLE_NAME).update({
-    name: item.name,
-    brand: item.brand,
-    application: item.application,
-    shelf: item.shelf,
-    quantity: item.quantity,
-    image_url: item.imageUrl,
+    name: item.name, brand: item.brand, application: item.application,
+    shelf: item.shelf, quantity: item.quantity, image_url: item.imageUrl,
     date: new Date().toISOString()
   }).eq('id', item.id);
 
@@ -231,7 +190,7 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
   return true;
 };
 
-// --- HISTORY & TRANSAKSI (Sama seperti sebelumnya) ---
+// --- HISTORY & TRANSAKSI ---
 
 export const fetchHistory = async (): Promise<StockHistory[]> => {
     const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').order('created_at', { ascending: false }).limit(100);
@@ -278,22 +237,16 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
 
     const from = (page - 1) * limit;
     const to = from + limit - 1;
-
     const { data, error, count } = await query.order('created_at', { ascending: false }).range(from, to);
 
     if (error) { console.error(`Error fetching ${table}:`, error); return { data: [], count: 0 }; }
 
     const mappedData: StockHistory[] = (data || []).map((item: any) => ({
-        id: item.id,
-        itemId: item.part_number,
-        partNumber: item.part_number,
-        name: item.name,
-        type: type,
-        quantity: type === 'in' ? Number(item.qty_masuk) : Number(item.qty_keluar),
+        id: item.id, itemId: item.part_number, partNumber: item.part_number, name: item.name,
+        type: type, quantity: type === 'in' ? Number(item.qty_masuk) : Number(item.qty_keluar),
         previousStock: Number(item.stock_awal),
         currentStock: type === 'in' ? Number(item.stock_awal) + Number(item.qty_masuk) : Number(item.stock_awal) - Number(item.qty_keluar),
-        price: Number(item.harga_satuan),
-        totalPrice: Number(item.harga_total),
+        price: Number(item.harga_satuan), totalPrice: Number(item.harga_total),
         timestamp: new Date(item.tanggal).getTime(),
         reason: type === 'in' ? `Restock (Via: ${item.ecommerce || '-'})` : `${item.customer || 'Customer'} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`
     }));
@@ -369,4 +322,29 @@ export const saveChatSession = async (s: ChatSession): Promise<boolean> => {
         customer_id: s.customerId, customer_name: s.customerName, messages: s.messages, last_message: s.lastMessage, last_timestamp: s.lastTimestamp, unread_admin_count: s.unreadAdminCount, unread_user_count: s.unreadUserCount
     }]);
     return !error;
+};
+
+// --- FUNGSI BARU: CEK HISTORY HARGA (UNTUK POPUP DI FORM) ---
+export const fetchPriceHistoryBySource = async (partNumber: string) => {
+    const { data, error } = await supabase
+        .from('barang_masuk')
+        .select('ecommerce, harga_satuan, tanggal')
+        .eq('part_number', partNumber)
+        .order('created_at', { ascending: false });
+
+    if (error || !data) return [];
+
+    const uniqueSources: Record<string, any> = {};
+    data.forEach((item: any) => {
+        const sourceName = item.ecommerce || 'Unknown';
+        if (!uniqueSources[sourceName]) {
+            uniqueSources[sourceName] = {
+                source: sourceName,
+                price: Number(item.harga_satuan),
+                date: item.tanggal
+            };
+        }
+    });
+
+    return Object.values(uniqueSources);
 };
