@@ -1,7 +1,7 @@
 // FILE: src/components/Dashboard.tsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
-import { fetchInventoryPaginated, fetchInventoryStats, fetchHistoryLogsPaginated } from '../services/supabaseService';
+import { fetchInventoryPaginated, fetchInventoryStats, fetchHistoryLogsPaginated, fetchItemHistory } from '../services/supabaseService';
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
   ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin, FileText,
@@ -47,6 +47,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [historyDetailSearch, setHistoryDetailSearch] = useState('');
   const [historyDetailLoading, setHistoryDetailLoading] = useState(false);
 
+  // STATE BARU: ITEM HISTORY
+  const [itemHistoryData, setItemHistoryData] = useState<StockHistory[]>([]);
+  const [loadingItemHistory, setLoadingItemHistory] = useState(false);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     const { data, count } = await fetchInventoryPaginated(page, 50, searchTerm, filterType);
@@ -91,6 +95,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   }, [showHistoryDetail, historyDetailPage, historyDetailSearch]);
 
+  // EFFECT BARU: Ambil history saat item dipilih
+  useEffect(() => {
+    if (selectedItemHistory) {
+      setLoadingItemHistory(true);
+      setItemHistoryData([]); // Reset data lama
+      
+      if (selectedItemHistory.partNumber) {
+        fetchItemHistory(selectedItemHistory.partNumber)
+            .then((data) => {
+                setItemHistoryData(data);
+                setLoadingItemHistory(false);
+            })
+            .catch((err) => {
+                console.error("Gagal load history item:", err);
+                setLoadingItemHistory(false);
+            });
+      } else {
+          setLoadingItemHistory(false);
+      }
+    }
+  }, [selectedItemHistory]);
 
   useEffect(() => {
     if (!selectedItemHistory) {
@@ -150,8 +175,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const filteredItemHistory = useMemo(() => {
     if (!selectedItemHistory) return [];
     
-    let itemHistory = history.filter(h => h.itemId === selectedItemHistory.id || h.partNumber === selectedItemHistory.partNumber)
-                             .sort((a, b) => b.timestamp - a.timestamp);
+    // Gunakan data yang baru di-fetch (itemHistoryData), BUKAN global history prop
+    let itemHistory = [...itemHistoryData];
 
     if (itemHistorySearch.trim() !== '') {
         const lowerSearch = itemHistorySearch.toLowerCase();
@@ -167,7 +192,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         });
     }
     return itemHistory;
-  }, [history, selectedItemHistory, itemHistorySearch]);
+  }, [itemHistoryData, selectedItemHistory, itemHistorySearch]); // Updated dependency
 
   const filteredGlobalHistory = useMemo(() => {
     if (!showHistoryDetail) return [];
@@ -181,7 +206,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     <div className="space-y-4 pb-24">
       
       {/* --- GLOBAL HISTORY MODAL (DETAIL RIWAYAT MASUK/KELUAR) --- */}
-      
       {showHistoryDetail && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 duration-300 flex flex-col max-h-[90vh]">
@@ -316,7 +340,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
 
                 <div className="overflow-auto flex-1 p-0">
-                    {filteredItemHistory.length === 0 ? (
+                    {loadingItemHistory ? (
+                        <div className="flex flex-col items-center justify-center h-64 text-blue-500">
+                            <Loader2 size={32} className="animate-spin mb-2"/>
+                            <p className="text-xs font-medium">Memuat Riwayat...</p>
+                        </div>
+                    ) : filteredItemHistory.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-64 text-gray-400">
                             <History size={48} className="opacity-20 mb-3"/>
                             <p>{itemHistorySearch ? 'Tidak ditemukan data sesuai pencarian' : 'Belum ada riwayat transaksi'}</p>
@@ -347,7 +376,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             <td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(total)}</td>
                                             <td className="p-3 align-top text-right font-mono text-gray-600">{h.currentStock}</td>
                                             
-                                            {/* KETERANGAN DI ITEM HISTORY (TETAP MENYATU KARENA KOLOM TERBATAS) */}
+                                            {/* KETERANGAN DI ITEM HISTORY */}
                                             <td className="p-3 align-top text-gray-700">
                                                 <div className="font-bold text-gray-900 text-xs mb-1.5 flex items-center gap-1.5">
                                                     {customer !== '-' && <User size={12} className="text-gray-400"/>}
@@ -369,7 +398,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
       
-      {/* STATS (TIDAK BERUBAH) */}
+      {/* STATS */}
       <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide snap-x md:grid md:grid-cols-5 md:gap-4 md:overflow-visible md:mx-0 md:px-0 md:pb-0">
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Package size={32} className="text-blue-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Package size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Item</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalItems, false)}</div></div>
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Layers size={32} className="text-purple-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Layers size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Stok</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalStock, false)}</div></div>
