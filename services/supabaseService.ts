@@ -171,7 +171,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   return data ? data.id : null;
 };
 
-// --- UPDATE INVENTORY (UPDATED WITH CUSTOMER PARAM) ---
+// --- UPDATE INVENTORY (DIUBAH) ---
 export const updateInventory = async (
     item: InventoryItem, 
     transaction?: { type: 'in' | 'out', qty: number, ecommerce: string, resiTempo: string, customer?: string }
@@ -208,28 +208,29 @@ export const updateInventory = async (
   const baseUpdated = updatedData[0];
 
   if (transaction && transaction.qty > 0) {
-      constMqQty = Number(transaction.qty);
+      const txQty = Number(transaction.qty);
       const sourceName = transaction.ecommerce || 'Manual Edit';
       
       if (transaction.type === 'in') {
+          // Barang masuk tidak butuh customer
           await addBarangMasuk({
               created_at: wibNow,
               tempo: transaction.resiTempo || '-', 
               ecommerce: sourceName, 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
-              rak: item.shelf, stockAhir: finalQty, qtyMasuk: MqQty,
-              hargaSatuan: item.costPrice || 0, hargaTotal: (item.costPrice || 0) * MqQty
+              rak: item.shelf, stockAhir: finalQty, qtyMasuk: txQty,
+              hargaSatuan: item.costPrice || 0, hargaTotal: (item.costPrice || 0) * txQty
           });
       } else {
+          // Barang keluar: Jika customer kosong, biarkan kosong (tidak default 'Adjustment')
           await addBarangKeluar({
               created_at: wibNow,
               kodeToko: 'MANUAL', tempo: 'AUTO', 
               ecommerce: sourceName,
-              // UPDATED: Menggunakan customer dari parameter jika ada
-              customer: transaction.customer || 'Adjustment', 
+              customer: transaction.customer || '', // UPDATE: Default string kosong
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
-              rak: item.shelf, stockAhir: finalQty, qtyKeluar: MqQty,
-              hargaSatuan: item.price || 0, hargaTotal: (item.price || 0) * MqQty,
+              rak: item.shelf, stockAhir: finalQty, qtyKeluar: txQty,
+              hargaSatuan: item.price || 0, hargaTotal: (item.price || 0) * txQty,
               resi: transaction.resiTempo || '-'
           });
       }
@@ -276,7 +277,8 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             type: 'out', quantity: Number(k.qty_keluar), previousStock: Number(k.stock_ahir) + Number(k.qty_keluar),
             currentStock: Number(k.stock_ahir), price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
             timestamp: parseTimestamp(k.created_at || k.date), 
-            reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, resi: k.resi || '-', tempo: k.tempo || '-'
+            // UPDATE: Hapus default text jika kosong
+            reason: `${k.customer || ''} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, resi: k.resi || '-', tempo: k.tempo || '-'
         });
     });
 
@@ -307,7 +309,8 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
             type: type, quantity: qty, previousStock: previous, currentStock: current,
             price: Number(item.harga_satuan), totalPrice: Number(item.harga_total),
             timestamp: parseTimestamp(item.created_at || item.date), 
-            reason: type === 'in' ? `Restock (Via: ${item.ecommerce || '-'})` : `${item.customer || 'Customer'} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`,
+            // UPDATE: Default ke kosong jika null
+            reason: type === 'in' ? `Restock (Via: ${item.ecommerce || '-'})` : `${item.customer || ''} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`,
             resi: item.resi || '-', tempo: item.tempo || '-'
         };
     });
@@ -333,7 +336,8 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
             type: 'out', quantity: Number(k.qty_keluar), previousStock: Number(k.stock_ahir) + Number(k.qty_keluar),
             currentStock: Number(k.stock_ahir), price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
             timestamp: parseTimestamp(k.created_at || k.date),
-            reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, resi: k.resi || '-', tempo: k.tempo || '-'
+            // UPDATE: Kosongkan jika null
+            reason: `${k.customer || ''} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, resi: k.resi || '-', tempo: k.tempo || '-'
         });
     });
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
