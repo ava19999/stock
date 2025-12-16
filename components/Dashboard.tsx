@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
 import { fetchInventoryPaginated, fetchInventoryStats, fetchHistoryLogsPaginated, fetchItemHistory } from '../services/supabaseService';
-import { ItemForm } from './ItemForm'; // Pastikan import ini ada
+import { ItemForm } from './ItemForm';
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
   ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin, FileText,
@@ -35,9 +35,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [showHistoryDetail, setShowHistoryDetail] = useState<'in' | 'out' | null>(null);
   
-  // State untuk Edit / Tambah di dalam Dashboard sendiri (opsional jika ItemForm dipanggil di App.tsx)
-  // Tapi biasanya props onEdit di App.tsx yang handle. 
-  // Jika Dashboard yang handle popup ItemForm, gunakan state ini:
+  // State untuk Edit / Tambah di dalam Dashboard
   const [showItemForm, setShowItemForm] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | undefined>(undefined);
 
@@ -56,10 +54,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  // --- 1. Load Data Server (Hanya dipanggil saat pindah hal / search / filter) ---
   const loadData = useCallback(async () => {
     setLoading(true);
-    // Kita fetch 50 data saja sesuai page
     const { data, count } = await fetchInventoryPaginated(page, 50, searchTerm, filterType);
     setLocalItems(data);
     setTotalCount(count);
@@ -84,71 +80,57 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadStats(); }, [loadStats]);
 
-  // --- Handlers Item Form (Edit/Add) ---
-  
-  // Fungsi ini dipanggil ketika tombol "Edit" diklik
+  // Handlers
   const handleEditClick = (item: InventoryItem) => {
       setEditingItem(item);
       setShowItemForm(true);
   };
 
-  // Fungsi ini dipanggil ketika tombol "+ Barang" diklik
   const handleAddNewClick = () => {
       setEditingItem(undefined);
       setShowItemForm(true);
   };
 
-  // --- LOGIKA UTAMA AGAR CEPAT (INSTANT UPDATE) ---
+  // --- LOGIKA OPTIMISTIC UPDATE ---
   const handleFormSuccess = (updatedItem?: InventoryItem) => {
       if (updatedItem) {
-          // KASUS EDIT:
-          // Kita langsung update array localItems tanpa fetch ke server
+          // Edit: Update langsung di state lokal
           setLocalItems(currentItems => 
               currentItems.map(item => item.id === updatedItem.id ? updatedItem : item)
           );
           
-          // Update statistik sederhana (jumlah stok) secara manual agar angka diatas berubah juga
           if (editingItem) {
              const diff = updatedItem.quantity - editingItem.quantity;
              setStats(prev => ({ ...prev, totalStock: prev.totalStock + diff }));
           }
-
-          // Tutup form
           setShowItemForm(false);
       } else {
-          // KASUS TAMBAH BARU:
-          // Karena ID baru ada di server dan urutan sort mungkin berubah, 
-          // untuk tambah baru sebaiknya kita reload (atau prepend manual jika mau)
+          // Tambah Baru: Reload karena ID dari server
           setShowItemForm(false);
           loadData(); 
           loadStats();
       }
   };
 
-  // ... (Sisa kode useEffect history, parseReason, formatRupiah dll TETAP SAMA) ...
-  // Saya persingkat bagian yang tidak berubah agar fokus ke solusi
-
   const formatRupiah = (num: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num || 0);
   const formatCompactNumber = (num: number, isCurrency = true) => { const n = num || 0; if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'M'; if (n >= 1000000) return (n / 1000000).toFixed(1) + 'jt'; return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(n); };
   
-  // ... (useEffect untuk history detail & item history SAMA SEPERTI SEBELUMNYA) ...
   useEffect(() => { if (showHistoryDetail) { setHistoryDetailLoading(true); const timer = setTimeout(async () => { const { data, count } = await fetchHistoryLogsPaginated(showHistoryDetail, historyDetailPage, 50, historyDetailSearch); setHistoryDetailData(data); setHistoryDetailTotalPages(Math.ceil(count / 50)); setHistoryDetailLoading(false); }, 500); return () => clearTimeout(timer); } else { setHistoryDetailData([]); setHistoryDetailPage(1); setHistoryDetailSearch(''); } }, [showHistoryDetail, historyDetailPage, historyDetailSearch]);
   useEffect(() => { if (selectedItemHistory && selectedItemHistory.partNumber) { setLoadingItemHistory(true); setItemHistoryData([]); fetchItemHistory(selectedItemHistory.partNumber).then((data) => { setItemHistoryData(data); setLoadingItemHistory(false); }).catch(() => setLoadingItemHistory(false)); } }, [selectedItemHistory]);
+  
   const parseHistoryReason = (reason: string) => { let resi = '-'; let ecommerce = '-'; let customer = '-'; let keterangan = reason || ''; const resiMatch = keterangan.match(/\(Resi: (.*?)\)/); if (resiMatch && resiMatch[1]) { resi = resiMatch[1]; keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, ''); } const viaMatch = keterangan.match(/\(Via: (.*?)\)/); if (viaMatch && viaMatch[1]) { ecommerce = viaMatch[1]; keterangan = keterangan.replace(/\s*\(Via:.*?\)/, ''); } const nameMatch = keterangan.match(/\((.*?)\)/); if (nameMatch && nameMatch[1]) { customer = nameMatch[1]; keterangan = keterangan.replace(/\s*\(.*?\)/, ''); } if (keterangan.toLowerCase().includes('cancel order')) { keterangan = 'Retur Pesanan'; } if (!keterangan.trim()) keterangan = 'Transaksi'; return { resi, ecommerce, customer, keterangan: keterangan.trim() }; };
   const filteredItemHistory = useMemo(() => { if (!selectedItemHistory) return []; let itemHistory = [...itemHistoryData]; if (itemHistorySearch.trim() !== '') { const lowerSearch = itemHistorySearch.toLowerCase(); itemHistory = itemHistory.filter(h => { const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason); return ( keterangan.toLowerCase().includes(lowerSearch) || resi.toLowerCase().includes(lowerSearch) || ecommerce.toLowerCase().includes(lowerSearch) || customer.toLowerCase().includes(lowerSearch) || h.reason.toLowerCase().includes(lowerSearch) ); }); } return itemHistory; }, [itemHistoryData, selectedItemHistory, itemHistorySearch]);
 
   return (
     <div className="space-y-4 pb-24">
-      {/* --- POPUP FORM EDIT / TAMBAH --- */}
       {showItemForm && (
         <ItemForm
             initialData={editingItem}
             onCancel={() => setShowItemForm(false)}
-            onSuccess={handleFormSuccess} // INI KUNCI AGAR CEPAT
+            onSuccess={handleFormSuccess}
         />
       )}
 
-      {/* ... (POPUP HISTORY DETAIL & ITEM HISTORY TETAP SAMA) ... */}
       {showHistoryDetail && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -166,7 +148,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
-      {/* POPUP HISTORY PER ITEM (SAMA) */}
       {selectedItemHistory && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -177,7 +158,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
       
-      {/* STATS HEADER */}
       <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide snap-x md:grid md:grid-cols-5 md:gap-4 md:overflow-visible md:mx-0 md:px-0 md:pb-0">
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Package size={32} className="text-blue-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Package size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Item</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalItems, false)}</div></div>
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Layers size={32} className="text-purple-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Layers size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Stok</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalStock, false)}</div></div>
@@ -187,7 +167,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       <div className="mt-6">
-        {/* HEADER TABLE & FILTER */}
         <div className="flex justify-between items-center mb-4">
             <div className="flex items-center gap-3"><h2 className="text-base font-bold text-gray-800">Daftar Barang</h2><span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{totalCount} Item</span></div>
             <div className="flex gap-2">
@@ -207,7 +186,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         
         <div className="relative mb-4"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} /><input type="text" placeholder="Cari (Tekan Enter atau Tunggu)..." onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm" /></div>
 
-        {/* LIST ITEM */}
         {loading ? <div className="flex flex-col items-center justify-center h-64 text-blue-500"><Loader2 size={32} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat Data...</p></div> : localItems.length === 0 ? <div className="p-8 text-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-200"><Package size={24} className="mx-auto mb-2 opacity-50"/><p className="text-xs">Tidak ada barang yang cocok.</p></div> : (
              <>
              {viewMode === 'grid' ? (
@@ -224,7 +202,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           <div className="mt-auto pt-2 border-t border-gray-50 space-y-2">
                              <div className="flex justify-between items-end"><div className="text-sm font-bold text-blue-700 truncate">{formatCompactNumber(item.price)}</div><div className="flex items-center text-xs text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200"><MapPin size={9} className="mr-0.5 text-gray-500"/>{item.shelf || '-'}</div></div>
                              <div className="grid grid-cols-2 gap-1.5">
-                                 {/* UBAH onEdit agar memanggil handleEditClick lokal */}
                                  <button onClick={() => handleEditClick(item)} className="flex items-center justify-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded text-[10px] font-bold transition-colors"><Edit size={10} /> Edit</button>
                                  <button onClick={() => onDelete(item.id)} className="flex items-center justify-center gap-1 bg-red-50 hover:bg-red-100 text-red-700 py-1.5 rounded text-[10px] font-bold transition-colors"><Trash2 size={10} /> Hapus</button>
                              </div>

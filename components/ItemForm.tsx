@@ -7,7 +7,7 @@ import { X, Save, History, Check, ShoppingBag, Calendar, Truck, AlertCircle } fr
 interface ItemFormProps {
   initialData?: InventoryItem;
   onSubmit?: (data: InventoryFormData) => void; 
-  onSuccess?: () => void; 
+  onSuccess?: (item?: InventoryItem) => void;
   onCancel: () => void;
 }
 
@@ -68,8 +68,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
     setError(null);
 
     try {
-        let success = false;
-        
         if (isEditMode && initialData) {
             const qtyAdj = Number(adjustmentQty);
             if (stockAdjustmentType !== 'none' && qtyAdj <= 0) {
@@ -85,18 +83,22 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
                 resiTempo: adjustmentResiTempo
             } : undefined;
 
-            success = await updateInventory({ ...initialData, ...formData }, transactionData);
+            const updatedItem = await updateInventory({ ...initialData, ...formData }, transactionData);
+            
+            if (updatedItem) {
+                if (onSuccess) onSuccess(updatedItem); 
+                onCancel();
+            } else {
+                setError('Gagal menyimpan. Terjadi kesalahan pada database.');
+            }
         } else {
             const id = await addInventory(formData);
-            success = !!id;
-        }
-        
-        if (success) {
-            if (onSuccess) onSuccess(); 
-            if (onSubmit) onSubmit(formData);
-            onCancel(); 
-        } else {
-            setError('Gagal menyimpan. Pastikan koneksi aman dan data valid.');
+            if (id) {
+                if (onSuccess) onSuccess(); 
+                onCancel();
+            } else {
+                setError('Gagal menambah barang baru.');
+            }
         }
     } catch (err) {
         setError('Terjadi kesalahan sistem.');
@@ -136,7 +138,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
       </div>
 
       <form onSubmit={handleSubmit} className="p-6 overflow-y-auto custom-scrollbar flex-1">
-        {error && <div className="bg-red-50 text-red-600 p-3 rounded-xl flex items-center gap-2 text-sm border border-red-100 mb-4 animate-pulse"><AlertCircle size={16} />{error}</div>}
+        {error && <div className="bg-red-50 text-red-600 p-3 rounded-xl flex items-center gap-2 text-sm border border-red-100 mb-4"><AlertCircle size={16} />{error}</div>}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-4">
@@ -176,22 +178,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
           </div>
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Harga & Foto</h3>
-            <div className="relative">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Harga Modal (HPP)</label>
-                <div className="flex gap-2">
-                    <input type="number" name="costPrice" value={formData.costPrice} onChange={handleChange} className="flex-1 px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none font-mono" placeholder="0" />
-                    <button type="button" onClick={handleCheckPrices} title="Cek Harga" className="px-3 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 border border-yellow-200"><History size={20} /></button>
-                </div>
-                {showPricePopup && (
-                    <>
-                        <div className="fixed inset-0 z-10" onClick={() => setShowPricePopup(false)}></div>
-                        <div className="absolute top-full right-0 mt-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-100 z-20 overflow-hidden animate-in fade-in slide-in-from-top-2">
-                            <div className="bg-gray-50 px-4 py-2 border-b border-gray-100 flex justify-between items-center"><span className="text-xs font-bold text-gray-500 uppercase">History Pembelian</span><button type="button" onClick={() => setShowPricePopup(false)}><X size={14} className="text-gray-400" /></button></div>
-                            <div className="max-h-60 overflow-y-auto">{loadingPrice ? <div className="p-4 text-center text-sm text-gray-400">Memuat data...</div> : priceHistory.length === 0 ? <div className="p-4 text-center text-sm text-red-400">Belum ada history.</div> : (priceHistory.map((ph, idx) => (<button key={idx} type="button" onClick={() => selectPrice(ph.price)} className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b border-gray-50 last:border-0 transition-colors flex justify-between items-center group"><div><div className="font-bold text-gray-800 text-sm">{ph.source}</div><div className="text-[10px] text-gray-400">{ph.date}</div></div><div className="flex items-center gap-2"><span className="font-mono text-sm font-semibold text-blue-600">Rp {ph.price.toLocaleString()}</span><Check size={14} className="text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"/></div></button>)))}</div>
-                        </div>
-                    </>
-                )}
-            </div>
+            <div className="relative"><label className="block text-sm font-medium text-gray-700 mb-1">Harga Modal (HPP)</label><div className="flex gap-2"><input type="number" name="costPrice" value={formData.costPrice} onChange={handleChange} className="flex-1 px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none font-mono" placeholder="0" /><button type="button" onClick={handleCheckPrices} className="px-3 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 border border-yellow-200"><History size={20} /></button></div>{showPricePopup && (<><div className="fixed inset-0 z-10" onClick={() => setShowPricePopup(false)}></div><div className="absolute top-full right-0 mt-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-100 z-20 overflow-hidden animate-in fade-in slide-in-from-top-2"><div className="bg-gray-50 px-4 py-2 border-b border-gray-100 flex justify-between items-center"><span className="text-xs font-bold text-gray-500 uppercase">History Pembelian</span><button type="button" onClick={() => setShowPricePopup(false)}><X size={14} className="text-gray-400" /></button></div><div className="max-h-60 overflow-y-auto">{loadingPrice ? <div className="p-4 text-center text-sm text-gray-400">Memuat data...</div> : priceHistory.length === 0 ? <div className="p-4 text-center text-sm text-red-400">Belum ada history.</div> : (priceHistory.map((ph, idx) => (<button key={idx} type="button" onClick={() => selectPrice(ph.price)} className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b border-gray-50 last:border-0 transition-colors flex justify-between items-center group"><div><div className="font-bold text-gray-800 text-sm">{ph.source}</div><div className="text-[10px] text-gray-400">{ph.date}</div></div><div className="flex items-center gap-2"><span className="font-mono text-sm font-semibold text-blue-600">Rp {ph.price.toLocaleString()}</span><Check size={14} className="text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"/></div></button>)))}</div></div></>)}</div>
             <div className="grid grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Harga Jual</label><input type="number" name="price" value={formData.price} onChange={handleChange} className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none font-mono" /></div>
                 <div><label className="block text-sm font-medium text-purple-700 mb-1">Harga King Fano</label><input type="number" name="kingFanoPrice" value={formData.kingFanoPrice} onChange={handleChange} className="w-full px-4 py-2 rounded-lg border border-purple-200 bg-purple-50 focus:ring-2 focus:ring-purple-500 outline-none font-mono text-purple-800" /></div>
