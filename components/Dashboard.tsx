@@ -180,13 +180,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
             );
         });
     }
-    return itemHistory;
+    return itemHistory; // Sorting sudah dilakukan di backend service
   }, [itemHistoryData, selectedItemHistory, itemHistorySearch]); 
 
   const filteredGlobalHistory = useMemo(() => {
     if (!showHistoryDetail) return [];
     return history.filter(h => h.type === showHistoryDetail)
-                  .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) // Handle null timestamp sort
+                  .sort((a, b) => { // Pastikan timestamp null ada di bawah
+                      const timeA = a.timestamp || 0;
+                      const timeB = b.timestamp || 0;
+                      if (timeA === 0 && timeB === 0) return 0;
+                      if (timeA === 0) return 1;
+                      if (timeB === 0) return -1;
+                      return timeB - timeA;
+                  })
                   .slice(0, 100);
   }, [history, showHistoryDetail]);
 

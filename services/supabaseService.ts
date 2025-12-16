@@ -216,8 +216,16 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
 // --- HISTORY & TRANSAKSI ---
 
 export const fetchHistory = async (): Promise<StockHistory[]> => {
-    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*, created_at').order('created_at', { ascending: false }).limit(100);
-    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*, created_at').order('created_at', { ascending: false }).limit(100);
+    // UPDATE: Order created_at descending, nulls last (di Supabase opsi nullsFirst: false itu artinya nulls last jika desc)
+    const { data: dataMasuk } = await supabase.from('barang_masuk')
+        .select('*, created_at')
+        .order('created_at', { ascending: false, nullsFirst: false }) 
+        .limit(100);
+        
+    const { data: dataKeluar } = await supabase.from('barang_keluar')
+        .select('*, created_at')
+        .order('created_at', { ascending: false, nullsFirst: false })
+        .limit(100);
 
     const history: StockHistory[] = [];
 
@@ -243,8 +251,15 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
         });
     });
 
-    // Sort dengan fallback ke 0 jika timestamp null
-    return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    // Sort manual: timestamp desc, null di paling bawah
+    return history.sort((a, b) => {
+        const timeA = a.timestamp || 0;
+        const timeB = b.timestamp || 0;
+        if (timeA === 0 && timeB === 0) return 0;
+        if (timeA === 0) return 1; // A null (0), taruh di bawah
+        if (timeB === 0) return -1; // B null (0), taruh di bawah
+        return timeB - timeA;
+    });
 };
 
 export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number, limit: number, search: string) => {
@@ -261,7 +276,11 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
 
     const from = (page - 1) * limit;
     const to = from + limit - 1;
-    const { data, error, count } = await query.order('created_at', { ascending: false }).range(from, to);
+    
+    // UPDATE: Order created_at descending, nulls last
+    const { data, error, count } = await query
+        .order('created_at', { ascending: false, nullsFirst: false }) 
+        .range(from, to);
 
     if (error) { console.error(`Error fetching ${table}:`, error); return { data: [], count: 0 }; }
 
@@ -279,8 +298,16 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
 };
 
 export const fetchItemHistory = async (partNumber: string): Promise<StockHistory[]> => {
-    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*, created_at').eq('part_number', partNumber).order('created_at', { ascending: false });
-    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*, created_at').eq('part_number', partNumber).order('created_at', { ascending: false });
+    // UPDATE: Order created_at descending, nulls last
+    const { data: dataMasuk } = await supabase.from('barang_masuk')
+        .select('*, created_at')
+        .eq('part_number', partNumber)
+        .order('created_at', { ascending: false, nullsFirst: false });
+
+    const { data: dataKeluar } = await supabase.from('barang_keluar')
+        .select('*, created_at')
+        .eq('part_number', partNumber)
+        .order('created_at', { ascending: false, nullsFirst: false });
 
     const history: StockHistory[] = [];
 
@@ -306,7 +333,15 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
         });
     });
 
-    return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    // Sort manual: timestamp desc, null di paling bawah
+    return history.sort((a, b) => {
+        const timeA = a.timestamp || 0;
+        const timeB = b.timestamp || 0;
+        if (timeA === 0 && timeB === 0) return 0;
+        if (timeA === 0) return 1;
+        if (timeB === 0) return -1;
+        return timeB - timeA;
+    });
 };
 
 export const addBarangMasuk = async (data: BarangMasuk): Promise<boolean> => {
