@@ -31,7 +31,7 @@ export interface BarangMasuk {
   brand: string;
   application: string;
   rak: string;
-  stockAwal: number;
+  stockAhir: number; // UPDATED: Sesuai permintaan (Stock Ahir)
   qtyMasuk: number;
   hargaSatuan: number;
   hargaTotal: number;
@@ -49,14 +49,15 @@ export interface BarangKeluar {
   brand: string;
   application: string;
   rak: string;
-  stockAwal: number;
+  stockAhir: number; // UPDATED: Sesuai permintaan (Stock Ahir)
   qtyKeluar: number;
   hargaSatuan: number;
   hargaTotal: number;
   resi: string;
 }
 
-// Interface ini PENTING agar Dashboard lama tetap bisa baca data baru
+// Interface StockHistory tetap menggunakan struktur ini untuk kemudahan UI
+// Service akan menghitung ulang previousStock dari stockAhir
 export interface StockHistory {
   id: string;
   itemId: string;
@@ -70,7 +71,6 @@ export interface StockHistory {
   totalPrice: number;
   timestamp: number | null; 
   reason: string;
-  // --- TAMBAHAN BARU ---
   resi?: string;
   tempo?: string;
 }
