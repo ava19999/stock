@@ -264,7 +264,8 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             type: 'in', quantity: Number(m.qty_masuk), previousStock: Number(m.stock_awal),
             currentStock: Number(m.stock_awal) + Number(m.qty_masuk),
             price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
-            timestamp: new Date(m.tanggal).getTime(),
+            // UPDATED: Use created_at instead of tanggal
+            timestamp: new Date(m.created_at).getTime(),
             reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`
         });
     });
@@ -275,7 +276,8 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             type: 'out', quantity: Number(k.qty_keluar), previousStock: Number(k.stock_awal),
             currentStock: Number(k.stock_awal) - Number(k.qty_keluar),
             price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
-            timestamp: new Date(k.tanggal).getTime(),
+            // UPDATED: Use created_at instead of tanggal
+            timestamp: new Date(k.created_at).getTime(),
             reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`
         });
     });
@@ -307,7 +309,8 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
         previousStock: Number(item.stock_awal),
         currentStock: type === 'in' ? Number(item.stock_awal) + Number(item.qty_masuk) : Number(item.stock_awal) - Number(item.qty_keluar),
         price: Number(item.harga_satuan), totalPrice: Number(item.harga_total),
-        timestamp: new Date(item.tanggal).getTime(),
+        // UPDATED: Use created_at instead of tanggal
+        timestamp: new Date(item.created_at).getTime(),
         reason: type === 'in' ? `Restock (Via: ${item.ecommerce || '-'})` : `${item.customer || 'Customer'} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`
     }));
 
@@ -345,8 +348,8 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
             currentStock: Number(m.stock_awal) + Number(m.qty_masuk),
             price: Number(m.harga_satuan), 
             totalPrice: Number(m.harga_total),
-            // Prioritaskan created_at untuk urutan waktu yang presisi
-            timestamp: m.created_at ? new Date(m.created_at).getTime() : new Date(m.tanggal).getTime(),
+            // UPDATED: Use created_at
+            timestamp: new Date(m.created_at).getTime(),
             reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`
         });
     });
@@ -357,14 +360,15 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
             id: k.id, 
             itemId: k.part_number, 
             partNumber: k.part_number, 
-            name: k.name,
+            name: k.name, 
             type: 'out', 
             quantity: Number(k.qty_keluar), 
             previousStock: Number(k.stock_awal),
             currentStock: Number(k.stock_awal) - Number(k.qty_keluar),
             price: Number(k.harga_satuan), 
             totalPrice: Number(k.harga_total),
-            timestamp: k.created_at ? new Date(k.created_at).getTime() : new Date(k.tanggal).getTime(),
+            // UPDATED: Use created_at
+            timestamp: new Date(k.created_at).getTime(),
             reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`
         });
     });
@@ -373,8 +377,9 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
 };
 
 export const addBarangMasuk = async (data: BarangMasuk): Promise<boolean> => {
+    // UPDATED: Remove 'tanggal' field from insert
     const { error } = await supabase.from('barang_masuk').insert([{
-        tanggal: data.tanggal, tempo: data.tempo, ecommerce: data.suplier || data.ecommerce || 'Lainnya',
+        tempo: data.tempo, ecommerce: data.suplier || data.ecommerce || 'Lainnya',
         part_number: data.partNumber, name: data.name, brand: data.brand, application: data.application,
         rak: data.rak, stock_awal: data.stockAwal, qty_masuk: data.qtyMasuk,
         harga_satuan: data.hargaSatuan, harga_total: data.hargaTotal
@@ -384,8 +389,9 @@ export const addBarangMasuk = async (data: BarangMasuk): Promise<boolean> => {
 };
 
 export const addBarangKeluar = async (data: BarangKeluar): Promise<boolean> => {
+    // UPDATED: Remove 'tanggal' field from insert
     const { error } = await supabase.from('barang_keluar').insert([{
-        tanggal: data.tanggal, kode_toko: data.kodeToko, tempo: data.tempo, ecommerce: data.ecommerce,
+        kode_toko: data.kodeToko, tempo: data.tempo, ecommerce: data.ecommerce,
         customer: data.customer, part_number: data.partNumber, name: data.name, brand: data.brand,
         application: data.application, rak: data.rak, stock_awal: data.stockAwal, qty_keluar: data.qtyKeluar,
         harga_satuan: data.hargaSatuan, harga_total: data.hargaTotal, resi: data.resi
@@ -446,7 +452,7 @@ export const saveChatSession = async (s: ChatSession): Promise<boolean> => {
 export const fetchPriceHistoryBySource = async (partNumber: string) => {
     const { data, error } = await supabase
         .from('barang_masuk')
-        .select('ecommerce, harga_satuan, tanggal')
+        .select('ecommerce, harga_satuan, created_at') // UPDATED: Select created_at instead of tanggal
         .eq('part_number', partNumber)
         .order('created_at', { ascending: false });
 
@@ -459,7 +465,8 @@ export const fetchPriceHistoryBySource = async (partNumber: string) => {
             uniqueSources[sourceName] = {
                 source: sourceName,
                 price: Number(item.harga_satuan),
-                date: item.tanggal
+                // UPDATED: Format date from created_at
+                date: new Date(item.created_at).toLocaleDateString('id-ID')
             };
         }
     });
