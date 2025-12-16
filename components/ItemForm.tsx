@@ -6,10 +6,9 @@ import { X, Save, History, Check, ShoppingBag, Calendar, Truck, AlertCircle } fr
 
 interface ItemFormProps {
   initialData?: InventoryItem;
-  // Diperbarui: onSubmit sekarang opsional atau disesuaikan karena handle submit dilakukan di dalam komponen ini
-  // Namun agar kompatibel dengan parent, kita tetap terima prop, tapi fungsinya kita override di dalam
-  onSubmit: (data: InventoryFormData) => void; 
-  onSuccess?: () => void; // Tambahan callback sukses
+  // Callback agar parent tau ada update
+  onSubmit?: (data: InventoryFormData) => void; 
+  onSuccess?: () => void; 
   onCancel: () => void;
 }
 
@@ -73,9 +72,20 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
     setError(null);
 
     try {
+        let success = false;
+        
         if (isEditMode && initialData) {
-            // Mode Edit: Kirim data master + data transaksi (jika ada)
+            // --- VALIDASI KHUSUS UPDATE STOK ---
             const qtyAdj = Number(adjustmentQty);
+
+            // Jika user memilih Tambah/Kurang tapi lupa isi angka atau isi 0
+            if (stockAdjustmentType !== 'none' && qtyAdj <= 0) {
+                setError(`Mohon isi jumlah stok yang akan di${stockAdjustmentType === 'in' ? 'tambah' : 'kurang'} (harus lebih dari 0).`);
+                setLoading(false);
+                return;
+            }
+
+            // Siapkan data transaksi jika ada
             const transactionData = (stockAdjustmentType !== 'none' && qtyAdj > 0) ? {
                 type: stockAdjustmentType === 'in' ? 'in' as const : 'out' as const,
                 qty: qtyAdj,
@@ -83,26 +93,29 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
                 resiTempo: adjustmentResiTempo
             } : undefined;
 
-            // Panggil updateInventory yang baru (mendukung transaksi)
-            await updateInventory({ ...initialData, ...formData }, transactionData);
+            // Panggil service update
+            success = await updateInventory({ ...initialData, ...formData }, transactionData);
         } else {
             // Mode Tambah Baru
-            await addInventory(formData);
+            const id = await addInventory(formData);
+            success = !!id; // Sukses jika ID tidak null
         }
         
-        if (onSuccess) onSuccess(); // Refresh data di dashboard
-        // Panggil onSubmit parent jika diperlukan, atau tutup form
-        if (onSubmit) onSubmit(formData); // Backward compatibility
-        // Jika parent handle closing via onSubmit, ini redundant, tapi aman
+        if (success) {
+            if (onSuccess) onSuccess(); 
+            if (onSubmit) onSubmit(formData);
+            onCancel(); // Tutup form hanya jika SUKSES
+        } else {
+            setError('Gagal menyimpan ke database. Silakan coba lagi.');
+        }
     } catch (err) {
-        setError('Gagal menyimpan data. Silakan coba lagi.');
+        setError('Terjadi kesalahan sistem.');
         console.error(err);
     } finally {
         setLoading(false);
     }
   };
 
-  // --- LOGIC POPUP HARGA ---
   const handleCheckPrices = async () => {
     if (!formData.partNumber) { alert("Isi Part Number terlebih dahulu!"); return; }
     setLoadingPrice(true);
@@ -121,8 +134,8 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
 
   // Hitung prediksi stok akhir untuk ditampilkan
   const projectedStock = isEditMode ? (
-      stockAdjustmentType === 'in' ? formData.quantity + (Number(adjustmentQty) || 0) :
-      stockAdjustmentType === 'out' ? formData.quantity - (Number(adjustmentQty) || 0) :
+      stockAdjustmentType === 'in' ? (Number(formData.quantity) + (Number(adjustmentQty) || 0)) :
+      stockAdjustmentType === 'out' ? (Number(formData.quantity) - (Number(adjustmentQty) || 0)) :
       formData.quantity
   ) : formData.quantity;
 
@@ -139,7 +152,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
       </div>
 
       <form onSubmit={handleSubmit} className="p-6 overflow-y-auto custom-scrollbar flex-1">
-        {error && <div className="bg-red-50 text-red-600 p-3 rounded-xl flex items-center gap-2 text-sm border border-red-100 mb-4"><AlertCircle size={16} />{error}</div>}
+        {error && <div className="bg-red-50 text-red-600 p-3 rounded-xl flex items-center gap-2 text-sm border border-red-100 mb-4 animate-pulse"><AlertCircle size={16} />{error}</div>}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           
@@ -242,21 +255,18 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Harga & Foto</h3>
 
-            {/* --- BAGIAN HARGA MODAL DENGAN TOMBOL POPUP --- */}
             <div className="relative">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Harga Modal (HPP)</label>
                 <div className="flex gap-2">
                     <input type="number" name="costPrice" value={formData.costPrice} onChange={handleChange}
                         className="flex-1 px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none font-mono" 
                         placeholder="0" />
-                    
                     <button type="button" onClick={handleCheckPrices} title="Cek Harga dari History"
                         className="px-3 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors border border-yellow-200">
                         <History size={20} />
                     </button>
                 </div>
 
-                {/* POPUP HARGA */}
                 {showPricePopup && (
                     <>
                         <div className="fixed inset-0 z-10" onClick={() => setShowPricePopup(false)}></div>
@@ -266,24 +276,13 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
                                 <button type="button" onClick={() => setShowPricePopup(false)}><X size={14} className="text-gray-400" /></button>
                             </div>
                             <div className="max-h-60 overflow-y-auto">
-                                {loadingPrice ? (
-                                    <div className="p-4 text-center text-sm text-gray-400">Memuat data...</div>
-                                ) : priceHistory.length === 0 ? (
-                                    <div className="p-4 text-center text-sm text-red-400">Belum ada history barang masuk.</div>
-                                ) : (
+                                {loadingPrice ? <div className="p-4 text-center text-sm text-gray-400">Memuat data...</div> : 
+                                 priceHistory.length === 0 ? <div className="p-4 text-center text-sm text-red-400">Belum ada history.</div> : (
                                     priceHistory.map((ph, idx) => (
                                         <button key={idx} type="button" onClick={() => selectPrice(ph.price)}
                                             className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b border-gray-50 last:border-0 transition-colors flex justify-between items-center group">
-                                            <div>
-                                                <div className="font-bold text-gray-800 text-sm">{ph.source}</div>
-                                                <div className="text-[10px] text-gray-400">{ph.date}</div>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <span className="font-mono text-sm font-semibold text-blue-600">
-                                                    Rp {ph.price.toLocaleString()}
-                                                </span>
-                                                <Check size={14} className="text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"/>
-                                            </div>
+                                            <div><div className="font-bold text-gray-800 text-sm">{ph.source}</div><div className="text-[10px] text-gray-400">{ph.date}</div></div>
+                                            <div className="flex items-center gap-2"><span className="font-mono text-sm font-semibold text-blue-600">Rp {ph.price.toLocaleString()}</span><Check size={14} className="text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"/></div>
                                         </button>
                                     ))
                                 )}
@@ -316,23 +315,16 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
                     <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
                 </label>
               </div>
-              {formData.imageUrl && (
-                  <div className="mt-2 w-full h-32 bg-gray-100 rounded-lg overflow-hidden border border-gray-200">
-                      <img src={formData.imageUrl} alt="Preview" className="w-full h-full object-contain" />
-                  </div>
-              )}
+              {formData.imageUrl && (<div className="mt-2 w-full h-32 bg-gray-100 rounded-lg overflow-hidden border border-gray-200"><img src={formData.imageUrl} alt="Preview" className="w-full h-full object-contain" /></div>)}
             </div>
           </div>
         </div>
       </form>
 
       <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50">
-        <button type="button" onClick={onCancel} className="px-6 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium hover:bg-gray-100 transition-colors">
-          Batal
-        </button>
+        <button type="button" onClick={onCancel} className="px-6 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium hover:bg-gray-100 transition-colors">Batal</button>
         <button onClick={handleSubmit} disabled={loading} className="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-bold shadow-lg hover:bg-blue-700 hover:shadow-xl transition-all flex items-center gap-2 disabled:opacity-50">
-          <Save size={18} />
-          <span>{loading ? 'Menyimpan...' : 'Simpan Barang'}</span>
+          <Save size={18} /><span>{loading ? 'Menyimpan...' : 'Simpan Barang'}</span>
         </button>
       </div>
     </div>
