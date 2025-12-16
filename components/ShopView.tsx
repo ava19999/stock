@@ -46,7 +46,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
   const [totalPages, setTotalPages] = useState(1);
   
   const [searchTerm, setSearchTerm] = useState('');
-  // const [selectedCategory, setSelectedCategory] = useState('Semua'); // REMOVED: Filter category
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
   const [adminPriceMode, setAdminPriceMode] = useState<'retail' | 'kingFano'>('retail');
@@ -61,16 +60,18 @@ export const ShopView: React.FC<ShopViewProps> = ({
   const [resiInput, setResiInput] = useState('');
   const [ecommerceInput, setEcommerceInput] = useState('');
   
+  // State untuk Toko
+  const [shopNameInput, setShopNameInput] = useState('');
+  
   const bannerInputRef = useRef<HTMLInputElement>(null); 
 
   const loadShopData = useCallback(async () => {
     setLoading(true);
-    // Always pass 'Semua' as category to fetch all items
     const { data, count } = await fetchShopItems(page, 20, searchTerm, 'Semua');
     setShopItems(data);
     setTotalPages(Math.ceil(count / 20));
     setLoading(false);
-  }, [page, searchTerm]); // Removed selectedCategory dependency
+  }, [page, searchTerm]); 
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -78,7 +79,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
         loadShopData();
     }, 500);
     return () => clearTimeout(timer);
-  }, [searchTerm]); // Removed selectedCategory dependency
+  }, [searchTerm]); 
 
   useEffect(() => {
     loadShopData();
@@ -90,8 +91,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
   const cartTotal = cart.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0); 
   const cartItemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
 
-  // const carCategories = ['Semua', 'Honda', 'Toyota', 'Suzuki', 'Nissan', 'Daihatsu', 'Mitsubishi', 'Wuling', 'Mazda']; // REMOVED
-
   return (
     <div className="relative min-h-full pb-20" onClick={() => setShowAdminPriceMenu(false)}>
       {tempBannerImg && <ImageCropper imageSrc={tempBannerImg} onConfirm={handleCropConfirm} onCancel={() => setTempBannerImg(null)} />}
@@ -102,7 +101,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
           {isAdmin && (<div className="absolute top-3 right-3 z-10"><button onClick={() => bannerInputRef.current?.click()} disabled={isUploadingBanner} className="bg-white/90 backdrop-blur text-gray-800 px-3 py-2 rounded-lg text-xs font-bold shadow-md hover:bg-white flex items-center gap-2 transition-all active:scale-95">{isUploadingBanner ? <Loader2 size={14} className="animate-spin"/> : <Camera size={14}/>}{isUploadingBanner ? 'Upload...' : 'Ganti Banner'}</button><input type="file" ref={bannerInputRef} className="hidden" accept="image/*" onChange={handleFileSelect} /></div>)}
       </div>
 
-      {/* FILTER BAR (MODIFIED: Removed Car Category Tabs) */}
+      {/* FILTER BAR */}
       <div className="sticky top-[64px] z-30 bg-gray-50/95 backdrop-blur-sm pt-2 pb-2 -mx-2 px-2 md:mx-0 md:px-0 space-y-3 border-b border-gray-200/50">
         <div className="flex gap-2">
             <div className="relative w-full group"><div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none"><Search size={18} className="text-gray-400 group-focus-within:text-blue-600 transition-colors" /></div><input type="text" placeholder="Cari sparepart..." className="pl-10 pr-4 py-3 w-full bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm transition-all" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/></div>
@@ -145,7 +144,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
             
             <div className="bg-white rounded-xl p-1 flex shadow-sm border border-gray-200"><button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={18}/></button><button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><List size={18}/></button></div>
         </div>
-        {/* REMOVED: Car Category Buttons ScrollView */}
       </div>
 
       {/* ITEMS LIST */}
@@ -180,7 +178,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
                             <p className="text-xs text-gray-500 line-clamp-2 mb-3 leading-relaxed flex-1">{item.description}</p>
                             <div className="mt-auto pt-3 border-t border-gray-50 flex flex-col justify-between gap-2">
                                 <div className="flex flex-col">
-                                    {/* HANYA TAMPILKAN SATU HARGA */}
                                     <span className={`text-sm font-extrabold ${useSpecialPrice ? 'text-purple-700' : 'text-gray-900'}`}>{formatRupiah(displayPrice)}</span>
                                 </div>
                                 <button onClick={() => onAddToCart({ ...item, customPrice: displayPrice })} className="bg-gray-900 text-white py-2 px-3 rounded-lg hover:bg-blue-600 active:scale-95 transition-all flex items-center justify-center space-x-1.5 w-full shadow-sm"><Plus size={14} /><span className="text-[10px] sm:text-xs font-bold uppercase tracking-wide">Keranjang</span></button>
@@ -211,7 +208,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
                              </div>
                              <div className="flex justify-between items-end mt-2">
                                  <div>
-                                     {/* HANYA TAMPILKAN SATU HARGA */}
                                      <span className={`text-sm font-extrabold ${useSpecialPrice ? 'text-purple-700' : 'text-gray-900'}`}>{formatRupiah(displayPrice)}</span>
                                  </div>
                                  <button onClick={() => onAddToCart({ ...item, customPrice: displayPrice })} className="bg-gray-900 text-white p-2 rounded-lg hover:bg-blue-600 active:scale-95 transition-all shadow-sm flex items-center gap-1"><Plus size={14} /><span className="text-[10px] font-bold">Beli</span></button>
@@ -342,18 +338,26 @@ export const ShopView: React.FC<ShopViewProps> = ({
                     if(customerNameInput.trim()) { 
                         let finalName = customerNameInput;
                         if(resiInput.trim()) finalName += ` (Resi: ${resiInput})`;
+                        // Logic: Name + Resi + Toko + Ecommerce
+                        if(shopNameInput.trim()) finalName += ` (Toko: ${shopNameInput})`;
                         if(ecommerceInput.trim()) finalName += ` (Via: ${ecommerceInput})`;
+                        
                         onCheckout(finalName); 
                         setIsCheckoutModalOpen(false); 
                         setCustomerNameInput(''); 
                         setResiInput('');
                         setEcommerceInput('');
+                        setShopNameInput(''); 
                     } 
                 }} className="p-6">
                     <div className="space-y-4">
                         <div><label className="text-xs font-bold text-gray-500 uppercase">Nama</label><input type="text" required autoFocus value={customerNameInput} onChange={(e) => setCustomerNameInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Nama Anda..." /></div>
                         <div><label className="text-xs font-bold text-gray-500 uppercase">No. Resi</label><input type="text" value={resiInput} onChange={(e) => setResiInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Nomor Resi..." /></div>
+                        
                         <div><label className="text-xs font-bold text-gray-500 uppercase">E-Commerce</label><input type="text" value={ecommerceInput} onChange={(e) => setEcommerceInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Contoh: Shopee..." /></div>
+                        
+                        {/* POSITION MOVED: Input is now below Ecommerce */}
+                        <div><label className="text-xs font-bold text-gray-500 uppercase">Toko</label><input type="text" value={shopNameInput} onChange={(e) => setShopNameInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Nama Toko..." /></div>
                     </div>
                     <div className="mt-6 grid grid-cols-2 gap-3">
                         <button type="button" onClick={() => setIsCheckoutModalOpen(false)} className="py-3 bg-gray-100 font-bold rounded-xl">Batal</button>
