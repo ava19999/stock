@@ -82,7 +82,6 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
   });
 };
 
-// --- INI FUNGSI YANG HILANG/ERROR SEBELUMNYA ---
 export const getItemById = async (id: string): Promise<InventoryItem | null> => {
   const { data, error } = await supabase.from(TABLE_NAME).select('*').eq('id', id).single();
   if (error || !data) return null;
@@ -93,7 +92,6 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
   if (sellData) mapped.price = Number(sellData.harga_satuan) || 0;
   return mapped;
 };
-// -----------------------------------------------
 
 export const fetchInventoryPaginated = async (page: number, limit: number, search: string, filter: string = 'all') => {
     let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' });
@@ -255,8 +253,9 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
 
 // --- HISTORY & TRANSAKSI ---
 export const fetchHistory = async (): Promise<StockHistory[]> => {
-    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*, stock_ahir, created_at').order('created_at', { ascending: false }).limit(100);
-    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*, stock_ahir, created_at').order('created_at', { ascending: false }).limit(100);
+    // UPDATED: Select all columns explicitly just to be safe, including created_at
+    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').order('created_at', { ascending: false }).limit(100);
+    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').order('created_at', { ascending: false }).limit(100);
 
     const history: StockHistory[] = [];
 
@@ -265,7 +264,7 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             id: m.id, itemId: m.part_number, partNumber: m.part_number, name: m.name,
             type: 'in', quantity: Number(m.qty_masuk), previousStock: Number(m.stock_ahir) - Number(m.qty_masuk),
             currentStock: Number(m.stock_ahir), price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
-            timestamp: parseTimestamp(m.created_at),
+            timestamp: parseTimestamp(m.created_at || m.date), // Fallback to date if created_at missing
             reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`, resi: '-', tempo: m.tempo || '-'
         });
     });
@@ -275,7 +274,7 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             id: k.id, itemId: k.part_number, partNumber: k.part_number, name: k.name,
             type: 'out', quantity: Number(k.qty_keluar), previousStock: Number(k.stock_ahir) + Number(k.qty_keluar),
             currentStock: Number(k.stock_ahir), price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
-            timestamp: parseTimestamp(k.created_at),
+            timestamp: parseTimestamp(k.created_at || k.date), // Fallback to date
             reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, resi: k.resi || '-', tempo: k.tempo || '-'
         });
     });
@@ -283,14 +282,18 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
+// --- FIX APPLIED HERE ---
 export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number, limit: number, search: string) => {
     const table = type === 'in' ? 'barang_masuk' : 'barang_keluar';
-    let query = supabase.from(table).select('*, stock_ahir, created_at', { count: 'exact' });
+    // UPDATED: Menggunakan select('*') untuk memastikan created_at terambil dengan benar
+    let query = supabase.from(table).select('*', { count: 'exact' });
+    
     if (search) {
         if (type === 'in') query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%`);
         else query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,customer.ilike.%${search}%,resi.ilike.%${search}%`);
     }
     const from = (page - 1) * limit; const to = from + limit - 1;
+    // UPDATED: Sorting by created_at explicitly
     const { data, error, count } = await query.order('created_at', { ascending: false }).range(from, to);
 
     if (error) { return { data: [], count: 0 }; }
@@ -304,7 +307,8 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
             id: item.id, itemId: item.part_number, partNumber: item.part_number, name: item.name,
             type: type, quantity: qty, previousStock: previous, currentStock: current,
             price: Number(item.harga_satuan), totalPrice: Number(item.harga_total),
-            timestamp: parseTimestamp(item.created_at),
+            // UPDATED: Ensure created_at is captured. If null, try date, else null.
+            timestamp: parseTimestamp(item.created_at || item.date), 
             reason: type === 'in' ? `Restock (Via: ${item.ecommerce || '-'})` : `${item.customer || 'Customer'} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`,
             resi: item.resi || '-', tempo: item.tempo || '-'
         };
@@ -313,15 +317,15 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
 };
 
 export const fetchItemHistory = async (partNumber: string): Promise<StockHistory[]> => {
-    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*, stock_ahir, created_at').eq('part_number', partNumber).order('created_at', { ascending: false });
-    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*, stock_ahir, created_at').eq('part_number', partNumber).order('created_at', { ascending: false });
+    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').eq('part_number', partNumber).order('created_at', { ascending: false });
+    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').eq('part_number', partNumber).order('created_at', { ascending: false });
     const history: StockHistory[] = [];
     (dataMasuk || []).forEach((m: any) => {
         history.push({
             id: m.id, itemId: m.part_number, partNumber: m.part_number, name: m.name,
             type: 'in', quantity: Number(m.qty_masuk), previousStock: Number(m.stock_ahir) - Number(m.qty_masuk),
             currentStock: Number(m.stock_ahir), price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
-            timestamp: parseTimestamp(m.created_at),
+            timestamp: parseTimestamp(m.created_at || m.date),
             reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`, resi: '-', tempo: m.tempo || '-'
         });
     });
@@ -330,7 +334,7 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
             id: k.id, itemId: k.part_number, partNumber: k.part_number, name: k.name,
             type: 'out', quantity: Number(k.qty_keluar), previousStock: Number(k.stock_ahir) + Number(k.qty_keluar),
             currentStock: Number(k.stock_ahir), price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
-            timestamp: parseTimestamp(k.created_at),
+            timestamp: parseTimestamp(k.created_at || k.date),
             reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, resi: k.resi || '-', tempo: k.tempo || '-'
         });
     });
