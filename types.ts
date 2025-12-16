@@ -68,8 +68,11 @@ export interface StockHistory {
   currentStock: number;
   price: number;
   totalPrice: number;
-  timestamp: number | null; // UBAH DI SINI: Izinkan null agar bisa menampilkan kosong
+  timestamp: number | null; 
   reason: string;
+  // --- TAMBAHAN BARU ---
+  resi?: string;
+  tempo?: string;
 }
 
 export interface Order {

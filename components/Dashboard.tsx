@@ -180,23 +180,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
             );
         });
     }
-    return itemHistory; // Sorting sudah dilakukan di backend service
+    return itemHistory; 
   }, [itemHistoryData, selectedItemHistory, itemHistorySearch]); 
-
-  const filteredGlobalHistory = useMemo(() => {
-    if (!showHistoryDetail) return [];
-    return history.filter(h => h.type === showHistoryDetail)
-                  .sort((a, b) => { // Pastikan timestamp null ada di bawah
-                      const timeA = a.timestamp || 0;
-                      const timeB = b.timestamp || 0;
-                      if (timeA === 0 && timeB === 0) return 0;
-                      if (timeA === 0) return 1;
-                      if (timeB === 0) return -1;
-                      return timeB - timeA;
-                  })
-                  .slice(0, 100);
-  }, [history, showHistoryDetail]);
-
 
   return (
     <div className="space-y-4 pb-24">
@@ -241,7 +226,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <thead className="bg-gray-100 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
                             <tr>
                                 <th className="p-3 border-b border-gray-200 w-28">Tanggal</th>
-                                <th className="p-3 border-b border-gray-200 w-32">Resi</th>
+                                <th className="p-3 border-b border-gray-200 w-36">Resi / Tempo</th> 
                                 <th className="p-3 border-b border-gray-200 w-32">E-Commerce</th>
                                 <th className="p-3 border-b border-gray-200 w-32">No. Part</th>
                                 <th className="p-3 border-b border-gray-200">Nama Barang</th>
@@ -255,8 +240,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             {historyDetailData.map((h) => {
                                 const price = h.price || 0; 
                                 const total = h.totalPrice || (price * (Number(h.quantity) || 0));
-                                const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
+                                const { ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
                                 
+                                const hasResi = h.resi && h.resi !== '-';
+                                const hasTempo = h.tempo && h.tempo !== '-' && h.tempo !== 'AUTO';
+
                                 let mainText = keterangan;
                                 if (showHistoryDetail === 'in' && customer !== '-' && keterangan.toLowerCase().includes('retur')) {
                                     mainText = `Retur Order ${customer}`;
@@ -278,7 +266,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         </td>
                                         
                                         <td className="p-3 align-top">
-                                            <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${resi !== '-' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-300'}`}>{resi}</span>
+                                             <div className="flex flex-col gap-1 items-start">
+                                                 {hasResi && (
+                                                    <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100 truncate max-w-[120px]" title={h.resi}>
+                                                        {h.resi}
+                                                    </span>
+                                                 )}
+                                                 
+                                                 {hasTempo && (
+                                                    <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-100 truncate max-w-[120px]" title={h.tempo}>
+                                                        {h.tempo}
+                                                    </span>
+                                                 )}
+
+                                                 {!hasResi && !hasTempo && (
+                                                     <span className="text-gray-300">-</span>
+                                                 )}
+                                             </div>
                                         </td>
                                         
                                         <td className="p-3 align-top">

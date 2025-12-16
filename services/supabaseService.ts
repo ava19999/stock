@@ -6,8 +6,7 @@ const TABLE_NAME = 'base'; // Tabel data barang master
 
 const handleDbError = (op: string, err: any) => { console.error(`${op} Error:`, err); };
 
-// --- HELPER: DATE PARSING (DIPERBAIKI) ---
-// Jika dateString kosong/null, kembalikan null (jangan Date.now())
+// --- HELPER: DATE PARSING ---
 const parseTimestamp = (dateString: string | null | undefined): number | null => {
     if (!dateString) return null; 
     const time = new Date(dateString).getTime();
@@ -35,7 +34,6 @@ const mapBaseItem = (item: any): InventoryItem => ({
 });
 
 // --- HELPER: AMBIL HARGA DARI HISTORY (OPTIMAL) ---
-
 const fetchLatestCostPrices = async (partNumbers?: string[]) => {
     let query = supabase
         .from('barang_masuk')
@@ -216,7 +214,6 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
 // --- HISTORY & TRANSAKSI ---
 
 export const fetchHistory = async (): Promise<StockHistory[]> => {
-    // UPDATE: Order created_at descending, nulls last (di Supabase opsi nullsFirst: false itu artinya nulls last jika desc)
     const { data: dataMasuk } = await supabase.from('barang_masuk')
         .select('*, created_at')
         .order('created_at', { ascending: false, nullsFirst: false }) 
@@ -235,8 +232,11 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             type: 'in', quantity: Number(m.qty_masuk), previousStock: Number(m.stock_awal),
             currentStock: Number(m.stock_awal) + Number(m.qty_masuk),
             price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
-            timestamp: parseTimestamp(m.created_at), // Menggunakan created_at
-            reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`
+            timestamp: parseTimestamp(m.created_at),
+            reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`,
+            // UPDATE: Map Resi & Tempo
+            resi: '-',
+            tempo: m.tempo || '-'
         });
     });
 
@@ -246,18 +246,20 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             type: 'out', quantity: Number(k.qty_keluar), previousStock: Number(k.stock_awal),
             currentStock: Number(k.stock_awal) - Number(k.qty_keluar),
             price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
-            timestamp: parseTimestamp(k.created_at), // Menggunakan created_at
-            reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`
+            timestamp: parseTimestamp(k.created_at),
+            reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`,
+            // UPDATE: Map Resi & Tempo
+            resi: k.resi || '-',
+            tempo: k.tempo || '-'
         });
     });
 
-    // Sort manual: timestamp desc, null di paling bawah
     return history.sort((a, b) => {
         const timeA = a.timestamp || 0;
         const timeB = b.timestamp || 0;
         if (timeA === 0 && timeB === 0) return 0;
-        if (timeA === 0) return 1; // A null (0), taruh di bawah
-        if (timeB === 0) return -1; // B null (0), taruh di bawah
+        if (timeA === 0) return 1;
+        if (timeB === 0) return -1;
         return timeB - timeA;
     });
 };
@@ -277,7 +279,6 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
     const from = (page - 1) * limit;
     const to = from + limit - 1;
     
-    // UPDATE: Order created_at descending, nulls last
     const { data, error, count } = await query
         .order('created_at', { ascending: false, nullsFirst: false }) 
         .range(from, to);
@@ -290,15 +291,17 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
         previousStock: Number(item.stock_awal),
         currentStock: type === 'in' ? Number(item.stock_awal) + Number(item.qty_masuk) : Number(item.stock_awal) - Number(item.qty_keluar),
         price: Number(item.harga_satuan), totalPrice: Number(item.harga_total),
-        timestamp: parseTimestamp(item.created_at), // Menggunakan created_at
-        reason: type === 'in' ? `Restock (Via: ${item.ecommerce || '-'})` : `${item.customer || 'Customer'} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`
+        timestamp: parseTimestamp(item.created_at),
+        reason: type === 'in' ? `Restock (Via: ${item.ecommerce || '-'})` : `${item.customer || 'Customer'} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`,
+        // UPDATE: Map Resi & Tempo
+        resi: item.resi || '-',
+        tempo: item.tempo || '-'
     }));
 
     return { data: mappedData, count: count || 0 };
 };
 
 export const fetchItemHistory = async (partNumber: string): Promise<StockHistory[]> => {
-    // UPDATE: Order created_at descending, nulls last
     const { data: dataMasuk } = await supabase.from('barang_masuk')
         .select('*, created_at')
         .eq('part_number', partNumber)
@@ -318,7 +321,10 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
             currentStock: Number(m.stock_awal) + Number(m.qty_masuk),
             price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
             timestamp: parseTimestamp(m.created_at),
-            reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`
+            reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`,
+            // UPDATE: Map Resi & Tempo
+            resi: '-',
+            tempo: m.tempo || '-'
         });
     });
 
@@ -329,11 +335,13 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
             currentStock: Number(k.stock_awal) - Number(k.qty_keluar),
             price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
             timestamp: parseTimestamp(k.created_at),
-            reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`
+            reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`,
+            // UPDATE: Map Resi & Tempo
+            resi: k.resi || '-',
+            tempo: k.tempo || '-'
         });
     });
 
-    // Sort manual: timestamp desc, null di paling bawah
     return history.sort((a, b) => {
         const timeA = a.timestamp || 0;
         const timeB = b.timestamp || 0;
