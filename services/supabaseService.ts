@@ -6,12 +6,12 @@ const TABLE_NAME = 'base'; // Tabel data barang master
 
 const handleDbError = (op: string, err: any) => { console.error(`${op} Error:`, err); };
 
-// --- HELPER: DATE PARSING ---
-// Mencegah 1/1/1970 jika created_at null/undefined
-const parseTimestamp = (dateString: string | null | undefined): number => {
-    if (!dateString) return Date.now(); // Fallback ke sekarang jika null
+// --- HELPER: DATE PARSING (DIPERBAIKI) ---
+// Jika dateString kosong/null, kembalikan null (jangan Date.now())
+const parseTimestamp = (dateString: string | null | undefined): number | null => {
+    if (!dateString) return null; 
     const time = new Date(dateString).getTime();
-    return isNaN(time) || time === 0 ? Date.now() : time;
+    return isNaN(time) ? null : time;
 };
 
 // --- HELPER: MAPPING ---
@@ -24,10 +24,7 @@ const mapBaseItem = (item: any): InventoryItem => ({
     quantity: Number(item.quantity) || 0,
     shelf: item.shelf || '',
     imageUrl: item.image_url || '',
-    // Gunakan date (jika ada) atau created_at untuk base item
     lastUpdated: item.date ? new Date(item.date).getTime() : (item.created_at ? new Date(item.created_at).getTime() : Date.now()),
-    
-    // Default 0, nanti di-update dari history
     price: 0, 
     kingFanoPrice: 0,
     costPrice: 0, 
@@ -39,12 +36,11 @@ const mapBaseItem = (item: any): InventoryItem => ({
 
 // --- HELPER: AMBIL HARGA DARI HISTORY (OPTIMAL) ---
 
-// 1. Ambil Harga Modal (Cost) dari BARANG MASUK
 const fetchLatestCostPrices = async (partNumbers?: string[]) => {
     let query = supabase
         .from('barang_masuk')
         .select('part_number, harga_satuan')
-        .order('created_at', { ascending: false }); // Paling baru
+        .order('created_at', { ascending: false });
 
     if (partNumbers && partNumbers.length > 0) {
         query = query.in('part_number', partNumbers);
@@ -55,7 +51,6 @@ const fetchLatestCostPrices = async (partNumbers?: string[]) => {
 
     const priceMap: Record<string, number> = {};
     data.forEach((row: any) => {
-        // Simpan harga pertama yang ditemukan (karena urut descending, ini yang terbaru)
         if (row.part_number && priceMap[row.part_number] === undefined) {
             priceMap[row.part_number] = Number(row.harga_satuan) || 0;
         }
@@ -63,12 +58,11 @@ const fetchLatestCostPrices = async (partNumbers?: string[]) => {
     return priceMap;
 };
 
-// 2. Ambil Harga Jual (Price) dari BARANG KELUAR
 const fetchLatestSellingPrices = async (partNumbers?: string[]) => {
     let query = supabase
         .from('barang_keluar')
         .select('part_number, harga_satuan')
-        .order('created_at', { ascending: false }); // Paling baru
+        .order('created_at', { ascending: false });
 
     if (partNumbers && partNumbers.length > 0) {
         query = query.in('part_number', partNumbers);
@@ -79,7 +73,6 @@ const fetchLatestSellingPrices = async (partNumbers?: string[]) => {
 
     const priceMap: Record<string, number> = {};
     data.forEach((row: any) => {
-        // Simpan harga pertama yang ditemukan
         if (row.part_number && priceMap[row.part_number] === undefined) {
             priceMap[row.part_number] = Number(row.harga_satuan) || 0;
         }
@@ -93,23 +86,13 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
   const { data: baseData, error } = await supabase.from(TABLE_NAME).select('*').order('date', { ascending: false });
   if (error) { console.error(error); return []; }
 
-  // Ambil map harga modal & jual
   const costMap = await fetchLatestCostPrices();
   const sellMap = await fetchLatestSellingPrices();
 
   return (baseData || []).map((item) => {
       const mapped = mapBaseItem(item);
-      
-      // Set Harga Modal dari Barang Masuk
-      if (costMap[item.part_number] !== undefined) {
-          mapped.costPrice = costMap[item.part_number];
-      }
-
-      // Set Harga Jual dari Barang Keluar
-      if (sellMap[item.part_number] !== undefined) {
-          mapped.price = sellMap[item.part_number];
-      }
-
+      if (costMap[item.part_number] !== undefined) mapped.costPrice = costMap[item.part_number];
+      if (sellMap[item.part_number] !== undefined) mapped.price = sellMap[item.part_number];
       return mapped;
   });
 };
@@ -120,31 +103,11 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
 
   const mapped = mapBaseItem(data);
 
-  // Cari harga modal terakhir (Barang Masuk)
-  const { data: costData } = await supabase
-      .from('barang_masuk')
-      .select('harga_satuan')
-      .eq('part_number', mapped.partNumber)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+  const { data: costData } = await supabase.from('barang_masuk').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false }).limit(1).single();
+  if (costData) mapped.costPrice = Number(costData.harga_satuan) || 0;
 
-  if (costData) {
-      mapped.costPrice = Number(costData.harga_satuan) || 0;
-  }
-
-  // Cari harga jual terakhir (Barang Keluar)
-  const { data: sellData } = await supabase
-      .from('barang_keluar')
-      .select('harga_satuan')
-      .eq('part_number', mapped.partNumber)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-  if (sellData) {
-      mapped.price = Number(sellData.harga_satuan) || 0;
-  }
+  const { data: sellData } = await supabase.from('barang_keluar').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false }).limit(1).single();
+  if (sellData) mapped.price = Number(sellData.harga_satuan) || 0;
 
   return mapped;
 };
@@ -168,20 +131,14 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
 
     const baseItems = (data || []).map(mapBaseItem);
 
-    // Optimasi: Hanya ambil harga untuk item yang ditampilkan
     if (baseItems.length > 0) {
         const partNumbers = baseItems.map(i => i.partNumber).filter(Boolean);
-        
         const costMap = await fetchLatestCostPrices(partNumbers);
         const sellMap = await fetchLatestSellingPrices(partNumbers);
 
         baseItems.forEach(item => {
-            if (costMap[item.partNumber] !== undefined) {
-                item.costPrice = costMap[item.partNumber];
-            }
-            if (sellMap[item.partNumber] !== undefined) {
-                item.price = sellMap[item.partNumber];
-            }
+            if (costMap[item.partNumber] !== undefined) item.costPrice = costMap[item.partNumber];
+            if (sellMap[item.partNumber] !== undefined) item.price = sellMap[item.partNumber];
         });
     }
 
@@ -216,15 +173,12 @@ export const fetchShopItems = async (page: number, limit: number, search: string
     const { data, error, count } = await query.range(from, to);
     if (error) return { data: [], count: 0 };
     
-    // Jika Shop butuh harga jual aktual dari history, gunakan logika mapping
     const baseItems = (data || []).map(mapBaseItem);
     if (baseItems.length > 0) {
         const partNumbers = baseItems.map(i => i.partNumber).filter(Boolean);
         const sellMap = await fetchLatestSellingPrices(partNumbers);
         baseItems.forEach(item => {
-            if (sellMap[item.partNumber] !== undefined) {
-                item.price = sellMap[item.partNumber];
-            }
+            if (sellMap[item.partNumber] !== undefined) item.price = sellMap[item.partNumber];
         });
     }
 
@@ -262,7 +216,6 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
 // --- HISTORY & TRANSAKSI ---
 
 export const fetchHistory = async (): Promise<StockHistory[]> => {
-    // Explicitly select created_at to ensure it's returned
     const { data: dataMasuk } = await supabase.from('barang_masuk').select('*, created_at').order('created_at', { ascending: false }).limit(100);
     const { data: dataKeluar } = await supabase.from('barang_keluar').select('*, created_at').order('created_at', { ascending: false }).limit(100);
 
@@ -274,8 +227,7 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             type: 'in', quantity: Number(m.qty_masuk), previousStock: Number(m.stock_awal),
             currentStock: Number(m.stock_awal) + Number(m.qty_masuk),
             price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
-            // Updated: menggunakan created_at dengan fallback
-            timestamp: parseTimestamp(m.created_at),
+            timestamp: parseTimestamp(m.created_at), // Menggunakan created_at
             reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`
         });
     });
@@ -286,13 +238,13 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             type: 'out', quantity: Number(k.qty_keluar), previousStock: Number(k.stock_awal),
             currentStock: Number(k.stock_awal) - Number(k.qty_keluar),
             price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
-            // Updated: menggunakan created_at dengan fallback
-            timestamp: parseTimestamp(k.created_at),
+            timestamp: parseTimestamp(k.created_at), // Menggunakan created_at
             reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`
         });
     });
 
-    return history.sort((a, b) => b.timestamp - a.timestamp);
+    // Sort dengan fallback ke 0 jika timestamp null
+    return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
 export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number, limit: number, search: string) => {
@@ -319,75 +271,45 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
         previousStock: Number(item.stock_awal),
         currentStock: type === 'in' ? Number(item.stock_awal) + Number(item.qty_masuk) : Number(item.stock_awal) - Number(item.qty_keluar),
         price: Number(item.harga_satuan), totalPrice: Number(item.harga_total),
-        // Updated: menggunakan created_at dengan fallback
-        timestamp: parseTimestamp(item.created_at),
+        timestamp: parseTimestamp(item.created_at), // Menggunakan created_at
         reason: type === 'in' ? `Restock (Via: ${item.ecommerce || '-'})` : `${item.customer || 'Customer'} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`
     }));
 
     return { data: mappedData, count: count || 0 };
 };
 
-// --- FUNGSI BARU UNTUK FETCH ITEM HISTORY SPESIFIK ---
 export const fetchItemHistory = async (partNumber: string): Promise<StockHistory[]> => {
-    // 1. Ambil Barang Masuk (IN)
-    const { data: dataMasuk } = await supabase
-        .from('barang_masuk')
-        .select('*, created_at')
-        .eq('part_number', partNumber)
-        .order('created_at', { ascending: false });
-
-    // 2. Ambil Barang Keluar (OUT)
-    const { data: dataKeluar } = await supabase
-        .from('barang_keluar')
-        .select('*, created_at')
-        .eq('part_number', partNumber)
-        .order('created_at', { ascending: false });
+    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*, created_at').eq('part_number', partNumber).order('created_at', { ascending: false });
+    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*, created_at').eq('part_number', partNumber).order('created_at', { ascending: false });
 
     const history: StockHistory[] = [];
 
-    // Map In
     (dataMasuk || []).forEach((m: any) => {
         history.push({
-            id: m.id, 
-            itemId: m.part_number, 
-            partNumber: m.part_number, 
-            name: m.name,
-            type: 'in', 
-            quantity: Number(m.qty_masuk), 
-            previousStock: Number(m.stock_awal),
+            id: m.id, itemId: m.part_number, partNumber: m.part_number, name: m.name,
+            type: 'in', quantity: Number(m.qty_masuk), previousStock: Number(m.stock_awal),
             currentStock: Number(m.stock_awal) + Number(m.qty_masuk),
-            price: Number(m.harga_satuan), 
-            totalPrice: Number(m.harga_total),
-            // Updated: menggunakan created_at dengan fallback
+            price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
             timestamp: parseTimestamp(m.created_at),
             reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`
         });
     });
 
-    // Map Out
     (dataKeluar || []).forEach((k: any) => {
         history.push({
-            id: k.id, 
-            itemId: k.part_number, 
-            partNumber: k.part_number, 
-            name: k.name, 
-            type: 'out', 
-            quantity: Number(k.qty_keluar), 
-            previousStock: Number(k.stock_awal),
+            id: k.id, itemId: k.part_number, partNumber: k.part_number, name: k.name,
+            type: 'out', quantity: Number(k.qty_keluar), previousStock: Number(k.stock_awal),
             currentStock: Number(k.stock_awal) - Number(k.qty_keluar),
-            price: Number(k.harga_satuan), 
-            totalPrice: Number(k.harga_total),
-            // Updated: menggunakan created_at dengan fallback
+            price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
             timestamp: parseTimestamp(k.created_at),
             reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`
         });
     });
 
-    return history.sort((a, b) => b.timestamp - a.timestamp);
+    return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
 export const addBarangMasuk = async (data: BarangMasuk): Promise<boolean> => {
-    // Updated: Menghapus 'tanggal' dari insert karena kolom dihapus
     const { error } = await supabase.from('barang_masuk').insert([{
         tempo: data.tempo, ecommerce: data.suplier || data.ecommerce || 'Lainnya',
         part_number: data.partNumber, name: data.name, brand: data.brand, application: data.application,
@@ -399,7 +321,6 @@ export const addBarangMasuk = async (data: BarangMasuk): Promise<boolean> => {
 };
 
 export const addBarangKeluar = async (data: BarangKeluar): Promise<boolean> => {
-    // Updated: Menghapus 'tanggal' dari insert karena kolom dihapus
     const { error } = await supabase.from('barang_keluar').insert([{
         kode_toko: data.kodeToko, tempo: data.tempo, ecommerce: data.ecommerce,
         customer: data.customer, part_number: data.partNumber, name: data.name, brand: data.brand,
@@ -411,17 +332,16 @@ export const addBarangKeluar = async (data: BarangKeluar): Promise<boolean> => {
 };
 
 export const addHistoryLog = async (h: StockHistory): Promise<boolean> => {
-    // Updated: Tidak mengirim field 'tanggal' lagi
     if (h.type === 'in') {
         return addBarangMasuk({
-            tanggal: '', // Ignored/Removed
+            tanggal: '', 
             tempo: 'AUTO', ecommerce: 'SYSTEM', partNumber: h.partNumber, name: h.name,
             brand: '-', application: '-', rak: '-', stockAwal: h.previousStock, qtyMasuk: h.quantity,
             hargaSatuan: h.price, hargaTotal: h.totalPrice
         });
     } else {
         return addBarangKeluar({
-            tanggal: '', // Ignored/Removed
+            tanggal: '', 
             kodeToko: 'SYS', tempo: 'AUTO', ecommerce: 'SYSTEM', customer: 'AUTO-LOG',
             partNumber: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-',
             stockAwal: h.previousStock, qtyKeluar: h.quantity, hargaSatuan: h.price, hargaTotal: h.totalPrice, resi: '-'
@@ -459,12 +379,10 @@ export const saveChatSession = async (s: ChatSession): Promise<boolean> => {
     }]);
     return !error;
 };
-
-// --- FUNGSI BARU: CEK HISTORY HARGA (UNTUK POPUP DI FORM) ---
 export const fetchPriceHistoryBySource = async (partNumber: string) => {
     const { data, error } = await supabase
         .from('barang_masuk')
-        .select('ecommerce, harga_satuan, created_at') // Updated: select created_at
+        .select('ecommerce, harga_satuan, created_at') 
         .eq('part_number', partNumber)
         .order('created_at', { ascending: false });
 
@@ -477,7 +395,6 @@ export const fetchPriceHistoryBySource = async (partNumber: string) => {
             uniqueSources[sourceName] = {
                 source: sourceName,
                 price: Number(item.harga_satuan),
-                // Updated: menggunakan created_at dengan fallback dash jika kosong
                 date: item.created_at ? new Date(item.created_at).toLocaleDateString('id-ID') : '-'
             };
         }

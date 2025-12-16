@@ -28,7 +28,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [totalCount, setTotalCount] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // STATE BARU UNTUK FILTER STOK
   const [filterType, setFilterType] = useState<'all' | 'low' | 'empty'>('all');
   
   const [stats, setStats] = useState({ totalItems: 0, totalStock: 0, totalAsset: 0, todayIn: 0, todayOut: 0 });
@@ -40,14 +39,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
   
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  // State untuk Detail History Paginated
   const [historyDetailData, setHistoryDetailData] = useState<StockHistory[]>([]);
   const [historyDetailPage, setHistoryDetailPage] = useState(1);
   const [historyDetailTotalPages, setHistoryDetailTotalPages] = useState(1);
   const [historyDetailSearch, setHistoryDetailSearch] = useState('');
   const [historyDetailLoading, setHistoryDetailLoading] = useState(false);
 
-  // STATE BARU: ITEM HISTORY
   const [itemHistoryData, setItemHistoryData] = useState<StockHistory[]>([]);
   const [loadingItemHistory, setLoadingItemHistory] = useState(false);
 
@@ -66,10 +63,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const todayIn = history
-      .filter(h => h.type === 'in' && h.timestamp >= startOfDay.getTime())
+      .filter(h => h.type === 'in' && h.timestamp && h.timestamp >= startOfDay.getTime())
       .reduce((acc, h) => acc + (Number(h.quantity) || 0), 0);
     const todayOut = history
-      .filter(h => h.type === 'out' && h.timestamp >= startOfDay.getTime())
+      .filter(h => h.type === 'out' && h.timestamp && h.timestamp >= startOfDay.getTime())
       .reduce((acc, h) => acc + (Number(h.quantity) || 0), 0);
 
     setStats({ ...invStats, todayIn, todayOut });
@@ -95,11 +92,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   }, [showHistoryDetail, historyDetailPage, historyDetailSearch]);
 
-  // EFFECT BARU: Ambil history saat item dipilih
   useEffect(() => {
     if (selectedItemHistory) {
       setLoadingItemHistory(true);
-      setItemHistoryData([]); // Reset data lama
+      setItemHistoryData([]); 
       
       if (selectedItemHistory.partNumber) {
         fetchItemHistory(selectedItemHistory.partNumber)
@@ -137,35 +133,30 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(n);
   };
 
-  // --- PARSE HISTORY REASON ---
   const parseHistoryReason = (reason: string) => {
       let resi = '-';
       let ecommerce = '-';
       let customer = '-';
       let keterangan = reason || '';
 
-      // Ekstrak Resi
       const resiMatch = keterangan.match(/\(Resi: (.*?)\)/);
       if (resiMatch && resiMatch[1]) { 
           resi = resiMatch[1]; 
           keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, ''); 
       }
 
-      // Ekstrak E-Commerce
       const viaMatch = keterangan.match(/\(Via: (.*?)\)/);
       if (viaMatch && viaMatch[1]) { 
           ecommerce = viaMatch[1]; 
           keterangan = keterangan.replace(/\s*\(Via:.*?\)/, ''); 
       }
 
-      // Ekstrak Nama Customer (text dalam kurung tersisa)
       const nameMatch = keterangan.match(/\((.*?)\)/);
       if (nameMatch && nameMatch[1]) {
           customer = nameMatch[1];
           keterangan = keterangan.replace(/\s*\(.*?\)/, '');
       }
 
-      // Cleanup sisa teks
       if (keterangan.toLowerCase().includes('cancel order')) { keterangan = 'Retur Pesanan'; }
       if (!keterangan.trim()) keterangan = 'Transaksi';
 
@@ -174,8 +165,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const filteredItemHistory = useMemo(() => {
     if (!selectedItemHistory) return [];
-    
-    // Gunakan data yang baru di-fetch (itemHistoryData), BUKAN global history prop
     let itemHistory = [...itemHistoryData];
 
     if (itemHistorySearch.trim() !== '') {
@@ -192,12 +181,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
         });
     }
     return itemHistory;
-  }, [itemHistoryData, selectedItemHistory, itemHistorySearch]); // Updated dependency
+  }, [itemHistoryData, selectedItemHistory, itemHistorySearch]); 
 
   const filteredGlobalHistory = useMemo(() => {
     if (!showHistoryDetail) return [];
     return history.filter(h => h.type === showHistoryDetail)
-                  .sort((a, b) => b.timestamp - a.timestamp)
+                  .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)) // Handle null timestamp sort
                   .slice(0, 100);
   }, [history, showHistoryDetail]);
 
@@ -205,7 +194,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   return (
     <div className="space-y-4 pb-24">
       
-      {/* --- GLOBAL HISTORY MODAL (DETAIL RIWAYAT MASUK/KELUAR) --- */}
       {showHistoryDetail && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 duration-300 flex flex-col max-h-[90vh]">
@@ -217,7 +205,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <button onClick={() => setShowHistoryDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm font-medium">Tutup</button>
             </div>
             
-            {/* SEARCH & PAGINATION HEADER */}
             <div className="p-3 bg-white border-b border-gray-100 flex gap-3 justify-between items-center">
                 <div className="relative flex-1 max-w-md">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
@@ -263,7 +250,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 const total = h.totalPrice || (price * (Number(h.quantity) || 0));
                                 const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
                                 
-                                // Logic Text Keterangan
                                 let mainText = keterangan;
                                 if (showHistoryDetail === 'in' && customer !== '-' && keterangan.toLowerCase().includes('retur')) {
                                     mainText = `Retur Order ${customer}`;
@@ -273,7 +259,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                                 return (
                                     <tr key={h.id} className="hover:bg-blue-50 transition-colors">
-                                        <td className="p-3 text-gray-600 whitespace-nowrap align-top"><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div></td>
+                                        <td className="p-3 text-gray-600 whitespace-nowrap align-top">
+                                            {h.timestamp ? (
+                                                <>
+                                                    <div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div>
+                                                    <div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div>
+                                                </>
+                                            ) : (
+                                                <div className="text-gray-400 font-medium">-</div>
+                                            )}
+                                        </td>
                                         
                                         <td className="p-3 align-top">
                                             <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${resi !== '-' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-300'}`}>{resi}</span>
@@ -309,7 +304,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
-      {/* --- ITEM HISTORY MODAL (RIWAYAT BARANG SPESIFIK) --- */}
       {selectedItemHistory && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
@@ -361,7 +355,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     const price = h.price || 0;
                                     const total = h.totalPrice || (price * (Number(h.quantity) || 0));
                                     
-                                    // Logic Text
                                     let mainText = customer !== '-' ? customer : keterangan;
                                     if (h.type === 'in' && customer !== '-' && keterangan.toLowerCase().includes('retur')) {
                                         mainText = `Retur Order ${customer}`;
@@ -369,14 +362,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                                     return (
                                         <tr key={h.id} className="hover:bg-gray-50 transition-colors">
-                                            <td className="p-3 align-top text-gray-600"><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div></td>
+                                            <td className="p-3 align-top text-gray-600">
+                                                {h.timestamp ? (
+                                                    <>
+                                                        <div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div>
+                                                        <div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div>
+                                                    </>
+                                                ) : (
+                                                    <div className="text-gray-400 font-medium">-</div>
+                                                )}
+                                            </td>
                                             <td className="p-3 align-top text-center"><span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${h.type === 'in' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{h.type === 'in' ? 'Masuk' : 'Keluar'}</span></td>
                                             <td className={`p-3 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>{h.type === 'in' ? '+' : '-'}{h.quantity}</td>
                                             <td className="p-3 align-top text-right font-mono text-gray-600 text-xs">{formatRupiah(price)}</td>
                                             <td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(total)}</td>
                                             <td className="p-3 align-top text-right font-mono text-gray-600">{h.currentStock}</td>
                                             
-                                            {/* KETERANGAN DI ITEM HISTORY */}
                                             <td className="p-3 align-top text-gray-700">
                                                 <div className="font-bold text-gray-900 text-xs mb-1.5 flex items-center gap-1.5">
                                                     {customer !== '-' && <User size={12} className="text-gray-400"/>}
@@ -398,7 +399,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
       
-      {/* STATS */}
       <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide snap-x md:grid md:grid-cols-5 md:gap-4 md:overflow-visible md:mx-0 md:px-0 md:pb-0">
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Package size={32} className="text-blue-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Package size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Item</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalItems, false)}</div></div>
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Layers size={32} className="text-purple-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Layers size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Stok</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalStock, false)}</div></div>
