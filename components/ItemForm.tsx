@@ -1,31 +1,28 @@
 // FILE: src/components/ItemForm.tsx
 import React, { useState, useEffect } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
-import { fetchPriceHistoryBySource } from '../services/supabaseService';
-import { X, Save, History, Check } from 'lucide-react';
+import { fetchPriceHistoryBySource, updateInventory, addInventory } from '../services/supabaseService';
+import { X, Save, History, Check, ShoppingBag, Calendar, Truck, AlertCircle } from 'lucide-react';
 
 interface ItemFormProps {
   initialData?: InventoryItem;
-  onSubmit: (data: InventoryFormData) => void;
+  // Diperbarui: onSubmit sekarang opsional atau disesuaikan karena handle submit dilakukan di dalam komponen ini
+  // Namun agar kompatibel dengan parent, kita tetap terima prop, tapi fungsinya kita override di dalam
+  onSubmit: (data: InventoryFormData) => void; 
+  onSuccess?: () => void; // Tambahan callback sukses
   onCancel: () => void;
 }
 
-export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCancel }) => {
+export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCancel, onSuccess }) => {
+  const isEditMode = !!initialData;
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Form State Utama
   const [formData, setFormData] = useState<InventoryFormData>({
-    partNumber: '',
-    name: '',
-    brand: '',
-    application: '',
-    price: 0,
-    costPrice: 0, 
-    kingFanoPrice: 0,
-    quantity: 0,
-    initialStock: 0,
-    qtyIn: 0,
-    qtyOut: 0,
-    shelf: '',
-    imageUrl: '',
-    ecommerce: ''
+    partNumber: '', name: '', brand: '', application: '', 
+    price: 0, costPrice: 0, kingFanoPrice: 0, quantity: 0,
+    initialStock: 0, qtyIn: 0, qtyOut: 0, shelf: '', imageUrl: '', ecommerce: ''
   });
 
   // State untuk Popup Harga
@@ -33,23 +30,20 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
   const [priceHistory, setPriceHistory] = useState<any[]>([]);
   const [loadingPrice, setLoadingPrice] = useState(false);
 
+  // State untuk Update Stok (Hanya di mode Edit)
+  const [stockAdjustmentType, setStockAdjustmentType] = useState<'none' | 'in' | 'out'>('none');
+  const [adjustmentQty, setAdjustmentQty] = useState<string>('');
+  const [adjustmentEcommerce, setAdjustmentEcommerce] = useState<string>('');
+  const [adjustmentResiTempo, setAdjustmentResiTempo] = useState<string>('');
+
   useEffect(() => {
     if (initialData) {
       setFormData({
-        partNumber: initialData.partNumber,
-        name: initialData.name,
-        brand: initialData.brand,
-        application: initialData.application,
-        price: initialData.price,
-        costPrice: initialData.costPrice,
-        kingFanoPrice: initialData.kingFanoPrice || 0,
-        quantity: initialData.quantity,
-        initialStock: initialData.initialStock || 0,
-        qtyIn: initialData.qtyIn || 0,
-        qtyOut: initialData.qtyOut || 0,
-        shelf: initialData.shelf,
-        imageUrl: initialData.imageUrl,
-        ecommerce: initialData.ecommerce || ''
+        partNumber: initialData.partNumber, name: initialData.name, brand: initialData.brand,
+        application: initialData.application, price: initialData.price, costPrice: initialData.costPrice,
+        kingFanoPrice: initialData.kingFanoPrice || 0, quantity: initialData.quantity,
+        initialStock: initialData.initialStock || 0, qtyIn: initialData.qtyIn || 0, qtyOut: initialData.qtyOut || 0,
+        shelf: initialData.shelf, imageUrl: initialData.imageUrl, ecommerce: initialData.ecommerce || ''
       });
     }
   }, [initialData]);
@@ -68,32 +62,55 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setFormData(prev => ({ ...prev, imageUrl: reader.result as string }));
-      };
+      reader.onloadend = () => { setFormData(prev => ({ ...prev, imageUrl: reader.result as string })); };
       reader.readAsDataURL(file);
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(formData);
+    setLoading(true);
+    setError(null);
+
+    try {
+        if (isEditMode && initialData) {
+            // Mode Edit: Kirim data master + data transaksi (jika ada)
+            const qtyAdj = Number(adjustmentQty);
+            const transactionData = (stockAdjustmentType !== 'none' && qtyAdj > 0) ? {
+                type: stockAdjustmentType === 'in' ? 'in' as const : 'out' as const,
+                qty: qtyAdj,
+                ecommerce: adjustmentEcommerce,
+                resiTempo: adjustmentResiTempo
+            } : undefined;
+
+            // Panggil updateInventory yang baru (mendukung transaksi)
+            await updateInventory({ ...initialData, ...formData }, transactionData);
+        } else {
+            // Mode Tambah Baru
+            await addInventory(formData);
+        }
+        
+        if (onSuccess) onSuccess(); // Refresh data di dashboard
+        // Panggil onSubmit parent jika diperlukan, atau tutup form
+        if (onSubmit) onSubmit(formData); // Backward compatibility
+        // Jika parent handle closing via onSubmit, ini redundant, tapi aman
+    } catch (err) {
+        setError('Gagal menyimpan data. Silakan coba lagi.');
+        console.error(err);
+    } finally {
+        setLoading(false);
+    }
   };
 
   // --- LOGIC POPUP HARGA ---
   const handleCheckPrices = async () => {
-    if (!formData.partNumber) {
-        alert("Isi Part Number terlebih dahulu!");
-        return;
-    }
+    if (!formData.partNumber) { alert("Isi Part Number terlebih dahulu!"); return; }
     setLoadingPrice(true);
     setShowPricePopup(true);
     try {
         const history = await fetchPriceHistoryBySource(formData.partNumber);
         setPriceHistory(history);
-    } catch (error) {
-        console.error("Gagal ambil harga", error);
-    }
+    } catch (error) { console.error("Gagal ambil harga", error); }
     setLoadingPrice(false);
   };
 
@@ -102,18 +119,28 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
       setShowPricePopup(false);
   };
 
+  // Hitung prediksi stok akhir untuk ditampilkan
+  const projectedStock = isEditMode ? (
+      stockAdjustmentType === 'in' ? formData.quantity + (Number(adjustmentQty) || 0) :
+      stockAdjustmentType === 'out' ? formData.quantity - (Number(adjustmentQty) || 0) :
+      formData.quantity
+  ) : formData.quantity;
+
   return (
     <div className="bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
+      {/* Header */}
       <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
         <h2 className="text-xl font-bold text-gray-800">
-          {initialData ? 'Edit Barang' : 'Tambah Barang Baru'}
+          {initialData ? 'Edit Barang & Stok' : 'Tambah Barang Baru'}
         </h2>
-        <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 transition-colors">
+        <button type="button" onClick={onCancel} className="text-gray-400 hover:text-gray-600 transition-colors">
           <X size={24} />
         </button>
       </div>
 
-      <form onSubmit={handleSubmit} className="p-6 overflow-y-auto custom-scrollbar">
+      <form onSubmit={handleSubmit} className="p-6 overflow-y-auto custom-scrollbar flex-1">
+        {error && <div className="bg-red-50 text-red-600 p-3 rounded-xl flex items-center gap-2 text-sm border border-red-100 mb-4"><AlertCircle size={16} />{error}</div>}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           
           {/* KOLOM KIRI: Identitas Barang */}
@@ -153,12 +180,62 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
                     <input type="text" name="shelf" value={formData.shelf} onChange={handleChange}
                         className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="A-01" />
                 </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Stok Saat Ini</label>
-                    <input type="number" name="quantity" value={formData.quantity} onChange={handleChange}
-                        className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none font-mono" />
-                </div>
+                {/* Field Stok Awal hanya muncul saat Tambah Baru */}
+                {!isEditMode && (
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Stok Awal</label>
+                        <input type="number" name="quantity" value={formData.quantity} onChange={handleChange}
+                            className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none font-mono" />
+                    </div>
+                )}
             </div>
+
+            {/* === BAGIAN STOK DAN TRANSAKSI (KHUSUS MODE EDIT) === */}
+            {isEditMode && (
+                <div className="mt-6 bg-blue-50/50 p-4 rounded-xl border border-blue-100 space-y-4">
+                    <div className="flex justify-between items-center">
+                        <h3 className="text-sm font-bold text-blue-800 flex items-center gap-2">
+                            Update Stok
+                            <span className="text-xs font-normal text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Stok Saat Ini: {formData.quantity}</span>
+                        </h3>
+                    </div>
+
+                    {/* Pilihan Aksi Stok */}
+                    <div className="flex bg-white p-1 rounded-lg border border-gray-200 shadow-sm">
+                        <button type="button" onClick={() => setStockAdjustmentType('none')} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${stockAdjustmentType === 'none' ? 'bg-gray-100 text-gray-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}>Tetap</button>
+                        <button type="button" onClick={() => setStockAdjustmentType('in')} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${stockAdjustmentType === 'in' ? 'bg-green-100 text-green-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}>+ Tambah</button>
+                        <button type="button" onClick={() => setStockAdjustmentType('out')} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${stockAdjustmentType === 'out' ? 'bg-red-100 text-red-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}>- Kurangi</button>
+                    </div>
+
+                    {/* Form Input Stok Tambahan */}
+                    {stockAdjustmentType !== 'none' && (
+                        <div className="space-y-3 animate-in slide-in-from-top-2 duration-200">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1">Jumlah {stockAdjustmentType === 'in' ? 'Masuk' : 'Keluar'}</label>
+                                    <input autoFocus required type="number" min="1" value={adjustmentQty} onChange={(e) => setAdjustmentQty(e.target.value)} 
+                                        className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-bold text-gray-800" placeholder="0" />
+                                </div>
+                                <div className="flex items-end pb-2">
+                                    <p className="text-xs text-gray-500">Stok Akhir: <strong className={stockAdjustmentType==='in'?'text-green-600':'text-red-600'}>{projectedStock}</strong></p>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1"><ShoppingBag size={10}/> Sumber / E-Commerce</label>
+                                    <input type="text" value={adjustmentEcommerce} onChange={(e) => setAdjustmentEcommerce(e.target.value)} 
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder={stockAdjustmentType === 'in' ? "Contoh: Tokopedia" : "Contoh: Shopee"} />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1">{stockAdjustmentType === 'in' ? <Calendar size={10}/> : <Truck size={10}/>} {stockAdjustmentType === 'in' ? ' Tempo' : ' No. Resi'}</label>
+                                    <input type="text" value={adjustmentResiTempo} onChange={(e) => setAdjustmentResiTempo(e.target.value)} 
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder={stockAdjustmentType === 'in' ? "Contoh: Lunas" : "Contoh: JP123..."} />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
           </div>
 
           {/* KOLOM KANAN: Harga & Foto */}
@@ -253,9 +330,9 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
         <button type="button" onClick={onCancel} className="px-6 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium hover:bg-gray-100 transition-colors">
           Batal
         </button>
-        <button onClick={handleSubmit} className="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-bold shadow-lg hover:bg-blue-700 hover:shadow-xl transition-all flex items-center gap-2">
+        <button onClick={handleSubmit} disabled={loading} className="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-bold shadow-lg hover:bg-blue-700 hover:shadow-xl transition-all flex items-center gap-2 disabled:opacity-50">
           <Save size={18} />
-          <span>Simpan Barang</span>
+          <span>{loading ? 'Menyimpan...' : 'Simpan Barang'}</span>
         </button>
       </div>
     </div>

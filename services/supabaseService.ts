@@ -67,8 +67,10 @@ const fetchLatestSellingPrices = async (partNumbers?: string[]) => {
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
   const { data: baseData, error } = await supabase.from(TABLE_NAME).select('*').order('date', { ascending: false });
   if (error) { console.error(error); return []; }
+
   const costMap = await fetchLatestCostPrices();
   const sellMap = await fetchLatestSellingPrices();
+
   return (baseData || []).map((item) => {
       const mapped = mapBaseItem(item);
       if (costMap[item.part_number] !== undefined) mapped.costPrice = costMap[item.part_number];
@@ -80,11 +82,15 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
 export const getItemById = async (id: string): Promise<InventoryItem | null> => {
   const { data, error } = await supabase.from(TABLE_NAME).select('*').eq('id', id).single();
   if (error || !data) return null;
+
   const mapped = mapBaseItem(data);
+
   const { data: costData } = await supabase.from('barang_masuk').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false }).limit(1).single();
   if (costData) mapped.costPrice = Number(costData.harga_satuan) || 0;
+
   const { data: sellData } = await supabase.from('barang_keluar').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false }).limit(1).single();
   if (sellData) mapped.price = Number(sellData.harga_satuan) || 0;
+
   return mapped;
 };
 
@@ -93,11 +99,14 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
     if (search) { query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`); }
     if (filter === 'low') { query = query.gt('quantity', 0).lt('quantity', 4); } 
     else if (filter === 'empty') { query = query.or('quantity.lte.0,quantity.is.null'); }
+    
     const from = (page - 1) * limit;
     const to = from + limit - 1;
     const { data, error, count } = await query.order('date', { ascending: false }).range(from, to);
+    
     if (error) { console.error("Error fetching inventory:", error); return { data: [], count: 0 }; }
     const baseItems = (data || []).map(mapBaseItem);
+
     if (baseItems.length > 0) {
         const partNumbers = baseItems.map(i => i.partNumber).filter(Boolean);
         const costMap = await fetchLatestCostPrices(partNumbers);
@@ -149,17 +158,85 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
     application: item.application, quantity: item.quantity, shelf: item.shelf, 
     image_url: item.imageUrl, date: new Date().toISOString() 
   }]).select().single();
+
   if (error) { handleDbError("Tambah Barang ke Base", error); return null; }
+  
+  // Otomatis catat stok awal sebagai barang masuk
+  if (item.quantity > 0 && data) {
+      await addBarangMasuk({
+          tanggal: new Date().toISOString(), tempo: 'AUTO', suplier: 'Stok Awal',
+          partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
+          rak: item.shelf, 
+          stockAhir: item.quantity, 
+          qtyMasuk: item.quantity,
+          hargaSatuan: item.costPrice || 0, 
+          hargaTotal: (item.costPrice || 0) * item.quantity
+      });
+  }
   return data ? data.id : null;
 };
 
-export const updateInventory = async (item: InventoryItem): Promise<boolean> => {
+// --- UPDATE INVENTORY DENGAN TRANSAKSI ---
+export const updateInventory = async (
+    item: InventoryItem, 
+    transaction?: { type: 'in' | 'out', qty: number, ecommerce: string, resiTempo: string }
+): Promise<boolean> => {
+  
+  let finalQty = item.quantity; // Stok awal sebelum transaksi (dari form)
+
+  // 1. Hitung Stok Baru jika ada transaksi
+  if (transaction && transaction.qty > 0) {
+      if (transaction.type === 'in') {
+          finalQty = item.quantity + transaction.qty;
+      } else {
+          finalQty = item.quantity - transaction.qty;
+      }
+  }
+
+  // 2. Update Master Data (Tabel Base)
   const { error } = await supabase.from(TABLE_NAME).update({
     name: item.name, brand: item.brand, application: item.application,
-    shelf: item.shelf, quantity: item.quantity, image_url: item.imageUrl,
+    shelf: item.shelf, 
+    quantity: finalQty, // Update stok ke angka terbaru
+    image_url: item.imageUrl,
     date: new Date().toISOString()
   }).eq('id', item.id);
+
   if (error) { handleDbError("Update Barang Base", error); return false; }
+
+  // 3. Catat Riwayat Transaksi (Log)
+  if (transaction && transaction.qty > 0) {
+      if (transaction.type === 'in') {
+          // Barang Masuk
+          await addBarangMasuk({
+              tanggal: new Date().toISOString(),
+              tempo: transaction.resiTempo || '-', // Field Tempo
+              suplier: transaction.ecommerce || 'Manual Edit',
+              partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
+              rak: item.shelf,
+              stockAhir: finalQty, // Stock Ahir sesuai perhitungan
+              qtyMasuk: transaction.qty,
+              hargaSatuan: item.costPrice || 0, 
+              hargaTotal: (item.costPrice || 0) * transaction.qty
+          });
+      } else {
+          // Barang Keluar
+          await addBarangKeluar({
+              tanggal: new Date().toISOString(),
+              kodeToko: 'MANUAL', tempo: 'AUTO',
+              ecommerce: transaction.ecommerce || 'Manual Edit',
+              customer: 'Adjustment',
+              partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
+              rak: item.shelf,
+              stockAhir: finalQty, // Stock Ahir sesuai perhitungan
+              qtyKeluar: transaction.qty,
+              hargaSatuan: item.price || 0, 
+              hargaTotal: (item.price || 0) * transaction.qty,
+              resi: transaction.resiTempo || '-' // Field Resi
+          });
+      }
+  }
+
   return true;
 };
 
@@ -169,7 +246,7 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
   return true;
 };
 
-// --- HISTORY & TRANSAKSI (UPDATED LOGIC STOCK_AHIR) ---
+// --- HISTORY & TRANSAKSI (MENGGUNAKAN LOGIKA STOCK_AHIR) ---
 
 export const fetchHistory = async (): Promise<StockHistory[]> => {
     // Select stock_ahir
@@ -186,40 +263,32 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
     const history: StockHistory[] = [];
 
     (dataMasuk || []).forEach((m: any) => {
-        // STOCK AHIR = CURRENT STOCK
-        // PREVIOUS STOCK = STOCK AHIR - QTY MASUK
         const current = Number(m.stock_ahir);
         const qty = Number(m.qty_masuk);
-        
         history.push({
             id: m.id, itemId: m.part_number, partNumber: m.part_number, name: m.name,
             type: 'in', quantity: qty, 
-            previousStock: current - qty,
+            previousStock: current - qty, // Hitung mundur
             currentStock: current,
             price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
             timestamp: parseTimestamp(m.created_at),
             reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`,
-            resi: '-',
-            tempo: m.tempo || '-'
+            resi: '-', tempo: m.tempo || '-'
         });
     });
 
     (dataKeluar || []).forEach((k: any) => {
-        // STOCK AHIR = CURRENT STOCK
-        // PREVIOUS STOCK = STOCK AHIR + QTY KELUAR
         const current = Number(k.stock_ahir);
         const qty = Number(k.qty_keluar);
-
         history.push({
             id: k.id, itemId: k.part_number, partNumber: k.part_number, name: k.name,
             type: 'out', quantity: qty, 
-            previousStock: current + qty,
+            previousStock: current + qty, // Hitung mundur
             currentStock: current,
             price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
             timestamp: parseTimestamp(k.created_at),
             reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`,
-            resi: k.resi || '-',
-            tempo: k.tempo || '-'
+            resi: k.resi || '-', tempo: k.tempo || '-'
         });
     });
 
@@ -254,9 +323,7 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
 
     const mappedData: StockHistory[] = (data || []).map((item: any) => {
         const qty = type === 'in' ? Number(item.qty_masuk) : Number(item.qty_keluar);
-        const current = Number(item.stock_ahir); // Menggunakan stock_ahir sebagai current stock
-        
-        // Menghitung previous stock secara manual
+        const current = Number(item.stock_ahir); 
         const previous = type === 'in' ? (current - qty) : (current + qty);
 
         return {
@@ -267,8 +334,7 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
             price: Number(item.harga_satuan), totalPrice: Number(item.harga_total),
             timestamp: parseTimestamp(item.created_at),
             reason: type === 'in' ? `Restock (Via: ${item.ecommerce || '-'})` : `${item.customer || 'Customer'} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`,
-            resi: item.resi || '-',
-            tempo: item.tempo || '-'
+            resi: item.resi || '-', tempo: item.tempo || '-'
         };
     });
 
@@ -293,14 +359,11 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
         const qty = Number(m.qty_masuk);
         history.push({
             id: m.id, itemId: m.part_number, partNumber: m.part_number, name: m.name,
-            type: 'in', quantity: qty, 
-            previousStock: current - qty, 
-            currentStock: current,
+            type: 'in', quantity: qty, previousStock: current - qty, currentStock: current,
             price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
             timestamp: parseTimestamp(m.created_at),
             reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`,
-            resi: '-',
-            tempo: m.tempo || '-'
+            resi: '-', tempo: m.tempo || '-'
         });
     });
 
@@ -309,14 +372,11 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
         const qty = Number(k.qty_keluar);
         history.push({
             id: k.id, itemId: k.part_number, partNumber: k.part_number, name: k.name,
-            type: 'out', quantity: qty, 
-            previousStock: current + qty, 
-            currentStock: current,
+            type: 'out', quantity: qty, previousStock: current + qty, currentStock: current,
             price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
             timestamp: parseTimestamp(k.created_at),
             reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`,
-            resi: k.resi || '-',
-            tempo: k.tempo || '-'
+            resi: k.resi || '-', tempo: k.tempo || '-'
         });
     });
 
@@ -333,7 +393,7 @@ export const addBarangMasuk = async (data: BarangMasuk): Promise<boolean> => {
         tempo: data.tempo, ecommerce: data.suplier || data.ecommerce || 'Lainnya',
         part_number: data.partNumber, name: data.name, brand: data.brand, application: data.application,
         rak: data.rak, 
-        stock_ahir: data.stockAhir, // SIMPAN STOCK AKHIR
+        stock_ahir: data.stockAhir, // SIMPAN STOCK AHIR
         qty_masuk: data.qtyMasuk,
         harga_satuan: data.hargaSatuan, harga_total: data.hargaTotal
     }]);
@@ -347,7 +407,7 @@ export const addBarangKeluar = async (data: BarangKeluar): Promise<boolean> => {
         kode_toko: data.kodeToko, tempo: data.tempo, ecommerce: data.ecommerce,
         customer: data.customer, part_number: data.partNumber, name: data.name, brand: data.brand,
         application: data.application, rak: data.rak, 
-        stock_ahir: data.stockAhir, // SIMPAN STOCK AKHIR
+        stock_ahir: data.stockAhir, // SIMPAN STOCK AHIR
         qty_keluar: data.qtyKeluar,
         harga_satuan: data.hargaSatuan, harga_total: data.hargaTotal, resi: data.resi
     }]);
@@ -356,30 +416,24 @@ export const addBarangKeluar = async (data: BarangKeluar): Promise<boolean> => {
 };
 
 export const addHistoryLog = async (h: StockHistory): Promise<boolean> => {
-    // LOGIKA PENTING:
-    // Kita harus menghitung 'stockAhir' yang akan disimpan.
-    // h.previousStock adalah stok SEBELUM transaksi.
-    // h.quantity adalah jumlah transaksi.
-    
+    // Logika perhitungan Stock Ahir
     if (h.type === 'in') {
-        const finalStock = h.previousStock + h.quantity; // Stock Akhir = Stock Lama + Masuk
-        
+        const finalStock = h.previousStock + h.quantity; 
         return addBarangMasuk({
             tanggal: '', 
             tempo: 'AUTO', ecommerce: 'SYSTEM', partNumber: h.partNumber, name: h.name,
             brand: '-', application: '-', rak: '-', 
-            stockAhir: finalStock, // Ini akan sama dengan Quantity di tabel BASE
+            stockAhir: finalStock, 
             qtyMasuk: h.quantity,
             hargaSatuan: h.price, hargaTotal: h.totalPrice
         });
     } else {
-        const finalStock = h.previousStock - h.quantity; // Stock Akhir = Stock Lama - Keluar
-        
+        const finalStock = h.previousStock - h.quantity;
         return addBarangKeluar({
             tanggal: '', 
             kodeToko: 'SYS', tempo: 'AUTO', ecommerce: 'SYSTEM', customer: 'AUTO-LOG',
             partNumber: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-',
-            stockAhir: finalStock, // Ini akan sama dengan Quantity di tabel BASE
+            stockAhir: finalStock,
             qtyKeluar: h.quantity, hargaSatuan: h.price, hargaTotal: h.totalPrice, resi: '-'
         });
     }
