@@ -82,6 +82,19 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
   });
 };
 
+// --- INI FUNGSI YANG HILANG/ERROR SEBELUMNYA ---
+export const getItemById = async (id: string): Promise<InventoryItem | null> => {
+  const { data, error } = await supabase.from(TABLE_NAME).select('*').eq('id', id).single();
+  if (error || !data) return null;
+  const mapped = mapBaseItem(data);
+  const { data: costData } = await supabase.from('barang_masuk').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false }).limit(1).single();
+  if (costData) mapped.costPrice = Number(costData.harga_satuan) || 0;
+  const { data: sellData } = await supabase.from('barang_keluar').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false }).limit(1).single();
+  if (sellData) mapped.price = Number(sellData.harga_satuan) || 0;
+  return mapped;
+};
+// -----------------------------------------------
+
 export const fetchInventoryPaginated = async (page: number, limit: number, search: string, filter: string = 'all') => {
     let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' });
     if (search) { query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`); }
@@ -118,6 +131,24 @@ export const fetchInventoryStats = async () => {
     return { totalItems: all.length, totalStock, totalAsset };
 };
 
+export const fetchShopItems = async (page: number, limit: number, search: string, cat: string) => {
+    let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' }).gt('quantity', 0);
+    if (search) query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%`);
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+    const { data, error, count } = await query.range(from, to);
+    if (error) return { data: [], count: 0 };
+    const baseItems = (data || []).map(mapBaseItem);
+    if (baseItems.length > 0) {
+        const partNumbers = baseItems.map(i => i.partNumber).filter(Boolean);
+        const sellMap = await fetchLatestSellingPrices(partNumbers);
+        baseItems.forEach(item => {
+            if (sellMap[item.partNumber] !== undefined) item.price = sellMap[item.partNumber];
+        });
+    }
+    return { data: baseItems, count: count || 0 };
+};
+
 export const addInventory = async (item: InventoryFormData): Promise<string | null> => {
   const wibNow = getWIBISOString();
   const { data, error } = await supabase.from(TABLE_NAME).insert([{
@@ -133,7 +164,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
       await addBarangMasuk({
           created_at: wibNow,
           tempo: 'AUTO', 
-          ecommerce: 'Stok Awal', // Konsisten pakai ecommerce
+          ecommerce: 'Stok Awal', 
           partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
           rak: item.shelf, stockAhir: item.quantity, qtyMasuk: item.quantity,
           hargaSatuan: item.costPrice || 0, hargaTotal: (item.costPrice || 0) * item.quantity
@@ -142,7 +173,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   return data ? data.id : null;
 };
 
-// --- UPDATE INVENTORY (FIXED E-COMMERCE) ---
+// --- UPDATE INVENTORY ---
 export const updateInventory = async (
     item: InventoryItem, 
     transaction?: { type: 'in' | 'out', qty: number, ecommerce: string, resiTempo: string }
@@ -183,11 +214,10 @@ export const updateInventory = async (
       const sourceName = transaction.ecommerce || 'Manual Edit';
       
       if (transaction.type === 'in') {
-          // FIX: Gunakan properti 'ecommerce' secara eksplisit
           await addBarangMasuk({
               created_at: wibNow,
               tempo: transaction.resiTempo || '-', 
-              ecommerce: sourceName, // FIX: Kirim ke properti ecommerce
+              ecommerce: sourceName, 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
               rak: item.shelf, stockAhir: finalQty, qtyMasuk: txQty,
               hargaSatuan: item.costPrice || 0, hargaTotal: (item.costPrice || 0) * txQty
@@ -307,7 +337,7 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
-// --- INSERT FUNCTIONS (FIXED) ---
+// --- INSERT FUNCTIONS ---
 
 export const addBarangMasuk = async (data: any) => { 
     // Prioritaskan data.ecommerce, fallback ke data.suplier jika ada
@@ -373,4 +403,3 @@ export const fetchChatSessions = async (): Promise<ChatSession[]> => { const { d
 export const saveChatSession = async (s: ChatSession): Promise<boolean> => { const { error } = await supabase.from('chat_sessions').upsert([{ customer_id: s.customerId, customer_name: s.customerName, messages: s.messages, last_message: s.lastMessage, last_timestamp: s.lastTimestamp, unread_admin_count: s.unreadAdminCount, unread_user_count: s.unreadUserCount }]); return !error; };
 export const fetchPriceHistoryBySource = async (partNumber: string) => { const { data, error } = await supabase.from('barang_masuk').select('ecommerce, harga_satuan, created_at').eq('part_number', partNumber).order('created_at', { ascending: false }); if (error || !data) return []; const uniqueSources: Record<string, any> = {}; data.forEach((item: any) => { const sourceName = item.ecommerce || 'Unknown'; if (!uniqueSources[sourceName]) { uniqueSources[sourceName] = { source: sourceName, price: Number(item.harga_satuan), date: item.created_at ? new Date(item.created_at).toLocaleDateString('id-ID') : '-' }; } }); return Object.values(uniqueSources); };
 export const clearBarangKeluar = async (): Promise<boolean> => { const { error } = await supabase.from('barang_keluar').delete().neq('id', 0); if (error) { console.error("Gagal hapus barang keluar:", error); return false; } return true; };
-export const fetchShopItems = async (page: number, limit: number, search: string, cat: string) => { return fetchInventoryPaginated(page, limit, search, 'all'); };
