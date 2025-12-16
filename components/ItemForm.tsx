@@ -71,9 +71,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
         let success = false;
         
         if (isEditMode && initialData) {
-            // Mode Edit: Kirim data master + data transaksi
             const qtyAdj = Number(adjustmentQty);
-
             if (stockAdjustmentType !== 'none' && qtyAdj <= 0) {
                 setError(`Mohon isi jumlah stok yang valid (lebih dari 0).`);
                 setLoading(false);
@@ -87,10 +85,8 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
                 resiTempo: adjustmentResiTempo
             } : undefined;
 
-            // Memanggil updateInventory yang sudah diperbaiki logic-nya
             success = await updateInventory({ ...initialData, ...formData }, transactionData);
         } else {
-            // Mode Tambah Baru
             const id = await addInventory(formData);
             success = !!id;
         }
@@ -100,7 +96,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
             if (onSubmit) onSubmit(formData);
             onCancel(); 
         } else {
-            setError('Gagal menyimpan ke database. Koneksi mungkin terputus atau ID tidak ditemukan.');
+            setError('Gagal menyimpan. Pastikan koneksi aman dan data valid.');
         }
     } catch (err) {
         setError('Terjadi kesalahan sistem.');
@@ -135,12 +131,8 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
   return (
     <div className="bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
       <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-        <h2 className="text-xl font-bold text-gray-800">
-          {initialData ? 'Edit Barang & Stok' : 'Tambah Barang Baru'}
-        </h2>
-        <button type="button" onClick={onCancel} className="text-gray-400 hover:text-gray-600 transition-colors">
-          <X size={24} />
-        </button>
+        <h2 className="text-xl font-bold text-gray-800">{initialData ? 'Edit Barang & Stok' : 'Tambah Barang Baru'}</h2>
+        <button type="button" onClick={onCancel} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
       </div>
 
       <form onSubmit={handleSubmit} className="p-6 overflow-y-auto custom-scrollbar flex-1">
