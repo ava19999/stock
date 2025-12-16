@@ -2,9 +2,27 @@
 import { supabase } from '../lib/supabase';
 import { InventoryItem, InventoryFormData, StockHistory, BarangMasuk, BarangKeluar, Order, ChatSession } from '../types';
 
-const TABLE_NAME = 'base'; // Tabel data barang master
+const TABLE_NAME = 'base'; 
 
 const handleDbError = (op: string, err: any) => { console.error(`${op} Error:`, err); };
+
+// --- HELPER: WAKTU INDONESIA (WIB) ---
+const getWIBISOString = (): string => {
+    const now = new Date();
+    
+    // 1. Ambil waktu UTC murni (hapus offset lokal browser)
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    
+    // 2. Tambah 7 jam untuk menjadi WIB
+    const wibTime = new Date(utc + (7 * 3600000));
+    
+    // 3. Format manual ke String ISO (YYYY-MM-DDTHH:mm:ss.sss)
+    // Kita format manual agar browser tidak mengubahnya kembali ke UTC atau timezone lain
+    const pad = (n: number) => n < 10 ? '0' + n : n;
+    const pad3 = (n: number) => n < 10 ? '00' + n : (n < 100 ? '0' + n : n);
+    
+    return `${wibTime.getFullYear()}-${pad(wibTime.getMonth() + 1)}-${pad(wibTime.getDate())}T${pad(wibTime.getHours())}:${pad(wibTime.getMinutes())}:${pad(wibTime.getSeconds())}.${pad3(wibTime.getMilliseconds())}`;
+};
 
 const parseTimestamp = (dateString: string | null | undefined): number | null => {
     if (!dateString) return null; 
@@ -22,7 +40,7 @@ const mapBaseItem = (item: any): InventoryItem => ({
     quantity: Number(item.quantity) || 0,
     shelf: item.shelf || '',
     imageUrl: item.image_url || '',
-    // Prioritas: created_at, jika tidak ada baru date, lalu sekarang
+    // Gunakan created_at sebagai prioritas
     lastUpdated: item.created_at ? new Date(item.created_at).getTime() : (item.date ? new Date(item.date).getTime() : Date.now()),
     price: 0, 
     kingFanoPrice: 0,
@@ -147,7 +165,8 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   const { data, error } = await supabase.from(TABLE_NAME).insert([{
     part_number: item.partNumber, name: item.name, brand: item.brand, 
     application: item.application, quantity: item.quantity, shelf: item.shelf, 
-    image_url: item.imageUrl, created_at: new Date().toISOString() 
+    image_url: item.imageUrl, 
+    created_at: getWIBISOString() // PAKAI WIB
   }]).select().single();
   
   if (error) { handleDbError("Tambah Barang ke Base", error); return null; }
@@ -163,92 +182,82 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   return data ? data.id : null;
 };
 
-// --- UPDATE INVENTORY (LOGIC PERBAIKAN) ---
+// --- UPDATE INVENTORY (INSTANT RETURN & WIB DATE) ---
 export const updateInventory = async (
     item: InventoryItem, 
     transaction?: { type: 'in' | 'out', qty: number, ecommerce: string, resiTempo: string }
-): Promise<boolean> => {
+): Promise<InventoryItem | null> => {
   
-  // 1. Ambil stok TERBARU dari database untuk menghindari data stale
+  // 1. Ambil stok TERBARU
   const { data: currentDbItem, error: fetchError } = await supabase
-      .from(TABLE_NAME)
-      .select('quantity')
-      .eq('id', item.id)
-      .single();
+      .from(TABLE_NAME).select('quantity').eq('id', item.id).single();
 
   if (fetchError || !currentDbItem) {
-      console.error("Gagal mengambil data stok terbaru dari base:", fetchError);
-      return false;
+      console.error("Gagal ambil stok terbaru:", fetchError);
+      return null;
   }
 
-  // Gunakan quantity dari database, bukan dari form state
   let finalQty = Number(currentDbItem.quantity);
 
-  // 2. Hitung Final Quantity berdasarkan transaksi
+  // 2. Hitung Final Quantity
   if (transaction && transaction.qty > 0) {
       const txQty = Number(transaction.qty);
-      if (transaction.type === 'in') {
-          finalQty += txQty;
-      } else {
-          finalQty -= txQty;
-      }
+      if (transaction.type === 'in') finalQty += txQty;
+      else finalQty -= txQty;
   }
 
-  // 3. Update BASE Table dengan nilai baru dan tanggal baru
-  // Note: Gunakan created_at atau date tergantung struktur tabel base Anda. 
-  // Jika tabel base pakai 'created_at' untuk sorting, kita tidak ubah itu. 
-  // Tapi biasanya update pakai kolom 'date' atau sejenisnya. Di sini kita update field yang ada saja.
+  // 3. Update BASE Table (Gunakan created_at untuk update tanggal edit agar sinkron WIB)
+  const wibNow = getWIBISOString();
+  
   const { data: updatedData, error } = await supabase.from(TABLE_NAME).update({
     name: item.name, brand: item.brand, application: item.application,
-    shelf: item.shelf, 
-    quantity: finalQty, // UPDATE STOK DI SINI
-    image_url: item.imageUrl,
-    // Kita update tanggal edit jika ada kolom 'date', jika tidak ada, Supabase mungkin handle updated_at
-    // date: new Date().toISOString() 
+    shelf: item.shelf, quantity: finalQty, image_url: item.imageUrl,
+    created_at: wibNow, // UPDATE TANGGAL EDIT (WIB)
+    date: wibNow // Opsional: update kolom 'date' juga jika ada
   }).eq('id', item.id).select();
 
-  if (error) { 
+  if (error || !updatedData || updatedData.length === 0) { 
       handleDbError("Update Barang Base", error); 
-      return false; 
+      return null; 
   }
   
-  if (!updatedData || updatedData.length === 0) {
-      console.error("Update gagal: Tidak ada baris yang berubah.");
-      return false;
-  }
+  const baseUpdated = updatedData[0];
 
-  // 4. Catat Riwayat Transaksi (Log)
+  // 4. Catat Riwayat dengan Tanggal WIB
   if (transaction && transaction.qty > 0) {
       const txQty = Number(transaction.qty);
       
       if (transaction.type === 'in') {
           await addBarangMasuk({
-              tempo: transaction.resiTempo || '-', 
-              suplier: transaction.ecommerce || 'Manual Edit',
+              created_at: wibNow, // PAKAI WIB
+              tempo: transaction.resiTempo || '-', suplier: transaction.ecommerce || 'Manual Edit',
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
-              rak: item.shelf,
-              stockAhir: finalQty, 
-              qtyMasuk: txQty,
-              hargaSatuan: item.costPrice || 0, 
-              hargaTotal: (item.costPrice || 0) * txQty
+              rak: item.shelf, stockAhir: finalQty, qtyMasuk: txQty,
+              hargaSatuan: item.costPrice || 0, hargaTotal: (item.costPrice || 0) * txQty
           });
       } else {
           await addBarangKeluar({
-              kodeToko: 'MANUAL', tempo: 'AUTO',
-              ecommerce: transaction.ecommerce || 'Manual Edit',
-              customer: 'Adjustment',
-              partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
-              rak: item.shelf,
-              stockAhir: finalQty, 
-              qtyKeluar: txQty,
-              hargaSatuan: item.price || 0, 
-              hargaTotal: (item.price || 0) * txQty,
+              created_at: wibNow, // PAKAI WIB
+              kodeToko: 'MANUAL', tempo: 'AUTO', ecommerce: transaction.ecommerce || 'Manual Edit',
+              customer: 'Adjustment', partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
+              rak: item.shelf, stockAhir: finalQty, qtyKeluar: txQty,
+              hargaSatuan: item.price || 0, hargaTotal: (item.price || 0) * txQty,
               resi: transaction.resiTempo || '-'
           });
       }
   }
 
-  return true;
+  // 5. Return Complete Item Object (agar UI langsung update)
+  return {
+      ...item,
+      quantity: finalQty,
+      name: baseUpdated.name,
+      brand: baseUpdated.brand,
+      application: baseUpdated.application,
+      shelf: baseUpdated.shelf,
+      imageUrl: baseUpdated.image_url,
+      lastUpdated: new Date(wibNow).getTime()
+  };
 };
 
 export const deleteInventory = async (id: string): Promise<boolean> => {
@@ -258,63 +267,47 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
 };
 
 // --- HISTORY & TRANSAKSI ---
-
 export const fetchHistory = async (): Promise<StockHistory[]> => {
-    // FIX: Hanya select kolom yang valid. Hapus 'tanggal'.
-    const { data: dataMasuk } = await supabase.from('barang_masuk')
-        .select('*, stock_ahir, created_at') 
-        .order('created_at', { ascending: false, nullsFirst: false }).limit(100);
-        
-    const { data: dataKeluar } = await supabase.from('barang_keluar')
-        .select('*, stock_ahir, created_at') 
-        .order('created_at', { ascending: false, nullsFirst: false }).limit(100);
+    // Select created_at
+    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*, stock_ahir, created_at').order('created_at', { ascending: false }).limit(100);
+    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*, stock_ahir, created_at').order('created_at', { ascending: false }).limit(100);
 
     const history: StockHistory[] = [];
 
     (dataMasuk || []).forEach((m: any) => {
-        const current = Number(m.stock_ahir);
-        const qty = Number(m.qty_masuk);
         history.push({
             id: m.id, itemId: m.part_number, partNumber: m.part_number, name: m.name,
-            type: 'in', quantity: qty, previousStock: current - qty, currentStock: current,
-            price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
-            timestamp: parseTimestamp(m.created_at), // Gunakan created_at
+            type: 'in', quantity: Number(m.qty_masuk), previousStock: Number(m.stock_ahir) - Number(m.qty_masuk),
+            currentStock: Number(m.stock_ahir), price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
+            timestamp: parseTimestamp(m.created_at),
             reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`, resi: '-', tempo: m.tempo || '-'
         });
     });
 
     (dataKeluar || []).forEach((k: any) => {
-        const current = Number(k.stock_ahir);
-        const qty = Number(k.qty_keluar);
         history.push({
             id: k.id, itemId: k.part_number, partNumber: k.part_number, name: k.name,
-            type: 'out', quantity: qty, previousStock: current + qty, currentStock: current,
-            price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
-            timestamp: parseTimestamp(k.created_at), // Gunakan created_at
+            type: 'out', quantity: Number(k.qty_keluar), previousStock: Number(k.stock_ahir) + Number(k.qty_keluar),
+            currentStock: Number(k.stock_ahir), price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
+            timestamp: parseTimestamp(k.created_at),
             reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, resi: k.resi || '-', tempo: k.tempo || '-'
         });
     });
 
-    return history.sort((a, b) => {
-        const timeA = a.timestamp || 0;
-        const timeB = b.timestamp || 0;
-        return timeB - timeA;
-    });
+    return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
 export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number, limit: number, search: string) => {
     const table = type === 'in' ? 'barang_masuk' : 'barang_keluar';
-    // FIX: Hapus 'tanggal'
     let query = supabase.from(table).select('*, stock_ahir, created_at', { count: 'exact' });
-    
     if (search) {
         if (type === 'in') query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%`);
         else query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,customer.ilike.%${search}%,resi.ilike.%${search}%`);
     }
     const from = (page - 1) * limit; const to = from + limit - 1;
-    const { data, error, count } = await query.order('created_at', { ascending: false, nullsFirst: false }).range(from, to);
+    const { data, error, count } = await query.order('created_at', { ascending: false }).range(from, to);
 
-    if (error) { console.error(`Error fetching ${table}:`, error); return { data: [], count: 0 }; }
+    if (error) { return { data: [], count: 0 }; }
 
     const mappedData: StockHistory[] = (data || []).map((item: any) => {
         const qty = type === 'in' ? Number(item.qty_masuk) : Number(item.qty_keluar);
@@ -325,7 +318,7 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
             id: item.id, itemId: item.part_number, partNumber: item.part_number, name: item.name,
             type: type, quantity: qty, previousStock: previous, currentStock: current,
             price: Number(item.harga_satuan), totalPrice: Number(item.harga_total),
-            timestamp: parseTimestamp(item.created_at), // Gunakan created_at
+            timestamp: parseTimestamp(item.created_at),
             reason: type === 'in' ? `Restock (Via: ${item.ecommerce || '-'})` : `${item.customer || 'Customer'} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`,
             resi: item.resi || '-', tempo: item.tempo || '-'
         };
@@ -334,26 +327,23 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
 };
 
 export const fetchItemHistory = async (partNumber: string): Promise<StockHistory[]> => {
-    // FIX: Hapus 'tanggal'
-    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*, stock_ahir, created_at').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
-    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*, stock_ahir, created_at').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
+    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*, stock_ahir, created_at').eq('part_number', partNumber).order('created_at', { ascending: false });
+    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*, stock_ahir, created_at').eq('part_number', partNumber).order('created_at', { ascending: false });
     const history: StockHistory[] = [];
     (dataMasuk || []).forEach((m: any) => {
-        const current = Number(m.stock_ahir); const qty = Number(m.qty_masuk);
         history.push({
             id: m.id, itemId: m.part_number, partNumber: m.part_number, name: m.name,
-            type: 'in', quantity: qty, previousStock: current - qty, currentStock: current,
-            price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
+            type: 'in', quantity: Number(m.qty_masuk), previousStock: Number(m.stock_ahir) - Number(m.qty_masuk),
+            currentStock: Number(m.stock_ahir), price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
             timestamp: parseTimestamp(m.created_at),
             reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`, resi: '-', tempo: m.tempo || '-'
         });
     });
     (dataKeluar || []).forEach((k: any) => {
-        const current = Number(k.stock_ahir); const qty = Number(k.qty_keluar);
         history.push({
             id: k.id, itemId: k.part_number, partNumber: k.part_number, name: k.name,
-            type: 'out', quantity: qty, previousStock: current + qty, currentStock: current,
-            price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
+            type: 'out', quantity: Number(k.qty_keluar), previousStock: Number(k.stock_ahir) + Number(k.qty_keluar),
+            currentStock: Number(k.stock_ahir), price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
             timestamp: parseTimestamp(k.created_at),
             reason: `${k.customer} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, resi: k.resi || '-', tempo: k.tempo || '-'
         });
@@ -361,53 +351,12 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
-export const addBarangMasuk = async (data: BarangMasuk): Promise<boolean> => {
-    // FIX: Masukkan created_at secara otomatis hari ini
-    const { error } = await supabase.from('barang_masuk').insert([{
-        created_at: new Date().toISOString(), // OTOMATIS TANGGAL HARI INI
-        tempo: data.tempo, ecommerce: data.suplier || data.ecommerce || 'Lainnya',
-        part_number: data.partNumber, name: data.name, brand: data.brand, application: data.application,
-        rak: data.rak, stock_ahir: data.stockAhir, qty_masuk: data.qtyMasuk,
-        harga_satuan: data.hargaSatuan, harga_total: data.hargaTotal
-    }]);
-    if (error) { console.error("Gagal catat Barang Masuk:", error); return false; }
-    return true;
-};
+// UPDATE: Pakai helper getWIBISOString()
+export const addBarangMasuk = async (data: any) => { const { error } = await supabase.from('barang_masuk').insert([{ created_at: data.created_at || getWIBISOString(), tempo: data.tempo, ecommerce: data.ecommerce, part_number: data.partNumber, name: data.name, brand: data.brand, application: data.application, rak: data.rak, stock_ahir: data.stockAhir, qty_masuk: data.qtyMasuk, harga_satuan: data.hargaSatuan, harga_total: data.hargaTotal }]); return !error; };
+export const addBarangKeluar = async (data: any) => { const { error } = await supabase.from('barang_keluar').insert([{ created_at: data.created_at || getWIBISOString(), kode_toko: data.kodeToko, tempo: data.tempo, ecommerce: data.ecommerce, customer: data.customer, part_number: data.partNumber, name: data.name, brand: data.brand, application: data.application, rak: data.rak, stock_ahir: data.stockAhir, qty_keluar: data.qtyKeluar, harga_satuan: data.hargaSatuan, harga_total: data.hargaTotal, resi: data.resi }]); return !error; };
+export const addHistoryLog = async (h: StockHistory) => { const now = getWIBISOString(); if (h.type === 'in') return addBarangMasuk({ created_at: now, tempo: 'AUTO', ecommerce: 'SYSTEM', part_number: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-', stockAhir: h.previousStock + h.quantity, qtyMasuk: h.quantity, hargaSatuan: h.price, hargaTotal: h.totalPrice }); else return addBarangKeluar({ created_at: now, kodeToko: 'SYS', tempo: 'AUTO', ecommerce: 'SYSTEM', customer: 'AUTO-LOG', partNumber: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-', stockAhir: h.previousStock - h.quantity, qtyKeluar: h.quantity, hargaSatuan: h.price, hargaTotal: h.totalPrice, resi: '-' }); };
 
-export const addBarangKeluar = async (data: BarangKeluar): Promise<boolean> => {
-    // FIX: Masukkan created_at secara otomatis hari ini
-    const { error } = await supabase.from('barang_keluar').insert([{
-        created_at: new Date().toISOString(), // OTOMATIS TANGGAL HARI INI
-        kode_toko: data.kodeToko, tempo: data.tempo, ecommerce: data.ecommerce,
-        customer: data.customer, part_number: data.partNumber, name: data.name, brand: data.brand,
-        application: data.application, rak: data.rak, stock_ahir: data.stockAhir, qty_keluar: data.qtyKeluar,
-        harga_satuan: data.hargaSatuan, harga_total: data.hargaTotal, resi: data.resi
-    }]);
-    if (error) { console.error("Gagal catat Barang Keluar:", error); return false; }
-    return true;
-};
-
-export const addHistoryLog = async (h: StockHistory): Promise<boolean> => {
-    if (h.type === 'in') {
-        const finalStock = h.previousStock + h.quantity; 
-        return addBarangMasuk({
-            tanggal: '', // Ignore
-            tempo: 'AUTO', ecommerce: 'SYSTEM', partNumber: h.partNumber, name: h.name,
-            brand: '-', application: '-', rak: '-', stockAhir: finalStock, qtyMasuk: h.quantity,
-            hargaSatuan: h.price, hargaTotal: h.totalPrice
-        });
-    } else {
-        const finalStock = h.previousStock - h.quantity;
-        return addBarangKeluar({
-            tanggal: '', // Ignore
-            kodeToko: 'SYS', tempo: 'AUTO', ecommerce: 'SYSTEM', customer: 'AUTO-LOG',
-            partNumber: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-',
-            stockAhir: finalStock, qtyKeluar: h.quantity, hargaSatuan: h.price, hargaTotal: h.totalPrice, resi: '-'
-        });
-    }
-};
-
-// ... (sisanya tetap sama)
+// ... (fetchOrders dll tidak berubah)
 export const fetchOrders = async (): Promise<Order[]> => { const { data } = await supabase.from('orders').select('*').order('timestamp', { ascending: false }).limit(100); return (data || []).map((o: any) => ({ id: o.id, customerName: o.customer_name, items: o.items, totalAmount: Number(o.total_amount), status: o.status, timestamp: Number(o.timestamp) })); };
 export const saveOrder = async (order: Order): Promise<boolean> => { const { error } = await supabase.from('orders').insert([{ id: order.id, customer_name: order.customerName, items: order.items, total_amount: order.totalAmount, status: order.status, timestamp: order.timestamp }]); return !error; };
 export const updateOrderStatusService = async (id: string, status: string, timestamp?: number): Promise<boolean> => { const updateData: any = { status }; if (timestamp) { updateData.timestamp = timestamp; } const { error } = await supabase.from('orders').update(updateData).eq('id', id); return !error; };
