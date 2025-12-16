@@ -226,7 +226,7 @@ export const updateInventory = async (
               kodeToko: 'MANUAL', tempo: 'AUTO', 
               ecommerce: sourceName,
               // UPDATED: Menggunakan customer dari parameter jika ada
-              customer: transaction.customer, 
+              customer: transaction.customer || 'Adjustment', 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
               rak: item.shelf, stockAhir: finalQty, qtyKeluar: MqQty,
               hargaSatuan: item.price || 0, hargaTotal: (item.price || 0) * MqQty,
