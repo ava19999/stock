@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
 import { fetchPriceHistoryBySource, updateInventory, addInventory } from '../services/supabaseService';
-import { X, Save, History, Check, ShoppingBag, Calendar, Truck, AlertCircle } from 'lucide-react';
+import { X, Save, History, Check, ShoppingBag, Calendar, Truck, AlertCircle, User } from 'lucide-react';
 
 interface ItemFormProps {
   initialData?: InventoryItem;
@@ -30,6 +30,9 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
   const [adjustmentQty, setAdjustmentQty] = useState<string>('');
   const [adjustmentEcommerce, setAdjustmentEcommerce] = useState<string>('');
   const [adjustmentResiTempo, setAdjustmentResiTempo] = useState<string>('');
+  
+  // NEW: State untuk Penerima
+  const [adjustmentCustomer, setAdjustmentCustomer] = useState<string>('');
 
   useEffect(() => {
     if (initialData) {
@@ -76,11 +79,13 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
                 return;
             }
 
+            // UPDATED: Include 'customer' in transaction data
             const transactionData = (stockAdjustmentType !== 'none' && qtyAdj > 0) ? {
                 type: stockAdjustmentType === 'in' ? 'in' as const : 'out' as const,
                 qty: qtyAdj,
                 ecommerce: adjustmentEcommerce,
-                resiTempo: adjustmentResiTempo
+                resiTempo: adjustmentResiTempo,
+                customer: adjustmentCustomer // <-- Mengirim data penerima
             } : undefined;
 
             const updatedItem = await updateInventory({ ...initialData, ...formData }, transactionData);
@@ -167,6 +172,15 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
                                 <div><label className="block text-xs font-bold text-gray-700 mb-1">Jml {stockAdjustmentType === 'in' ? 'Masuk' : 'Keluar'}</label><input autoFocus required type="number" min="1" value={adjustmentQty} onChange={(e) => setAdjustmentQty(e.target.value)} className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-bold text-gray-800" placeholder="0" /></div>
                                 <div className="flex items-end pb-2"><p className="text-xs text-gray-500">Stok Akhir: <strong className={stockAdjustmentType==='in'?'text-green-600':'text-red-600'}>{projectedStock}</strong></p></div>
                             </div>
+
+                            {/* NEW: Input Penerima (Hanya muncul jika type = OUT) */}
+                            {stockAdjustmentType === 'out' && (
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1"><User size={10}/> Penerima</label>
+                                    <input type="text" value={adjustmentCustomer} onChange={(e) => setAdjustmentCustomer(e.target.value)} className="w-full px-3 py-2 border border-red-200 rounded-lg text-sm bg-white" placeholder="Nama Customer / Montir / Bengkel..." />
+                                </div>
+                            )}
+
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div><label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1"><ShoppingBag size={10}/> Sumber / E-Commerce</label><input type="text" value={adjustmentEcommerce} onChange={(e) => setAdjustmentEcommerce(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder={stockAdjustmentType === 'in' ? "Tokopedia" : "Shopee"} /></div>
                                 <div><label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1">{stockAdjustmentType === 'in' ? <Calendar size={10}/> : <Truck size={10}/>} {stockAdjustmentType === 'in' ? ' Tempo' : ' No. Resi'}</label><input type="text" value={adjustmentResiTempo} onChange={(e) => setAdjustmentResiTempo(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder={stockAdjustmentType === 'in' ? "Lunas" : "JP123..."} /></div>
