@@ -40,7 +40,7 @@ const mapBaseItem = (item: any): InventoryItem => ({
 
 // --- HELPER PRICES ---
 const fetchLatestCostPrices = async (partNumbers?: string[]) => {
-    let query = supabase.from('barang_masuk').select('part_number, harga_satuan').order('created_at', { ascending: false });
+    let query = supabase.from('barang_masuk').select('part_number, harga_satuan').order('created_at', { ascending: false, nullsFirst: false });
     if (partNumbers && partNumbers.length > 0) { query = query.in('part_number', partNumbers); }
     const { data, error } = await query;
     if (error || !data) return {};
@@ -54,7 +54,7 @@ const fetchLatestCostPrices = async (partNumbers?: string[]) => {
 };
 
 const fetchLatestSellingPrices = async (partNumbers?: string[]) => {
-    let query = supabase.from('barang_keluar').select('part_number, harga_satuan').order('created_at', { ascending: false });
+    let query = supabase.from('barang_keluar').select('part_number, harga_satuan').order('created_at', { ascending: false, nullsFirst: false });
     if (partNumbers && partNumbers.length > 0) { query = query.in('part_number', partNumbers); }
     const { data, error } = await query;
     if (error || !data) return {};
@@ -70,7 +70,7 @@ const fetchLatestSellingPrices = async (partNumbers?: string[]) => {
 // --- INVENTORY FUNCTIONS ---
 
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
-  const { data: baseData, error } = await supabase.from(TABLE_NAME).select('*').order('date', { ascending: false });
+  const { data: baseData, error } = await supabase.from(TABLE_NAME).select('*').order('date', { ascending: false, nullsFirst: false });
   if (error) { console.error(error); return []; }
   const costMap = await fetchLatestCostPrices();
   const sellMap = await fetchLatestSellingPrices();
@@ -86,9 +86,9 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
   const { data, error } = await supabase.from(TABLE_NAME).select('*').eq('id', id).single();
   if (error || !data) return null;
   const mapped = mapBaseItem(data);
-  const { data: costData } = await supabase.from('barang_masuk').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false }).limit(1).single();
+  const { data: costData } = await supabase.from('barang_masuk').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false, nullsFirst: false }).limit(1).single();
   if (costData) mapped.costPrice = Number(costData.harga_satuan) || 0;
-  const { data: sellData } = await supabase.from('barang_keluar').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false }).limit(1).single();
+  const { data: sellData } = await supabase.from('barang_keluar').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false, nullsFirst: false }).limit(1).single();
   if (sellData) mapped.price = Number(sellData.harga_satuan) || 0;
   return mapped;
 };
@@ -100,7 +100,7 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
     else if (filter === 'empty') { query = query.or('quantity.lte.0,quantity.is.null'); }
     const from = (page - 1) * limit;
     const to = from + limit - 1;
-    const { data, error, count } = await query.order('date', { ascending: false }).range(from, to);
+    const { data, error, count } = await query.order('date', { ascending: false, nullsFirst: false }).range(from, to);
     if (error) { console.error("Error fetching inventory:", error); return { data: [], count: 0 }; }
     const baseItems = (data || []).map(mapBaseItem);
     if (baseItems.length > 0) {
@@ -253,9 +253,9 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
 
 // --- HISTORY & TRANSAKSI ---
 export const fetchHistory = async (): Promise<StockHistory[]> => {
-    // UPDATED: Select all columns explicitly just to be safe, including created_at
-    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').order('created_at', { ascending: false }).limit(100);
-    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').order('created_at', { ascending: false }).limit(100);
+    // UPDATED: Added nullsFirst: false to keep null dates at the bottom
+    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
+    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
 
     const history: StockHistory[] = [];
 
@@ -282,10 +282,9 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
-// --- FIX APPLIED HERE ---
 export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number, limit: number, search: string) => {
     const table = type === 'in' ? 'barang_masuk' : 'barang_keluar';
-    // UPDATED: Menggunakan select('*') untuk memastikan created_at terambil dengan benar
+    // UPDATED: Select '*' to ensure created_at is fetched
     let query = supabase.from(table).select('*', { count: 'exact' });
     
     if (search) {
@@ -293,8 +292,9 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
         else query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,customer.ilike.%${search}%,resi.ilike.%${search}%`);
     }
     const from = (page - 1) * limit; const to = from + limit - 1;
-    // UPDATED: Sorting by created_at explicitly
-    const { data, error, count } = await query.order('created_at', { ascending: false }).range(from, to);
+    
+    // UPDATED: Added nullsFirst: false to put null dates at the end
+    const { data, error, count } = await query.order('created_at', { ascending: false, nullsFirst: false }).range(from, to);
 
     if (error) { return { data: [], count: 0 }; }
 
@@ -307,7 +307,6 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
             id: item.id, itemId: item.part_number, partNumber: item.part_number, name: item.name,
             type: type, quantity: qty, previousStock: previous, currentStock: current,
             price: Number(item.harga_satuan), totalPrice: Number(item.harga_total),
-            // UPDATED: Ensure created_at is captured. If null, try date, else null.
             timestamp: parseTimestamp(item.created_at || item.date), 
             reason: type === 'in' ? `Restock (Via: ${item.ecommerce || '-'})` : `${item.customer || 'Customer'} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`,
             resi: item.resi || '-', tempo: item.tempo || '-'
@@ -317,8 +316,9 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
 };
 
 export const fetchItemHistory = async (partNumber: string): Promise<StockHistory[]> => {
-    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').eq('part_number', partNumber).order('created_at', { ascending: false });
-    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').eq('part_number', partNumber).order('created_at', { ascending: false });
+    // UPDATED: Added nullsFirst: false
+    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
+    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
     const history: StockHistory[] = [];
     (dataMasuk || []).forEach((m: any) => {
         history.push({
