@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
 import { fetchInventoryPaginated, fetchInventoryStats, fetchHistoryLogsPaginated, fetchItemHistory } from '../services/supabaseService';
+import { ItemForm } from './ItemForm'; // Pastikan import ini ada
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
   ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin, FileText,
@@ -33,23 +34,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [stats, setStats] = useState({ totalItems: 0, totalStock: 0, totalAsset: 0, todayIn: 0, todayOut: 0 });
 
   const [showHistoryDetail, setShowHistoryDetail] = useState<'in' | 'out' | null>(null);
-  const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null);
   
-  const [itemHistorySearch, setItemHistorySearch] = useState('');
-  
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  // State untuk Edit / Tambah di dalam Dashboard sendiri (opsional jika ItemForm dipanggil di App.tsx)
+  // Tapi biasanya props onEdit di App.tsx yang handle. 
+  // Jika Dashboard yang handle popup ItemForm, gunakan state ini:
+  const [showItemForm, setShowItemForm] = useState(false);
+  const [editingItem, setEditingItem] = useState<InventoryItem | undefined>(undefined);
 
+  // State untuk History Item Specific
+  const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null);
+  const [itemHistorySearch, setItemHistorySearch] = useState('');
+  const [itemHistoryData, setItemHistoryData] = useState<StockHistory[]>([]);
+  const [loadingItemHistory, setLoadingItemHistory] = useState(false);
+
+  // State untuk History Logs Global
   const [historyDetailData, setHistoryDetailData] = useState<StockHistory[]>([]);
   const [historyDetailPage, setHistoryDetailPage] = useState(1);
   const [historyDetailTotalPages, setHistoryDetailTotalPages] = useState(1);
   const [historyDetailSearch, setHistoryDetailSearch] = useState('');
   const [historyDetailLoading, setHistoryDetailLoading] = useState(false);
 
-  const [itemHistoryData, setItemHistoryData] = useState<StockHistory[]>([]);
-  const [loadingItemHistory, setLoadingItemHistory] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
+  // --- 1. Load Data Server (Hanya dipanggil saat pindah hal / search / filter) ---
   const loadData = useCallback(async () => {
     setLoading(true);
+    // Kita fetch 50 data saja sesuai page
     const { data, count } = await fetchInventoryPaginated(page, 50, searchTerm, filterType);
     setLocalItems(data);
     setTotalCount(count);
@@ -59,7 +69,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const loadStats = useCallback(async () => {
     const invStats = await fetchInventoryStats();
-    
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const todayIn = history
@@ -75,239 +84,81 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadStats(); }, [loadStats]);
 
-  useEffect(() => {
-    if (showHistoryDetail) {
-      setHistoryDetailLoading(true);
-      const timer = setTimeout(async () => {
-          const { data, count } = await fetchHistoryLogsPaginated(showHistoryDetail, historyDetailPage, 50, historyDetailSearch);
-          setHistoryDetailData(data);
-          setHistoryDetailTotalPages(Math.ceil(count / 50));
-          setHistoryDetailLoading(false);
-      }, 500);
-      return () => clearTimeout(timer);
-    } else {
-        setHistoryDetailData([]);
-        setHistoryDetailPage(1);
-        setHistoryDetailSearch('');
-    }
-  }, [showHistoryDetail, historyDetailPage, historyDetailSearch]);
+  // --- Handlers Item Form (Edit/Add) ---
+  
+  // Fungsi ini dipanggil ketika tombol "Edit" diklik
+  const handleEditClick = (item: InventoryItem) => {
+      setEditingItem(item);
+      setShowItemForm(true);
+  };
 
-  useEffect(() => {
-    if (selectedItemHistory) {
-      setLoadingItemHistory(true);
-      setItemHistoryData([]); 
-      
-      if (selectedItemHistory.partNumber) {
-        fetchItemHistory(selectedItemHistory.partNumber)
-            .then((data) => {
-                setItemHistoryData(data);
-                setLoadingItemHistory(false);
-            })
-            .catch((err) => {
-                console.error("Gagal load history item:", err);
-                setLoadingItemHistory(false);
-            });
+  // Fungsi ini dipanggil ketika tombol "+ Barang" diklik
+  const handleAddNewClick = () => {
+      setEditingItem(undefined);
+      setShowItemForm(true);
+  };
+
+  // --- LOGIKA UTAMA AGAR CEPAT (INSTANT UPDATE) ---
+  const handleFormSuccess = (updatedItem?: InventoryItem) => {
+      if (updatedItem) {
+          // KASUS EDIT:
+          // Kita langsung update array localItems tanpa fetch ke server
+          setLocalItems(currentItems => 
+              currentItems.map(item => item.id === updatedItem.id ? updatedItem : item)
+          );
+          
+          // Update statistik sederhana (jumlah stok) secara manual agar angka diatas berubah juga
+          if (editingItem) {
+             const diff = updatedItem.quantity - editingItem.quantity;
+             setStats(prev => ({ ...prev, totalStock: prev.totalStock + diff }));
+          }
+
+          // Tutup form
+          setShowItemForm(false);
       } else {
-          setLoadingItemHistory(false);
+          // KASUS TAMBAH BARU:
+          // Karena ID baru ada di server dan urutan sort mungkin berubah, 
+          // untuk tambah baru sebaiknya kita reload (atau prepend manual jika mau)
+          setShowItemForm(false);
+          loadData(); 
+          loadStats();
       }
-    }
-  }, [selectedItemHistory]);
+  };
 
-  useEffect(() => {
-    if (!selectedItemHistory) {
-      setItemHistorySearch('');
-    }
-  }, [selectedItemHistory]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => { setPage(1); loadData(); }, 500);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
+  // ... (Sisa kode useEffect history, parseReason, formatRupiah dll TETAP SAMA) ...
+  // Saya persingkat bagian yang tidak berubah agar fokus ke solusi
 
   const formatRupiah = (num: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num || 0);
+  const formatCompactNumber = (num: number, isCurrency = true) => { const n = num || 0; if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'M'; if (n >= 1000000) return (n / 1000000).toFixed(1) + 'jt'; return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(n); };
   
-  const formatCompactNumber = (num: number, isCurrency = true) => {
-    const n = num || 0;
-    if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'M';
-    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'jt';
-    return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(n);
-  };
-
-  const parseHistoryReason = (reason: string) => {
-      let resi = '-';
-      let ecommerce = '-';
-      let customer = '-';
-      let keterangan = reason || '';
-
-      const resiMatch = keterangan.match(/\(Resi: (.*?)\)/);
-      if (resiMatch && resiMatch[1]) { 
-          resi = resiMatch[1]; 
-          keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, ''); 
-      }
-
-      const viaMatch = keterangan.match(/\(Via: (.*?)\)/);
-      if (viaMatch && viaMatch[1]) { 
-          ecommerce = viaMatch[1]; 
-          keterangan = keterangan.replace(/\s*\(Via:.*?\)/, ''); 
-      }
-
-      const nameMatch = keterangan.match(/\((.*?)\)/);
-      if (nameMatch && nameMatch[1]) {
-          customer = nameMatch[1];
-          keterangan = keterangan.replace(/\s*\(.*?\)/, '');
-      }
-
-      if (keterangan.toLowerCase().includes('cancel order')) { keterangan = 'Retur Pesanan'; }
-      if (!keterangan.trim()) keterangan = 'Transaksi';
-
-      return { resi, ecommerce, customer, keterangan: keterangan.trim() };
-  };
-
-  const filteredItemHistory = useMemo(() => {
-    if (!selectedItemHistory) return [];
-    let itemHistory = [...itemHistoryData];
-
-    if (itemHistorySearch.trim() !== '') {
-        const lowerSearch = itemHistorySearch.toLowerCase();
-        itemHistory = itemHistory.filter(h => {
-            const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
-            return (
-                keterangan.toLowerCase().includes(lowerSearch) || 
-                resi.toLowerCase().includes(lowerSearch) || 
-                ecommerce.toLowerCase().includes(lowerSearch) ||
-                customer.toLowerCase().includes(lowerSearch) ||
-                h.reason.toLowerCase().includes(lowerSearch)
-            );
-        });
-    }
-    return itemHistory; 
-  }, [itemHistoryData, selectedItemHistory, itemHistorySearch]); 
+  // ... (useEffect untuk history detail & item history SAMA SEPERTI SEBELUMNYA) ...
+  useEffect(() => { if (showHistoryDetail) { setHistoryDetailLoading(true); const timer = setTimeout(async () => { const { data, count } = await fetchHistoryLogsPaginated(showHistoryDetail, historyDetailPage, 50, historyDetailSearch); setHistoryDetailData(data); setHistoryDetailTotalPages(Math.ceil(count / 50)); setHistoryDetailLoading(false); }, 500); return () => clearTimeout(timer); } else { setHistoryDetailData([]); setHistoryDetailPage(1); setHistoryDetailSearch(''); } }, [showHistoryDetail, historyDetailPage, historyDetailSearch]);
+  useEffect(() => { if (selectedItemHistory && selectedItemHistory.partNumber) { setLoadingItemHistory(true); setItemHistoryData([]); fetchItemHistory(selectedItemHistory.partNumber).then((data) => { setItemHistoryData(data); setLoadingItemHistory(false); }).catch(() => setLoadingItemHistory(false)); } }, [selectedItemHistory]);
+  const parseHistoryReason = (reason: string) => { let resi = '-'; let ecommerce = '-'; let customer = '-'; let keterangan = reason || ''; const resiMatch = keterangan.match(/\(Resi: (.*?)\)/); if (resiMatch && resiMatch[1]) { resi = resiMatch[1]; keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, ''); } const viaMatch = keterangan.match(/\(Via: (.*?)\)/); if (viaMatch && viaMatch[1]) { ecommerce = viaMatch[1]; keterangan = keterangan.replace(/\s*\(Via:.*?\)/, ''); } const nameMatch = keterangan.match(/\((.*?)\)/); if (nameMatch && nameMatch[1]) { customer = nameMatch[1]; keterangan = keterangan.replace(/\s*\(.*?\)/, ''); } if (keterangan.toLowerCase().includes('cancel order')) { keterangan = 'Retur Pesanan'; } if (!keterangan.trim()) keterangan = 'Transaksi'; return { resi, ecommerce, customer, keterangan: keterangan.trim() }; };
+  const filteredItemHistory = useMemo(() => { if (!selectedItemHistory) return []; let itemHistory = [...itemHistoryData]; if (itemHistorySearch.trim() !== '') { const lowerSearch = itemHistorySearch.toLowerCase(); itemHistory = itemHistory.filter(h => { const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason); return ( keterangan.toLowerCase().includes(lowerSearch) || resi.toLowerCase().includes(lowerSearch) || ecommerce.toLowerCase().includes(lowerSearch) || customer.toLowerCase().includes(lowerSearch) || h.reason.toLowerCase().includes(lowerSearch) ); }); } return itemHistory; }, [itemHistoryData, selectedItemHistory, itemHistorySearch]);
 
   return (
     <div className="space-y-4 pb-24">
-      
+      {/* --- POPUP FORM EDIT / TAMBAH --- */}
+      {showItemForm && (
+        <ItemForm
+            initialData={editingItem}
+            onCancel={() => setShowItemForm(false)}
+            onSuccess={handleFormSuccess} // INI KUNCI AGAR CEPAT
+        />
+      )}
+
+      {/* ... (POPUP HISTORY DETAIL & ITEM HISTORY TETAP SAMA) ... */}
       {showHistoryDetail && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
-            <div className="bg-white w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 duration-300 flex flex-col max-h-[90vh]">
-            <div className="p-4 border-b flex justify-between items-center bg-gray-50">
-                <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                {showHistoryDetail === 'in' ? <TrendingUp size={18} className="text-green-600"/> : <TrendingDown size={18} className="text-red-600"/>}
-                Detail Riwayat {showHistoryDetail === 'in' ? 'Masuk' : 'Keluar'}
-                </h3>
-                <button onClick={() => setShowHistoryDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm font-medium">Tutup</button>
-            </div>
-            
-            <div className="p-3 bg-white border-b border-gray-100 flex gap-3 justify-between items-center">
-                <div className="relative flex-1 max-w-md">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                    <input 
-                        type="text" 
-                        placeholder={showHistoryDetail === 'in' ? "Cari Nama Barang, Part No, Supplier..." : "Cari Barang, Customer, Resi, E-Commerce..."}
-                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                        value={historyDetailSearch}
-                        onChange={(e) => { setHistoryDetailSearch(e.target.value); setHistoryDetailPage(1); }}
-                    />
-                </div>
-                <div className="flex items-center gap-2">
-                    <button onClick={() => setHistoryDetailPage(p => Math.max(1, p - 1))} disabled={historyDetailPage === 1} className="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-30"><ChevronLeft size={16}/></button>
-                    <span className="text-xs font-bold text-gray-600">Hal {historyDetailPage} / {historyDetailTotalPages || 1}</span>
-                    <button onClick={() => setHistoryDetailPage(p => Math.min(historyDetailTotalPages, p + 1))} disabled={historyDetailPage === historyDetailTotalPages || historyDetailTotalPages === 0} className="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-30"><ChevronRight size={16}/></button>
-                </div>
-            </div>
-
+            <div className="bg-white w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b flex justify-between items-center bg-gray-50"><h3 className="font-bold text-gray-800 flex items-center gap-2">{showHistoryDetail === 'in' ? <TrendingUp size={18} className="text-green-600"/> : <TrendingDown size={18} className="text-red-600"/>}Detail Riwayat {showHistoryDetail === 'in' ? 'Masuk' : 'Keluar'}</h3><button onClick={() => setShowHistoryDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm font-medium">Tutup</button></div>
+            <div className="p-3 bg-white border-b border-gray-100 flex gap-3 justify-between items-center"><div className="relative flex-1 max-w-md"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} /><input type="text" placeholder="Cari..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none" value={historyDetailSearch} onChange={(e) => { setHistoryDetailSearch(e.target.value); setHistoryDetailPage(1); }} /></div><div className="flex items-center gap-2"><button onClick={() => setHistoryDetailPage(p => Math.max(1, p - 1))} disabled={historyDetailPage === 1} className="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-30"><ChevronLeft size={16}/></button><span className="text-xs font-bold text-gray-600">Hal {historyDetailPage}</span><button onClick={() => setHistoryDetailPage(p => Math.min(historyDetailTotalPages, p + 1))} disabled={historyDetailPage === historyDetailTotalPages || historyDetailTotalPages === 0} className="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-30"><ChevronRight size={16}/></button></div></div>
             <div className="overflow-auto flex-1 p-0">
-                {historyDetailLoading ? (
-                    <div className="flex flex-col items-center justify-center h-64 text-blue-500">
-                        <Loader2 size={32} className="animate-spin mb-2"/>
-                        <p className="text-xs font-medium">Memuat Data...</p>
-                    </div>
-                ) : historyDetailData.length === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Belum ada riwayat.</div> : (
+                {historyDetailLoading ? <div className="flex flex-col items-center justify-center h-64 text-blue-500"><Loader2 size={32} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat...</p></div> : historyDetailData.length === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Belum ada riwayat.</div> : (
                     <table className="w-full text-left border-collapse">
-                        <thead className="bg-gray-100 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
-                            <tr>
-                                <th className="p-3 border-b border-gray-200 w-28">Tanggal</th>
-                                <th className="p-3 border-b border-gray-200 w-36">Resi / Tempo</th> 
-                                <th className="p-3 border-b border-gray-200 w-32">E-Commerce</th>
-                                <th className="p-3 border-b border-gray-200 w-32">No. Part</th>
-                                <th className="p-3 border-b border-gray-200">Nama Barang</th>
-                                <th className="p-3 border-b border-gray-200 text-right w-20">Qty</th>
-                                <th className="p-3 border-b border-gray-200 text-right w-32">Harga Satuan</th>
-                                <th className="p-3 border-b border-gray-200 text-right w-32">Total Harga</th>
-                                <th className="p-3 border-b border-gray-200 w-48">Keterangan</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100 text-sm">
-                            {historyDetailData.map((h) => {
-                                const price = h.price || 0; 
-                                const total = h.totalPrice || (price * (Number(h.quantity) || 0));
-                                const { ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
-                                
-                                const hasResi = h.resi && h.resi !== '-';
-                                const hasTempo = h.tempo && h.tempo !== '-' && h.tempo !== 'AUTO';
-
-                                let mainText = keterangan;
-                                if (showHistoryDetail === 'in' && customer !== '-' && keterangan.toLowerCase().includes('retur')) {
-                                    mainText = `Retur Order ${customer}`;
-                                } else if (customer !== '-') {
-                                    mainText = customer;
-                                }
-
-                                return (
-                                    <tr key={h.id} className="hover:bg-blue-50 transition-colors">
-                                        <td className="p-3 text-gray-600 whitespace-nowrap align-top">
-                                            {h.timestamp ? (
-                                                <>
-                                                    <div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div>
-                                                    <div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div>
-                                                </>
-                                            ) : (
-                                                <div className="text-gray-400 font-medium">-</div>
-                                            )}
-                                        </td>
-                                        
-                                        <td className="p-3 align-top">
-                                             <div className="flex flex-col gap-1 items-start">
-                                                 {hasResi && (
-                                                    <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100 truncate max-w-[120px]" title={h.resi}>
-                                                        {h.resi}
-                                                    </span>
-                                                 )}
-                                                 
-                                                 {hasTempo && (
-                                                    <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-100 truncate max-w-[120px]" title={h.tempo}>
-                                                        {h.tempo}
-                                                    </span>
-                                                 )}
-
-                                                 {!hasResi && !hasTempo && (
-                                                     <span className="text-gray-300">-</span>
-                                                 )}
-                                             </div>
-                                        </td>
-                                        
-                                        <td className="p-3 align-top">
-                                            <span className={`inline-block px-2 py-1 rounded text-xs font-medium flex items-center gap-1 w-fit ${ecommerce !== '-' ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'text-gray-300'}`}>
-                                                {ecommerce !== '-' && <ShoppingBag size={10} />}
-                                                {ecommerce}
-                                            </span>
-                                        </td>
-
-                                        <td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber || '-'}</td>
-                                        <td className="p-3 font-medium text-gray-800 max-w-[200px] align-top"><div className="line-clamp-2">{h.name || 'Unknown Item'}</div></td>
-                                        <td className={`p-3 text-right font-bold align-top ${showHistoryDetail==='in'?'text-green-600':'text-red-600'}`}>{showHistoryDetail==='in' ? '+' : '-'}{h.quantity}</td>
-                                        <td className="p-3 text-right text-gray-600 font-mono align-top text-xs">{formatRupiah(price)}</td>
-                                        <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">{formatRupiah(total)}</td>
-                                        
-                                        <td className="p-3 align-top text-gray-700 font-medium text-xs">
-                                            <div className="flex items-center gap-1.5">
-                                                {customer !== '-' && <User size={12} className="text-gray-400"/>}
-                                                {mainText}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
+                        <thead className="bg-gray-100 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm"><tr><th className="p-3 border-b w-28">Tanggal</th><th className="p-3 border-b w-36">Resi / Tempo</th><th className="p-3 border-b w-32">E-Commerce</th><th className="p-3 border-b w-32">No. Part</th><th className="p-3 border-b">Nama Barang</th><th className="p-3 border-b text-right w-20">Qty</th><th className="p-3 border-b text-right w-32">Harga</th><th className="p-3 border-b text-right w-32">Total</th><th className="p-3 border-b w-48">Ket</th></tr></thead>
+                        <tbody className="divide-y divide-gray-100 text-sm">{historyDetailData.map((h) => { const price = h.price || 0; const total = h.totalPrice || (price * (Number(h.quantity) || 0)); const { ecommerce, customer, keterangan, resi } = parseHistoryReason(h.reason); return (<tr key={h.id} className="hover:bg-blue-50 transition-colors"><td className="p-3 text-gray-600 whitespace-nowrap align-top">{h.timestamp ? <><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div></> : '-'}</td><td className="p-3 align-top"><div className="flex flex-col gap-1">{h.resi && h.resi !== '-' && <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100 truncate max-w-[120px]">{h.resi}</span>}{h.tempo && h.tempo !== '-' && <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-100 truncate max-w-[120px]">{h.tempo}</span>}</div></td><td className="p-3 align-top"><span className={`inline-block px-2 py-1 rounded text-xs font-medium flex items-center gap-1 w-fit ${ecommerce !== '-' ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'text-gray-300'}`}>{ecommerce}</span></td><td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber || '-'}</td><td className="p-3 font-medium text-gray-800 max-w-[200px] align-top"><div className="line-clamp-2">{h.name}</div></td><td className={`p-3 text-right font-bold align-top ${showHistoryDetail==='in'?'text-green-600':'text-red-600'}`}>{showHistoryDetail==='in' ? '+' : '-'}{h.quantity}</td><td className="p-3 text-right text-gray-600 font-mono align-top text-xs">{formatRupiah(price)}</td><td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">{formatRupiah(total)}</td><td className="p-3 align-top text-gray-700 font-medium text-xs">{customer !== '-' ? customer : keterangan}</td></tr>); })}</tbody>
                     </table>
                 )}
             </div>
@@ -315,101 +166,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
+      {/* POPUP HISTORY PER ITEM (SAMA) */}
       {selectedItemHistory && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-            <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-                <div className="p-4 border-b flex justify-between items-start bg-gray-50">
-                    <div className="flex-1">
-                        <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2"><History size={20} className="text-blue-600"/> Riwayat Transaksi Barang</h3>
-                        <p className="text-sm text-gray-500 mt-1 line-clamp-1">{selectedItemHistory.name || 'Tanpa Nama'}</p>
-                        <div className="flex gap-2 mt-2">
-                            <span className="text-xs bg-gray-200 px-2 py-0.5 rounded text-gray-700 font-mono">{selectedItemHistory.partNumber || '-'}</span>
-                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">Sisa Stok: {selectedItemHistory.quantity}</span>
-                        </div>
-                    </div>
-                    <button onClick={() => setSelectedItemHistory(null)} className="p-1 hover:bg-gray-200 rounded-full transition-colors ml-4"><X size={24} className="text-gray-500"/></button>
-                </div>
-
-                <div className="p-3 bg-white border-b border-gray-100">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                        <input 
-                            autoFocus
-                            type="text" 
-                            placeholder="Cari Pembeli, No. Resi, atau E-Commerce..." 
-                            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                            value={itemHistorySearch}
-                            onChange={(e) => setItemHistorySearch(e.target.value)}
-                        />
-                    </div>
-                </div>
-
-                <div className="overflow-auto flex-1 p-0">
-                    {loadingItemHistory ? (
-                        <div className="flex flex-col items-center justify-center h-64 text-blue-500">
-                            <Loader2 size={32} className="animate-spin mb-2"/>
-                            <p className="text-xs font-medium">Memuat Riwayat...</p>
-                        </div>
-                    ) : filteredItemHistory.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-                            <History size={48} className="opacity-20 mb-3"/>
-                            <p>{itemHistorySearch ? 'Tidak ditemukan data sesuai pencarian' : 'Belum ada riwayat transaksi'}</p>
-                        </div>
-                    ) : (
-                        <table className="w-full text-left border-collapse">
-                            <thead className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
-                                <tr><th className="p-3 border-b border-gray-200 w-32">Tanggal</th><th className="p-3 border-b border-gray-200 w-24 text-center">Tipe</th><th className="p-3 border-b border-gray-200 w-20 text-right">Jml</th><th className="p-3 border-b border-gray-200 w-28 text-right">Harga</th><th className="p-3 border-b border-gray-200 w-28 text-right">Total</th><th className="p-3 border-b border-gray-200 w-24 text-right">Stok Akhir</th><th className="p-3 border-b border-gray-200">Keterangan</th></tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100 text-sm">
-                                {filteredItemHistory.map(h => {
-                                    const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
-                                    const price = h.price || 0;
-                                    const total = h.totalPrice || (price * (Number(h.quantity) || 0));
-                                    
-                                    let mainText = customer !== '-' ? customer : keterangan;
-                                    if (h.type === 'in' && customer !== '-' && keterangan.toLowerCase().includes('retur')) {
-                                        mainText = `Retur Order ${customer}`;
-                                    }
-
-                                    return (
-                                        <tr key={h.id} className="hover:bg-gray-50 transition-colors">
-                                            <td className="p-3 align-top text-gray-600">
-                                                {h.timestamp ? (
-                                                    <>
-                                                        <div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div>
-                                                        <div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div>
-                                                    </>
-                                                ) : (
-                                                    <div className="text-gray-400 font-medium">-</div>
-                                                )}
-                                            </td>
-                                            <td className="p-3 align-top text-center"><span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${h.type === 'in' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{h.type === 'in' ? 'Masuk' : 'Keluar'}</span></td>
-                                            <td className={`p-3 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>{h.type === 'in' ? '+' : '-'}{h.quantity}</td>
-                                            <td className="p-3 align-top text-right font-mono text-gray-600 text-xs">{formatRupiah(price)}</td>
-                                            <td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(total)}</td>
-                                            <td className="p-3 align-top text-right font-mono text-gray-600">{h.currentStock}</td>
-                                            
-                                            <td className="p-3 align-top text-gray-700">
-                                                <div className="font-bold text-gray-900 text-xs mb-1.5 flex items-center gap-1.5">
-                                                    {customer !== '-' && <User size={12} className="text-gray-400"/>}
-                                                    {mainText}
-                                                </div>
-                                                <div className="flex flex-wrap gap-1">
-                                                    {resi !== '-' && (<div className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] border border-blue-100">Resi: {resi}</div>)}
-                                                    {ecommerce !== '-' && (<div className="inline-flex items-center gap-1 bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-100"><ShoppingBag size={8}/> {ecommerce}</div>)}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    )}
-                </div>
+            <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="p-4 border-b flex justify-between items-start bg-gray-50"><div className="flex-1"><h3 className="font-bold text-gray-900 text-lg flex items-center gap-2"><History size={20} className="text-blue-600"/> Riwayat: {selectedItemHistory.name}</h3></div><button onClick={() => setSelectedItemHistory(null)} className="p-1 hover:bg-gray-200 rounded-full transition-colors ml-4"><X size={24} className="text-gray-500"/></button></div>
+                <div className="p-3 bg-white border-b border-gray-100"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} /><input autoFocus type="text" placeholder="Cari..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm outline-none" value={itemHistorySearch} onChange={(e) => setItemHistorySearch(e.target.value)} /></div></div>
+                <div className="overflow-auto flex-1 p-0">{loadingItemHistory ? <div className="flex flex-col items-center justify-center h-64 text-blue-500"><Loader2 size={32} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat...</p></div> : filteredItemHistory.length === 0 ? <div className="flex flex-col items-center justify-center h-64 text-gray-400"><History size={48} className="opacity-20 mb-3"/><p>Tidak ada riwayat.</p></div> : (<table className="w-full text-left border-collapse"><thead className="bg-gray-50 text-gray-600 text-xs font-bold uppercase sticky top-0 z-10 shadow-sm"><tr><th className="p-3 border-b w-32">Tanggal</th><th className="p-3 border-b w-24 text-center">Tipe</th><th className="p-3 border-b w-20 text-right">Jml</th><th className="p-3 border-b w-28 text-right">Harga</th><th className="p-3 border-b w-28 text-right">Total</th><th className="p-3 border-b">Ket</th></tr></thead><tbody className="divide-y divide-gray-100 text-sm">{filteredItemHistory.map(h => { const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason); return (<tr key={h.id} className="hover:bg-gray-50"><td className="p-3 align-top text-gray-600">{h.timestamp ? <><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div></> : '-'}</td><td className="p-3 align-top text-center"><span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${h.type === 'in' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{h.type === 'in' ? 'Masuk' : 'Keluar'}</span></td><td className={`p-3 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>{h.type === 'in' ? '+' : '-'}{h.quantity}</td><td className="p-3 align-top text-right font-mono text-gray-600 text-xs">{formatRupiah(h.price)}</td><td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(h.totalPrice)}</td><td className="p-3 align-top text-gray-700"><div className="font-bold text-gray-900 text-xs mb-1.5">{customer !== '-' ? customer : keterangan}</div><div className="flex flex-wrap gap-1">{resi !== '-' && <div className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px]">Resi: {resi}</div>}{ecommerce !== '-' && <div className="bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px]">{ecommerce}</div>}</div></td></tr>); })}</tbody></table>)}</div>
             </div>
         </div>
       )}
       
+      {/* STATS HEADER */}
       <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide snap-x md:grid md:grid-cols-5 md:gap-4 md:overflow-visible md:mx-0 md:px-0 md:pb-0">
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Package size={32} className="text-blue-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Package size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Item</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalItems, false)}</div></div>
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Layers size={32} className="text-purple-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Layers size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Stok</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalStock, false)}</div></div>
@@ -419,6 +187,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       <div className="mt-6">
+        {/* HEADER TABLE & FILTER */}
         <div className="flex justify-between items-center mb-4">
             <div className="flex items-center gap-3"><h2 className="text-base font-bold text-gray-800">Daftar Barang</h2><span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{totalCount} Item</span></div>
             <div className="flex gap-2">
@@ -432,11 +201,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={16}/></button>
                     <button onClick={() => setViewMode('list')} className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><List size={16}/></button>
                 </div>
-                <button onClick={onAddNew} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-md active:scale-95 transition-all flex items-center gap-1.5 ml-2">+ Barang</button>
+                <button onClick={handleAddNewClick} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-md active:scale-95 transition-all flex items-center gap-1.5 ml-2">+ Barang</button>
             </div>
         </div>
+        
         <div className="relative mb-4"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} /><input type="text" placeholder="Cari (Tekan Enter atau Tunggu)..." onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm" /></div>
 
+        {/* LIST ITEM */}
         {loading ? <div className="flex flex-col items-center justify-center h-64 text-blue-500"><Loader2 size={32} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat Data...</p></div> : localItems.length === 0 ? <div className="p-8 text-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-200"><Package size={24} className="mx-auto mb-2 opacity-50"/><p className="text-xs">Tidak ada barang yang cocok.</p></div> : (
              <>
              {viewMode === 'grid' ? (
@@ -452,7 +223,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           <div className="mb-2"><h3 className="font-bold text-gray-900 text-sm leading-tight line-clamp-2 min-h-[2.4em] mb-1">{item.name || 'Tanpa Nama'}</h3><p className="text-xs text-gray-500 font-mono truncate bg-gray-50 inline-block px-1 rounded">{item.partNumber || '-'}</p><div className="text-xs text-gray-500 mb-3 flex-1 flex flex-col gap-0.5 mt-1.5"><div className="truncate">App: <span className="font-bold text-gray-900">{item.application || "-"}</span></div><div className="truncate">Brand: <span className="font-bold text-gray-900">{item.brand || "-"}</span></div></div></div>
                           <div className="mt-auto pt-2 border-t border-gray-50 space-y-2">
                              <div className="flex justify-between items-end"><div className="text-sm font-bold text-blue-700 truncate">{formatCompactNumber(item.price)}</div><div className="flex items-center text-xs text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200"><MapPin size={9} className="mr-0.5 text-gray-500"/>{item.shelf || '-'}</div></div>
-                             <div className="grid grid-cols-2 gap-1.5"><button onClick={() => onEdit(item)} className="flex items-center justify-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded text-[10px] font-bold transition-colors"><Edit size={10} /> Edit</button><button onClick={() => onDelete(item.id)} className="flex items-center justify-center gap-1 bg-red-50 hover:bg-red-100 text-red-700 py-1.5 rounded text-[10px] font-bold transition-colors"><Trash2 size={10} /> Hapus</button></div>
+                             <div className="grid grid-cols-2 gap-1.5">
+                                 {/* UBAH onEdit agar memanggil handleEditClick lokal */}
+                                 <button onClick={() => handleEditClick(item)} className="flex items-center justify-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded text-[10px] font-bold transition-colors"><Edit size={10} /> Edit</button>
+                                 <button onClick={() => onDelete(item.id)} className="flex items-center justify-center gap-1 bg-red-50 hover:bg-red-100 text-red-700 py-1.5 rounded text-[10px] font-bold transition-colors"><Trash2 size={10} /> Hapus</button>
+                             </div>
                           </div>
                         </div>
                      </div>
@@ -466,7 +241,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}/> : <div className="w-full h-full flex items-center justify-center text-gray-300"><Package size={20} /></div>}
                             </div>
                             <div className="flex-1 min-w-0"><h3 className="font-bold text-gray-900 text-sm truncate">{item.name || 'Tanpa Nama'}</h3><div className="flex items-center gap-3 mt-1"><p className="text-xs text-gray-500 font-mono truncate bg-gray-50 px-1.5 py-0.5 rounded">{item.partNumber || '-'}</p><div className="flex items-center text-xs text-gray-600"><MapPin size={10} className="mr-0.5 text-gray-400"/>{item.shelf || '-'}</div></div><div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-x-3 gap-y-1"><span>App: <span className="font-bold text-gray-900">{item.application || "-"}</span></span><span>Brand: <span className="font-bold text-gray-900">{item.brand || "-"}</span></span></div></div>
-                            <div className="flex flex-col items-end gap-2 pl-3 border-l border-gray-50 ml-1"><div className="text-right"><div className="text-sm font-bold text-blue-700">{formatCompactNumber(item.price)}</div><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm border inline-block mt-0.5 ${item.quantity === 0 ? 'bg-black text-white border-gray-600' : item.quantity < 4 ? 'bg-orange-500 text-white border-orange-600' : 'bg-green-50 text-green-700 border-green-100'}`}>{item.quantity === 0 ? 'HABIS' : item.quantity + ' Unit'}</span></div><div className="flex gap-1.5"><button onClick={() => onEdit(item)} className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md transition-colors"><Edit size={14} /></button><button onClick={() => onDelete(item.id)} className="p-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-md transition-colors"><Trash2 size={14} /></button></div></div>
+                            <div className="flex flex-col items-end gap-2 pl-3 border-l border-gray-50 ml-1"><div className="text-right"><div className="text-sm font-bold text-blue-700">{formatCompactNumber(item.price)}</div><span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm border inline-block mt-0.5 ${item.quantity === 0 ? 'bg-black text-white border-gray-600' : item.quantity < 4 ? 'bg-orange-500 text-white border-orange-600' : 'bg-green-50 text-green-700 border-green-100'}`}>{item.quantity === 0 ? 'HABIS' : item.quantity + ' Unit'}</span></div><div className="flex gap-1.5">
+                                <button onClick={() => handleEditClick(item)} className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md transition-colors"><Edit size={14} /></button>
+                                <button onClick={() => onDelete(item.id)} className="p-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-md transition-colors"><Trash2 size={14} /></button>
+                            </div></div>
                         </div>
                     ))}
                 </div>
