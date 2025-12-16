@@ -26,7 +26,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
   const [priceHistory, setPriceHistory] = useState<any[]>([]);
   const [loadingPrice, setLoadingPrice] = useState(false);
 
-  // State untuk Update Stok (Hanya di mode Edit)
   const [stockAdjustmentType, setStockAdjustmentType] = useState<'none' | 'in' | 'out'>('none');
   const [adjustmentQty, setAdjustmentQty] = useState<string>('');
   const [adjustmentEcommerce, setAdjustmentEcommerce] = useState<string>('');
@@ -88,6 +87,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
                 resiTempo: adjustmentResiTempo
             } : undefined;
 
+            // Memanggil updateInventory yang sudah diperbaiki logic-nya
             success = await updateInventory({ ...initialData, ...formData }, transactionData);
         } else {
             // Mode Tambah Baru
@@ -100,7 +100,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onSubmit, onCan
             if (onSubmit) onSubmit(formData);
             onCancel(); 
         } else {
-            setError('Gagal menyimpan ke database. Data tidak ditemukan atau koneksi bermasalah.');
+            setError('Gagal menyimpan ke database. Koneksi mungkin terputus atau ID tidak ditemukan.');
         }
     } catch (err) {
         setError('Terjadi kesalahan sistem.');
