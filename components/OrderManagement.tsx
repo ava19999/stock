@@ -1,7 +1,7 @@
 // FILE: src/components/OrderManagement.tsx
 import React, { useState, useMemo, useEffect } from 'react';
 import { Order, OrderStatus } from '../types';
-import { Clock, CheckCircle, Package, Truck, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X } from 'lucide-react';
+import { Clock, CheckCircle, Package, Truck, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store } from 'lucide-react';
 import { formatRupiah } from '../utils';
 
 interface OrderManagementProps {
@@ -95,8 +95,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       let resiText = `#${orderId.slice(0, 8)}`;
       let isResi = false;
       let ecommerce = '-';
+      let shopName = '-'; // NEW: Variable untuk menyimpan nama toko
 
       try {
+          // 1. Ambil Resi
           const resiMatch = cleanName.match(/\(Resi: (.*?)\)/);
           if (resiMatch && resiMatch[1]) {
               resiText = resiMatch[1];
@@ -104,6 +106,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
               cleanName = cleanName.replace(/\s*\(Resi:.*?\)/, '');
           }
 
+          // 2. Ambil Toko (NEW LOGIC)
+          const shopMatch = cleanName.match(/\(Toko: (.*?)\)/);
+          if (shopMatch && shopMatch[1]) {
+              shopName = shopMatch[1];
+              cleanName = cleanName.replace(/\s*\(Toko:.*?\)/, '');
+          }
+
+          // 3. Ambil Via (E-commerce)
           const viaMatch = cleanName.match(/\(Via: (.*?)\)/);
           if (viaMatch && viaMatch[1]) {
               ecommerce = viaMatch[1];
@@ -113,7 +123,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           console.error("Error parsing name", e);
       }
 
-      return { cleanName, resiText, isResi, ecommerce };
+      return { cleanName, resiText, isResi, ecommerce, shopName };
   };
 
   const formatDate = (ts: number) => {
@@ -146,7 +156,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       <div className="flex border-b border-gray-100 bg-gray-50/50">
           {[
               { id: 'pending', label: 'Pesanan Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' },
-              { id: 'processing', label: 'Dikirim', icon: Package, count: safeOrders.filter(o=>o?.status==='processing').length, color: 'text-blue-600' }, // Label Diubah jadi Dikirim
+              { id: 'processing', label: 'Dikirim', icon: Package, count: safeOrders.filter(o=>o?.status==='processing').length, color: 'text-blue-600' },
               { id: 'history', label: 'Riwayat', icon: CheckCircle, count: 0, color: 'text-gray-600' }
           ].map((tab: any) => (
               <button
@@ -163,7 +173,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           ))}
       </div>
 
-      {/* Search Bar (Hanya muncul di tab Dikirim & Riwayat) */}
+      {/* Search Bar */}
       {(activeTab === 'processing' || activeTab === 'history') && (
           <div className="px-6 py-3 bg-gray-50 border-b border-gray-100 animate-in slide-in-from-top-2">
               <div className="relative max-w-md">
@@ -218,7 +228,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     ) : (
                         filteredOrders.map(order => {
                             if (!order) return null;
-                            const { cleanName, resiText, isResi, ecommerce } = getOrderDetails(order);
+                            const { cleanName, resiText, isResi, ecommerce, shopName } = getOrderDetails(order);
                             const dt = formatDate(order.timestamp);
                             
                             const items = Array.isArray(order.items) ? order.items : [];
@@ -242,6 +252,13 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                 <span className={`block px-2 py-1 rounded w-fit ${isResi ? 'bg-blue-50 text-blue-700 font-bold border border-blue-100' : 'text-gray-500 bg-gray-50'}`}>
                                                     {resiText}
                                                 </span>
+                                                {/* NEW: Tampilkan Nama Toko Di Bawah Resi */}
+                                                {shopName !== '-' && (
+                                                    <div className="mt-2 flex items-center gap-1.5 text-gray-600 bg-gray-50 px-2 py-1 rounded w-fit border border-gray-200">
+                                                        <Store size={10} className="text-gray-400" />
+                                                        <span className="font-bold text-[10px] uppercase truncate max-w-[100px]" title={shopName}>{shopName}</span>
+                                                    </div>
+                                                )}
                                             </td>
                                             <td rowSpan={items.length} className="p-4 align-top border-r border-gray-100 font-medium bg-white group-hover:bg-blue-50/30 text-gray-600">
                                                 {ecommerce !== '-' ? (
