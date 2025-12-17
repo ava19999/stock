@@ -25,10 +25,8 @@ const parseTimestamp = (dateString: string | null | undefined): number | null =>
 };
 
 // --- HELPER: FORMAT DISPLAY (AUTO/APP -> KOSONG) ---
-// Helper ini memastikan data lama 'AUTO' atau 'APP' tidak muncul (jadi kosong)
 const formatDisplayTempo = (tempo: string | null | undefined): string => {
     const val = tempo || '';
-    // Jika isinya AUTO atau APP, kembalikan kosong. Jika tidak, kembalikan isinya.
     if (val === 'AUTO' || val === 'APP') return ''; 
     return val;
 };
@@ -170,7 +168,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   if (item.quantity > 0 && data) {
       await addBarangMasuk({
           created_at: wibNow,
-          tempo: '', // DEFAULT: Kosong (bukan APP/AUTO)
+          tempo: '', // DEFAULT: Kosong
           ecommerce: 'Stok Awal', 
           partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
           rak: item.shelf, stockAhir: item.quantity, qtyMasuk: item.quantity,
@@ -180,7 +178,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   return data ? data.id : null;
 };
 
-// --- UPDATE INVENTORY ---
+// --- UPDATE INVENTORY (PERBAIKAN LOGIKA STOK) ---
 export const updateInventory = async (
     item: InventoryItem, 
     transaction?: { type: 'in' | 'out', qty: number, ecommerce: string, resiTempo: string, customer?: string }
@@ -194,12 +192,19 @@ export const updateInventory = async (
       return null;
   }
 
+  // UPDATED: Tentukan stok akhir
   let finalQty = Number(currentDbItem.quantity);
 
   if (transaction && transaction.qty > 0) {
+      // Jika ada transaksi manual (via tombol +/- di edit), hitung dari stok DB
       const txQty = Number(transaction.qty);
       if (transaction.type === 'in') finalQty += txQty;
       else finalQty -= txQty;
+  } else {
+      // PERBAIKAN: Jika TIDAK ada transaksi (misal update dari App.tsx saat pesanan diproses),
+      // gunakan quantity yang dikirim di parameter 'item'.
+      // Ini penting agar pengurangan stok saat checkout berfungsi.
+      finalQty = item.quantity;
   }
 
   const wibNow = getWIBISOString();
@@ -216,6 +221,8 @@ export const updateInventory = async (
   
   const baseUpdated = updatedData[0];
 
+  // Hanya jika ada transaksi manual via ItemForm (tombol +/-), catat log di sini.
+  // Untuk pesanan APP/Checkout, pencatatan log dilakukan terpisah di App.tsx (handleUpdateStatus)
   if (transaction && transaction.qty > 0) {
       const txQty = Number(transaction.qty);
       const sourceName = transaction.ecommerce || 'Manual Edit';
@@ -230,11 +237,10 @@ export const updateInventory = async (
               hargaSatuan: item.costPrice || 0, hargaTotal: (item.costPrice || 0) * txQty
           });
       } else {
-          // INSERT BARANG KELUAR
           await addBarangKeluar({
               created_at: wibNow,
               kodeToko: 'MANUAL', 
-              tempo: '', // DEFAULT: Kosong (bukan APP/AUTO)
+              tempo: '', // Default Kosong
               ecommerce: sourceName,
               customer: transaction.customer || '', 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
@@ -288,7 +294,7 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             timestamp: parseTimestamp(k.created_at || k.date), 
             reason: `${k.customer || ''} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, 
             resi: k.resi || '-', 
-            tempo: formatDisplayTempo(k.tempo) // DISPLAY: AUTO/APP jadi kosong
+            tempo: formatDisplayTempo(k.tempo) 
         });
     });
 
@@ -321,7 +327,7 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
             timestamp: parseTimestamp(item.created_at || item.date), 
             reason: type === 'in' ? `Restock (Via: ${item.ecommerce || '-'})` : `${item.customer || ''} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`,
             resi: item.resi || '-', 
-            tempo: formatDisplayTempo(item.tempo) // DISPLAY: AUTO/APP jadi kosong
+            tempo: formatDisplayTempo(item.tempo)
         };
     });
     return { data: mappedData, count: count || 0 };
@@ -348,7 +354,7 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
             timestamp: parseTimestamp(k.created_at || k.date),
             reason: `${k.customer || ''} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, 
             resi: k.resi || '-', 
-            tempo: formatDisplayTempo(k.tempo) // DISPLAY: AUTO/APP jadi kosong
+            tempo: formatDisplayTempo(k.tempo) 
         });
     });
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -397,7 +403,7 @@ export const addHistoryLog = async (h: StockHistory) => {
     if (h.type === 'in') {
         return addBarangMasuk({ 
             created_at: now, 
-            tempo: '', // DEFAULT: Kosong
+            tempo: '', 
             ecommerce: 'SYSTEM', 
             partNumber: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-', 
             stockAhir: h.previousStock + h.quantity, qtyMasuk: h.quantity, 
@@ -406,9 +412,9 @@ export const addHistoryLog = async (h: StockHistory) => {
     } else {
         return addBarangKeluar({ 
             created_at: now, kodeToko: 'SYS', 
-            tempo: '', // DEFAULT: Kosong
+            tempo: '', 
             ecommerce: 'SYSTEM', 
-            customer: '', // DEFAULT: Kosong
+            customer: '', 
             partNumber: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-', 
             stockAhir: h.previousStock - h.quantity, qtyKeluar: h.quantity, 
             hargaSatuan: h.price, hargaTotal: h.totalPrice, resi: '-' 
