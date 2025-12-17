@@ -277,12 +277,19 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
     const history: StockHistory[] = [];
 
     (dataMasuk || []).forEach((m: any) => {
+        // UPDATED: Jika ada suplier (retur), tampilkan suplier di reason
+        const reasonText = m.suplier 
+            ? `${m.suplier} (Via: ${m.ecommerce}) (${m.tempo})` 
+            : `Restock (Via: ${m.ecommerce}) (${m.tempo})`;
+
         history.push({
             id: m.id, itemId: m.part_number, partNumber: m.part_number, name: m.name,
             type: 'in', quantity: Number(m.qty_masuk), previousStock: Number(m.stock_ahir) - Number(m.qty_masuk),
             currentStock: Number(m.stock_ahir), price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
             timestamp: parseTimestamp(m.created_at || m.date), 
-            reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`, resi: '-', tempo: m.tempo || '-'
+            reason: reasonText, 
+            resi: '-', 
+            tempo: m.tempo || '-'
         });
     });
 
@@ -320,12 +327,17 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
         const current = Number(item.stock_ahir); 
         const previous = type === 'in' ? (current - qty) : (current + qty);
         
+        // UPDATED: Logic reason untuk Log Paginated juga
+        const reasonText = type === 'in' 
+            ? (item.suplier ? `${item.suplier} (Via: ${item.ecommerce || '-'})` : `Restock (Via: ${item.ecommerce || '-'})`)
+            : `${item.customer || ''} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`;
+
         return {
             id: item.id, itemId: item.part_number, partNumber: item.part_number, name: item.name,
             type: type, quantity: qty, previousStock: previous, currentStock: current,
             price: Number(item.harga_satuan), totalPrice: Number(item.harga_total),
             timestamp: parseTimestamp(item.created_at || item.date), 
-            reason: type === 'in' ? `Restock (Via: ${item.ecommerce || '-'})` : `${item.customer || ''} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`,
+            reason: reasonText,
             resi: item.resi || '-', 
             tempo: formatDisplayTempo(item.tempo)
         };
@@ -338,12 +350,18 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
     const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
     const history: StockHistory[] = [];
     (dataMasuk || []).forEach((m: any) => {
+        const reasonText = m.suplier 
+            ? `${m.suplier} (Via: ${m.ecommerce}) (${m.tempo})` 
+            : `Restock (Via: ${m.ecommerce}) (${m.tempo})`;
+
         history.push({
             id: m.id, itemId: m.part_number, partNumber: m.part_number, name: m.name,
             type: 'in', quantity: Number(m.qty_masuk), previousStock: Number(m.stock_ahir) - Number(m.qty_masuk),
             currentStock: Number(m.stock_ahir), price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
             timestamp: parseTimestamp(m.created_at || m.date),
-            reason: `Restock (Via: ${m.ecommerce}) (${m.tempo})`, resi: '-', tempo: m.tempo || '-'
+            reason: reasonText, 
+            resi: '-', 
+            tempo: m.tempo || '-'
         });
     });
     (dataKeluar || []).forEach((k: any) => {
@@ -368,6 +386,8 @@ export const addBarangMasuk = async (data: any) => {
         created_at: data.created_at || getWIBISOString(), 
         tempo: data.tempo, 
         ecommerce: ecommerceVal, 
+        // UPDATED: Menyimpan suplier juga jika ada (agar Keterangan Retur tersimpan dengan benar)
+        suplier: data.suplier, 
         part_number: data.partNumber || data.part_number, 
         name: data.name, brand: data.brand, application: data.application, rak: data.rak, 
         stock_ahir: data.stockAhir || data.stock_ahir, 

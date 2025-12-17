@@ -17,7 +17,7 @@ import {
   fetchOrders, saveOrder, updateOrderStatusService,
   fetchHistory, addHistoryLog,
   fetchChatSessions, saveChatSession,
-  addBarangMasuk, addBarangKeluar // <--- Fungsi Baru
+  addBarangMasuk, addBarangKeluar 
 } from './services/supabaseService';
 
 import { generateId, formatRupiah } from './utils';
@@ -121,18 +121,16 @@ const AppContent: React.FC = () => {
 
   const handleLogout = () => { setIsAuthenticated(false); setIsAdmin(false); setLoginName(''); setLoginPass(''); localStorage.removeItem('stockmaster_customer_name'); };
 
-  // --- LOGIC BARU: SAVE ITEM (Master Data Saja) ---
+  // --- SAVE ITEM ---
   const handleSaveItem = async (data: InventoryFormData) => {
       setLoading(true);
       const newQuantity = Number(data.quantity) || 0;
       let updatedItem: InventoryItem = { ...editItem, ...data, quantity: newQuantity, initialStock: data.initialStock || 0, qtyIn: data.qtyIn || 0, qtyOut: data.qtyOut || 0, lastUpdated: Date.now() };
 
       if (editItem) {
-          // History pencatatan sudah ditangani oleh ItemForm
           if (await updateInventory(updatedItem)) { showToast('Update berhasil!'); refreshData(); }
       } else {
           if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number sudah ada!', 'error'); setLoading(false); return; }
-          // History pencatatan sudah ditangani oleh ItemForm
           if (await addInventory(data)) { showToast('Tersimpan!'); refreshData(); }
       }
       setIsEditing(false); setEditItem(null); setLoading(false);
@@ -175,35 +173,34 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- LOGIC BARU: UPDATE STATUS & HISTORY ---
+  // --- UPDATE STATUS & HISTORY (UPDATED FOR RETUR) ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
 
       let pureName = order.customerName;
-      let extraInfo = '';
-      
+      let resiVal = '-';
+      let shopVal = '';
+      let ecommerceVal = 'APLIKASI';
+
       // 1. Parse Resi
       const resiMatch = pureName.match(/\(Resi: (.*?)\)/);
       if (resiMatch) { 
-          extraInfo += ` (Resi: ${resiMatch[1]})`; 
+          resiVal = resiMatch[1];
           pureName = pureName.replace(/\(Resi:.*?\)/, ''); 
       }
 
-      // 2. Parse Toko (NEW: Untuk mengisi field Tempo)
-      let shopName = '';
+      // 2. Parse Toko
       const shopMatch = pureName.match(/\(Toko: (.*?)\)/);
       if (shopMatch) {
-          shopName = shopMatch[1];
+          shopVal = shopMatch[1];
           pureName = pureName.replace(/\(Toko:.*?\)/, '');
       }
 
-      // 3. Parse Via (Untuk mengisi field Ecommerce)
+      // 3. Parse Via (E-commerce)
       const viaMatch = pureName.match(/\(Via: (.*?)\)/);
-      let ecommerceName = 'APLIKASI';
       if (viaMatch) { 
-          ecommerceName = viaMatch[1];
-          extraInfo += ` (Via: ${viaMatch[1]})`; 
+          ecommerceVal = viaMatch[1];
           pureName = pureName.replace(/\(Via:.*?\)/, ''); 
       }
       
@@ -226,13 +223,12 @@ const AppContent: React.FC = () => {
                       
                       await updateInventory(itemToUpdate);
                       
-                      // LOGIKA BARU: Simpan ke tabel barang_keluar
                       await addBarangKeluar({
                           tanggal: today,
                           kodeToko: 'APP',
-                          tempo: shopName, // <--- Nama Toko mengisi Tempo
-                          ecommerce: ecommerceName, // <--- E-commerce otomatis
-                          customer: pureName, // <--- Nama Penerima mengisi Keterangan (Customer)
+                          tempo: shopVal, 
+                          ecommerce: ecommerceVal, 
+                          customer: pureName, 
                           partNumber: currentItem.partNumber,
                           name: currentItem.name,
                           brand: currentItem.brand,
@@ -242,7 +238,7 @@ const AppContent: React.FC = () => {
                           qtyKeluar: qtySold,
                           hargaSatuan: orderItem.customPrice ?? orderItem.price,
                           hargaTotal: (orderItem.customPrice ?? orderItem.price) * qtySold,
-                          resi: resiMatch ? resiMatch[1] : '-'
+                          resi: resiVal
                       });
                   }
               }
@@ -261,11 +257,15 @@ const AppContent: React.FC = () => {
                           
                           await updateInventory(itemToUpdate);
                           
-                          // LOGIKA BARU: Simpan ke tabel barang_masuk (RETUR)
+                          // LOGIKA BARU: Simpan RETUR sesuai permintaan
+                          // Resi/Tempo diisi Resi + Toko
+                          // E-commerce diisi E-commerce asli
+                          // Keterangan diisi Nama Penerima + (RETUR)
                           await addBarangMasuk({
                               tanggal: today,
-                              tempo: 'RETUR',
-                              suplier: `RETUR: ${pureName}`,
+                              tempo: `${resiVal} / ${shopVal}`, // Resi + Toko
+                              ecommerce: ecommerceVal,          // E-commerce asli
+                              suplier: `${pureName} (RETUR)`,   // Keterangan: Nama Penerima + Retur
                               partNumber: itemToUpdate.partNumber,
                               name: itemToUpdate.name,
                               brand: itemToUpdate.brand,
@@ -303,7 +303,6 @@ const AppContent: React.FC = () => {
     await saveChatSession(updatedSession);
   };
 
-  // --- LOGIC BARU: SAVE SCAN RESI ---
   const handleSaveScannedOrder = async (data: ResiAnalysisResult | any) => {
     if (!data.items || data.items.length === 0) { showToast("Gagal: Tidak ada item terdeteksi.", 'error'); return; }
     setLoading(true);
@@ -351,7 +350,6 @@ const AppContent: React.FC = () => {
                 const updateData = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
                 await updateInventory(updateData);
                 
-                // LOGIKA BARU: Simpan ke tabel barang_keluar
                 await addBarangKeluar({
                     tanggal: today,
                     kodeToko: 'SCAN',
@@ -450,7 +448,7 @@ const AppContent: React.FC = () => {
               ) : (
                   <>
                     <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-blue-50 text-blue-700 ring-1 ring-blue-200':'text-gray-500 hover:bg-gray-50'}`}><Home size={18}/> Belanja</button>
-                    <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-blue-50 text-blue-700 ring-1 ring-blue-200':'text-gray-500 hover:bg-gray-50'}`}><ClipboardList size={18}/> Pesanan {myPendingOrdersCount > 0 && <span className="bg-orange-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{myPendingOrdersCount}</span>}</button>
+                    <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-blue-50 text-blue-700 ring-1 ring-blue-200':'text-gray-500 hover:bg-gray-50'}`}><ClipboardList size={18}/> Pesanan {myPendingOrdersCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-white"></span>}</button>
                     <button onClick={() => setActiveView('chat')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='chat'?'bg-blue-50 text-blue-700 ring-1 ring-blue-200':'text-gray-500 hover:bg-gray-50'}`}><MessageSquare size={18}/> Chat</button>
                   </>
               )}
