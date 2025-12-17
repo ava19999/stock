@@ -73,6 +73,9 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   const getStatusLabel = (status: OrderStatus) => {
       if (status === 'cancelled') return 'RETUR';
+      if (status === 'processing') return 'TERJUAL'; // CHANGED: Dikirim -> TERJUAL
+      if (status === 'pending') return 'BARU';
+      if (status === 'completed') return 'SELESAI';
       return status;
   };
 
@@ -126,7 +129,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       </div>
 
       <div className="flex border-b border-gray-100 bg-gray-50/50">
-          {[{ id: 'pending', label: 'Pesanan Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' }, { id: 'processing', label: 'Dikirim', icon: Package, count: safeOrders.filter(o=>o?.status==='processing').length, color: 'text-blue-600' }, { id: 'history', label: 'Riwayat', icon: CheckCircle, count: 0, color: 'text-gray-600' }].map((tab: any) => (
+          {[
+              { id: 'pending', label: 'Pesanan Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' },
+              
+              // CHANGED: Label 'Dikirim' -> 'Terjual'
+              { id: 'processing', label: 'Terjual', icon: Package, count: safeOrders.filter(o=>o?.status==='processing').length, color: 'text-blue-600' },
+              
+              { id: 'history', label: 'Riwayat', icon: CheckCircle, count: 0, color: 'text-gray-600' }
+          ].map((tab: any) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-white relative ${activeTab === tab.id ? `border-purple-600 text-purple-700 bg-white` : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                   <tab.icon size={18} className={activeTab === tab.id ? tab.color : ''} /><span>{tab.label}</span>{tab.count > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{tab.count}</span>}
               </button>
@@ -183,7 +193,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                 <div className="font-bold text-gray-900">{dt.date}</div><div className="text-xs text-gray-500 font-mono mt-0.5">{dt.time}</div>
                                             </td>
                                             
-                                            {/* UPDATED: Resi di atas, Toko di bawah */}
                                             <td rowSpan={items.length} className="p-4 align-top border-r border-gray-100 font-mono text-xs bg-white group-hover:bg-blue-50/30">
                                                 <div className="flex flex-col gap-2">
                                                     <span className={`block px-2 py-1 rounded w-fit font-bold ${isResi ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-500 bg-gray-50'}`}>
