@@ -1,16 +1,18 @@
-// FILE: src/components/OrderManagement.tsx
 import React, { useState, useMemo, useEffect } from 'react';
 import { Order, OrderStatus } from '../types';
-import { Clock, CheckCircle, Package, Truck, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store, Save } from 'lucide-react';
+import { Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store, Save, Loader } from 'lucide-react';
 import { formatRupiah } from '../utils';
+// Pastikan import saveOrder ditambahkan
+import { updateInventory, updateOrderData, saveOrder } from '../services/supabaseService';
 
 interface OrderManagementProps {
   orders: Order[];
   onUpdateStatus: (orderId: string, status: OrderStatus) => void;
   onProcessReturn: (orderId: string, returnedItems: { itemId: string, qty: number }[]) => void;
+  onRefresh?: () => void;
 }
 
-export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], onUpdateStatus, onProcessReturn }) => {
+export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], onUpdateStatus, onProcessReturn, onRefresh }) => {
   const [activeTab, setActiveTab] = useState<'pending' | 'processing' | 'history'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
   const [orderNotes, setOrderNotes] = useState<Record<string, string>>({});
@@ -18,16 +20,13 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
   const [selectedOrderForReturn, setSelectedOrderForReturn] = useState<Order | null>(null);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     try {
         const savedNotes = localStorage.getItem('stockmaster_order_notes');
-        if (savedNotes) {
-            setOrderNotes(JSON.parse(savedNotes));
-        }
-    } catch (e) {
-        console.error("Gagal load notes", e);
-    }
+        if (savedNotes) setOrderNotes(JSON.parse(savedNotes));
+    } catch (e) { console.error("Gagal load notes", e); }
   }, []);
 
   useEffect(() => { setSearchTerm(''); }, [activeTab]);
@@ -46,20 +45,109 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       setIsReturnModalOpen(true);
   };
 
-  const handleSubmitReturn = () => {
+  // --- LOGIKA UTAMA RETUR (SPLIT ORDER) ---
+  const handleProcessReturn = async () => {
       if (!selectedOrderForReturn) return;
-      const itemsToReturn = Object.entries(returnQuantities)
-          .filter(([_, qty]) => qty > 0)
-          .map(([itemId, qty]) => ({ itemId, qty }));
 
-      if (itemsToReturn.length === 0) {
+      // 1. Identifikasi Barang yang Diretur
+      const itemsToReturnData = selectedOrderForReturn.items
+        .map(item => {
+            const qtyRetur = returnQuantities[item.id] || 0;
+            if (qtyRetur > 0) {
+                return { ...item, cartQuantity: qtyRetur }; // Buat object item baru dengan qty retur
+            }
+            return null;
+        })
+        .filter(Boolean) as any[];
+
+      if (itemsToReturnData.length === 0) {
           alert("Pilih minimal 1 barang untuk diretur.");
           return;
       }
 
-      onProcessReturn(selectedOrderForReturn.id, itemsToReturn);
-      setIsReturnModalOpen(false);
-      setSelectedOrderForReturn(null);
+      setIsLoading(true);
+
+      try {
+        // 2. Kembalikan Stok ke Gudang (Looping item retur)
+        for (const item of itemsToReturnData) {
+            await updateInventory({
+                ...item,
+                quantity: item.quantity // Gunakan stok master saat ini (tidak diubah disini)
+            }, {
+                type: 'in', 
+                qty: item.cartQuantity,
+                ecommerce: 'RETUR',
+                resiTempo: `Retur ${selectedOrderForReturn.id.substring(0,6)}`,
+                customer: selectedOrderForReturn.customerName
+            });
+        }
+
+        // 3. Hitung Sisa Barang untuk Pesanan Asli
+        const remainingItems = selectedOrderForReturn.items.map(item => {
+            const returItem = itemsToReturnData.find(r => r.id === item.id);
+            if (returItem) {
+                // Kurangi qty asli dengan qty retur
+                const newQty = (item.cartQuantity || 0) - returItem.cartQuantity;
+                return { ...item, cartQuantity: newQty };
+            }
+            return item;
+        }).filter(item => (item.cartQuantity || 0) > 0); // Hapus jika habis (0)
+
+        const isFullReturn = remainingItems.length === 0;
+
+        if (isFullReturn) {
+            // SKENARIO A: RETUR SEMUA (Full Return)
+            // Cukup ubah status pesanan asli jadi 'cancelled' agar pindah ke tab Retur
+            await updateOrderData(
+                selectedOrderForReturn.id,
+                selectedOrderForReturn.items, // Item biarkan utuh agar history tercatat
+                selectedOrderForReturn.totalAmount,
+                'cancelled'
+            );
+            alert('Semua barang berhasil diretur. Pesanan dipindahkan ke Riwayat.');
+
+        } else {
+            // SKENARIO B: RETUR SEBAGIAN (Partial Return)
+            // 1. Buat Pesanan BARU untuk barang yang diretur (Masuk Tab Retur)
+            const returnTotal = itemsToReturnData.reduce((sum, item) => sum + ((item.customPrice ?? item.price ?? 0) * item.cartQuantity), 0);
+            
+            const newReturnOrder: Order = {
+                id: `${selectedOrderForReturn.id}-RET`, // ID Unik untuk Retur
+                customerName: `${selectedOrderForReturn.customerName} (RETUR)`,
+                items: itemsToReturnData,
+                totalAmount: returnTotal,
+                status: 'cancelled', // Status 'cancelled' masuk ke Tab History/Retur
+                timestamp: Date.now()
+            };
+            
+            // Simpan pesanan retur baru
+            await saveOrder(newReturnOrder);
+
+            // 2. Update Pesanan ASLI dengan sisa barang (Tetap di Tab Terjual)
+            const remainingTotal = remainingItems.reduce((sum, item) => sum + ((item.customPrice ?? item.price ?? 0) * item.cartQuantity), 0);
+            
+            await updateOrderData(
+                selectedOrderForReturn.id,
+                remainingItems,
+                remainingTotal,
+                'processing' // Tetap processing agar muncul di Tab Terjual
+            );
+
+            alert('Retur sebagian berhasil!\n\n• Barang retur -> Tab Riwayat\n• Sisa barang -> Tetap di Tab Terjual');
+        }
+
+        // Reset & Refresh
+        setIsReturnModalOpen(false);
+        setSelectedOrderForReturn(null);
+        if (onRefresh) onRefresh();
+        else window.location.reload();
+
+      } catch (error) {
+          console.error("Error processing return:", error);
+          alert("Terjadi kesalahan saat memproses retur.");
+      } finally {
+          setIsLoading(false);
+      }
   };
 
   const safeOrders = Array.isArray(orders) ? orders : [];
@@ -67,12 +155,11 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const filteredOrders = useMemo(() => {
     return safeOrders.filter(o => {
       if (!o) return false;
-      let matchesTab = false;
-      if (activeTab === 'pending') matchesTab = o.status === 'pending';
-      if (activeTab === 'processing') matchesTab = o.status === 'processing';
-      if (activeTab === 'history') matchesTab = o.status === 'completed' || o.status === 'cancelled';
-      if (!matchesTab) return false;
-
+      if (activeTab === 'pending') return o.status === 'pending';
+      if (activeTab === 'processing') return o.status === 'processing';
+      if (activeTab === 'history') return o.status === 'completed' || o.status === 'cancelled';
+      return false;
+    }).filter(o => {
       if ((activeTab === 'processing' || activeTab === 'history') && searchTerm.trim() !== '') {
           const lowerSearch = searchTerm.toLowerCase();
           return (
@@ -90,21 +177,19 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     });
   }, [safeOrders, activeTab, searchTerm]);
 
-  // --- UPDATED: STATUS COLOR ---
   const getStatusColor = (status: OrderStatus) => {
     switch (status) {
       case 'pending': return 'bg-amber-100 text-amber-700 border-amber-200';
       case 'processing': return 'bg-blue-100 text-blue-700 border-blue-200';
-      case 'completed': return 'bg-yellow-100 text-yellow-700 border-yellow-200'; // Retur Sebagian (Kuning)
-      case 'cancelled': return 'bg-red-100 text-red-700 border-red-200'; // Retur Semua (Merah)
+      case 'completed': return 'bg-green-100 text-green-700 border-green-200';
+      case 'cancelled': return 'bg-red-100 text-red-700 border-red-200';
       default: return 'bg-gray-100 text-gray-700';
     }
   };
 
-  // --- UPDATED: STATUS LABEL ---
   const getStatusLabel = (status: OrderStatus) => {
-      if (status === 'cancelled') return 'RETUR SEMUA';
-      if (status === 'completed') return 'RETUR SEBAGIAN';
+      if (status === 'cancelled') return 'RETUR / BATAL';
+      if (status === 'completed') return 'SELESAI';
       if (status === 'processing') return 'TERJUAL';
       if (status === 'pending') return 'BARU';
       return status;
@@ -163,7 +248,9 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                   </div>
                   <div className="p-6 overflow-y-auto">
                       <div className="text-sm text-gray-500 mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                          Pilih jumlah barang yang dikembalikan. Stok gudang akan otomatis bertambah.
+                          Pilih jumlah barang yang dikembalikan.<br/>
+                          <span className="text-orange-600 font-bold">• Barang Retur akan dipisah ke tab Riwayat.</span><br/>
+                          <span className="text-blue-600 font-bold">• Sisa Barang tetap di tab Terjual.</span>
                       </div>
                       <div className="space-y-3">
                           {selectedOrderForReturn.items.map((item) => (
@@ -171,7 +258,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                   <div className="flex-1">
                                       <div className="font-bold text-gray-800 text-sm">{item.name}</div>
                                       <div className="text-xs text-gray-500 font-mono">{item.partNumber}</div>
-                                      <div className="text-xs text-blue-600 font-semibold mt-1">Terjual: {item.cartQuantity} unit</div>
+                                      <div className="text-xs text-blue-600 font-semibold mt-1">Dibeli: {item.cartQuantity} unit</div>
                                   </div>
                                   <div className="flex items-center gap-3 bg-gray-50 p-1.5 rounded-lg border border-gray-200">
                                       <button 
@@ -180,7 +267,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                       >-</button>
                                       <div className="w-8 text-center font-bold text-lg text-gray-800">{returnQuantities[item.id] || 0}</div>
                                       <button 
-                                          onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.min(item.cartQuantity, (prev[item.id] || 0) + 1)}))}
+                                          onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.min(item.cartQuantity || 0, (prev[item.id] || 0) + 1)}))}
                                           className="w-8 h-8 flex items-center justify-center bg-white rounded-md shadow-sm border border-gray-200 hover:bg-green-50 text-gray-600 font-bold"
                                       >+</button>
                                   </div>
@@ -190,7 +277,13 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                   </div>
                   <div className="p-4 border-t bg-gray-50 flex justify-end gap-3">
                       <button onClick={() => setIsReturnModalOpen(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">Batal</button>
-                      <button onClick={handleSubmitReturn} className="px-6 py-2 text-sm font-bold bg-orange-600 text-white hover:bg-orange-700 rounded-lg shadow-md transition-colors flex items-center gap-2"><Save size={16}/> Proses Retur</button>
+                      <button 
+                        onClick={handleProcessReturn} 
+                        disabled={isLoading}
+                        className="px-6 py-2 text-sm font-bold bg-orange-600 text-white hover:bg-orange-700 rounded-lg shadow-md transition-colors flex items-center gap-2 disabled:opacity-50"
+                      >
+                        {isLoading ? <Loader size={16} className="animate-spin"/> : <Save size={16}/>} Proses Retur
+                      </button>
                   </div>
               </div>
           </div>
@@ -209,7 +302,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           {[
               { id: 'pending', label: 'Pesanan Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' },
               { id: 'processing', label: 'Terjual', icon: Package, count: safeOrders.filter(o=>o?.status==='processing').length, color: 'text-blue-600' },
-              { id: 'history', label: 'Retur', icon: CheckCircle, count: 0, color: 'text-gray-600' }
+              { id: 'history', label: 'Riwayat / Retur', icon: CheckCircle, count: 0, color: 'text-gray-600' }
           ].map((tab: any) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-white relative ${activeTab === tab.id ? `border-purple-600 text-purple-700 bg-white` : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                   <tab.icon size={18} className={activeTab === tab.id ? tab.color : ''} /><span>{tab.label}</span>{tab.count > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{tab.count}</span>}
@@ -296,7 +389,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                     {index === 0 && (
                                         <>
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
-                                                {/* UPDATED: LABEL STATUS KHUSUS */}
                                                 <div className={`inline-block px-3 py-1.5 rounded-lg text-[10px] font-extrabold border uppercase tracking-wider mb-2 shadow-sm ${getStatusColor(order.status)}`}>{getStatusLabel(order.status)}</div>
                                                 <div className="text-[10px] text-gray-400 font-medium">Total Order:</div><div className="text-sm font-extrabold text-purple-700">{formatRupiah(order.totalAmount || 0)}</div>
                                             </td>
