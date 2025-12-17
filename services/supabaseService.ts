@@ -168,7 +168,8 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   if (item.quantity > 0 && data) {
       await addBarangMasuk({
           created_at: wibNow,
-          tempo: '', // DEFAULT: Kosong
+          tempo: '', 
+          keterangan: 'Stok Awal', // Default
           ecommerce: 'Stok Awal', 
           partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
           rak: item.shelf, stockAhir: item.quantity, qtyMasuk: item.quantity,
@@ -178,7 +179,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   return data ? data.id : null;
 };
 
-// --- UPDATE INVENTORY (PERBAIKAN LOGIKA STOK) ---
+// --- UPDATE INVENTORY ---
 export const updateInventory = async (
     item: InventoryItem, 
     transaction?: { type: 'in' | 'out', qty: number, ecommerce: string, resiTempo: string, customer?: string }
@@ -192,18 +193,13 @@ export const updateInventory = async (
       return null;
   }
 
-  // UPDATED: Tentukan stok akhir
   let finalQty = Number(currentDbItem.quantity);
 
   if (transaction && transaction.qty > 0) {
-      // Jika ada transaksi manual (via tombol +/- di edit), hitung dari stok DB
       const txQty = Number(transaction.qty);
       if (transaction.type === 'in') finalQty += txQty;
       else finalQty -= txQty;
   } else {
-      // PERBAIKAN: Jika TIDAK ada transaksi (misal update dari App.tsx saat pesanan diproses),
-      // gunakan quantity yang dikirim di parameter 'item'.
-      // Ini penting agar pengurangan stok saat checkout berfungsi.
       finalQty = item.quantity;
   }
 
@@ -221,8 +217,6 @@ export const updateInventory = async (
   
   const baseUpdated = updatedData[0];
 
-  // Hanya jika ada transaksi manual via ItemForm (tombol +/-), catat log di sini.
-  // Untuk pesanan APP/Checkout, pencatatan log dilakukan terpisah di App.tsx (handleUpdateStatus)
   if (transaction && transaction.qty > 0) {
       const txQty = Number(transaction.qty);
       const sourceName = transaction.ecommerce || 'Manual Edit';
@@ -230,7 +224,8 @@ export const updateInventory = async (
       if (transaction.type === 'in') {
           await addBarangMasuk({
               created_at: wibNow,
-              tempo: transaction.resiTempo || '-', 
+              tempo: transaction.resiTempo || '-',
+              keterangan: 'Manual Restock', // Keterangan untuk edit manual
               ecommerce: sourceName, 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
               rak: item.shelf, stockAhir: finalQty, qtyMasuk: txQty,
@@ -240,7 +235,7 @@ export const updateInventory = async (
           await addBarangKeluar({
               created_at: wibNow,
               kodeToko: 'MANUAL', 
-              tempo: '', // Default Kosong
+              tempo: '', 
               ecommerce: sourceName,
               customer: transaction.customer || '', 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
@@ -269,7 +264,7 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
   return true;
 };
 
-// --- HISTORY & TRANSAKSI ---
+// --- HISTORY & TRANSAKSI (UPDATED: BACA KOLOM KETERANGAN) ---
 export const fetchHistory = async (): Promise<StockHistory[]> => {
     const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
     const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
@@ -277,10 +272,9 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
     const history: StockHistory[] = [];
 
     (dataMasuk || []).forEach((m: any) => {
-        // UPDATED: Jika ada suplier (retur), tampilkan suplier di reason
-        const reasonText = m.suplier 
-            ? `${m.suplier} (Via: ${m.ecommerce}) (${m.tempo})` 
-            : `Restock (Via: ${m.ecommerce}) (${m.tempo})`;
+        // Tampilkan keterangan jika ada (contoh: "Budi (RETUR)"), jika tidak "Restock"
+        const ket = m.keterangan || 'Restock';
+        const reasonText = `${ket} (Via: ${m.ecommerce}) (${m.tempo || '-'})`;
 
         history.push({
             id: m.id, itemId: m.part_number, partNumber: m.part_number, name: m.name,
@@ -313,7 +307,7 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
     let query = supabase.from(table).select('*', { count: 'exact' });
     
     if (search) {
-        if (type === 'in') query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%`);
+        if (type === 'in') query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,keterangan.ilike.%${search}%`);
         else query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,customer.ilike.%${search}%,resi.ilike.%${search}%`);
     }
     const from = (page - 1) * limit; const to = from + limit - 1;
@@ -327,10 +321,16 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
         const current = Number(item.stock_ahir); 
         const previous = type === 'in' ? (current - qty) : (current + qty);
         
-        // UPDATED: Logic reason untuk Log Paginated juga
-        const reasonText = type === 'in' 
-            ? (item.suplier ? `${item.suplier} (Via: ${item.ecommerce || '-'})` : `Restock (Via: ${item.ecommerce || '-'})`)
-            : `${item.customer || ''} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`;
+        let reasonText = '';
+        let displayTempo = formatDisplayTempo(item.tempo);
+
+        if (type === 'in') {
+            displayTempo = item.tempo || '-';
+            const ket = item.keterangan || 'Restock';
+            reasonText = `${ket} (Via: ${item.ecommerce || '-'})`;
+        } else {
+            reasonText = `${item.customer || ''} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`;
+        }
 
         return {
             id: item.id, itemId: item.part_number, partNumber: item.part_number, name: item.name,
@@ -339,7 +339,7 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
             timestamp: parseTimestamp(item.created_at || item.date), 
             reason: reasonText,
             resi: item.resi || '-', 
-            tempo: formatDisplayTempo(item.tempo)
+            tempo: displayTempo
         };
     });
     return { data: mappedData, count: count || 0 };
@@ -350,9 +350,8 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
     const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
     const history: StockHistory[] = [];
     (dataMasuk || []).forEach((m: any) => {
-        const reasonText = m.suplier 
-            ? `${m.suplier} (Via: ${m.ecommerce}) (${m.tempo})` 
-            : `Restock (Via: ${m.ecommerce}) (${m.tempo})`;
+        const ket = m.keterangan || 'Restock';
+        const reasonText = `${ket} (Via: ${m.ecommerce}) (${m.tempo || '-'})`;
 
         history.push({
             id: m.id, itemId: m.part_number, partNumber: m.part_number, name: m.name,
@@ -378,16 +377,18 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
-// --- INSERT FUNCTIONS ---
+// --- INSERT FUNCTIONS (UPDATED: ADA KOLOM KETERANGAN) ---
 
 export const addBarangMasuk = async (data: any) => { 
-    const ecommerceVal = data.ecommerce || data.suplier || 'Lainnya';
+    const ecommerceVal = data.ecommerce || 'Lainnya';
+    // Gunakan 'Restock' jika keterangan kosong/tidak diisi
+    const keteranganVal = data.keterangan || 'Restock'; 
+
     const { error } = await supabase.from('barang_masuk').insert([{ 
         created_at: data.created_at || getWIBISOString(), 
         tempo: data.tempo, 
         ecommerce: ecommerceVal, 
-        // UPDATED: Menyimpan suplier juga jika ada (agar Keterangan Retur tersimpan dengan benar)
-        suplier: data.suplier, 
+        keterangan: keteranganVal, // KOLOM BARU DI DB
         part_number: data.partNumber || data.part_number, 
         name: data.name, brand: data.brand, application: data.application, rak: data.rak, 
         stock_ahir: data.stockAhir || data.stock_ahir, 
@@ -424,6 +425,7 @@ export const addHistoryLog = async (h: StockHistory) => {
         return addBarangMasuk({ 
             created_at: now, 
             tempo: '', 
+            keterangan: 'System Log', 
             ecommerce: 'SYSTEM', 
             partNumber: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-', 
             stockAhir: h.previousStock + h.quantity, qtyMasuk: h.quantity, 

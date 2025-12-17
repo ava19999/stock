@@ -173,7 +173,7 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- UPDATE STATUS & HISTORY (UPDATED FOR RETUR) ---
+  // --- UPDATE STATUS & HISTORY ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -257,15 +257,12 @@ const AppContent: React.FC = () => {
                           
                           await updateInventory(itemToUpdate);
                           
-                          // LOGIKA BARU: Simpan RETUR sesuai permintaan
-                          // Resi/Tempo diisi Resi + Toko
-                          // E-commerce diisi E-commerce asli
-                          // Keterangan diisi Nama Penerima + (RETUR)
+                          // LOGIKA BARU: Simpan RETUR menggunakan kolom KETERANGAN
                           await addBarangMasuk({
                               tanggal: today,
                               tempo: `${resiVal} / ${shopVal}`, // Resi + Toko
-                              ecommerce: ecommerceVal,          // E-commerce asli
-                              suplier: `${pureName} (RETUR)`,   // Keterangan: Nama Penerima + Retur
+                              ecommerce: ecommerceVal,          
+                              keterangan: `${pureName} (RETUR)`, // Masuk ke kolom Keterangan
                               partNumber: itemToUpdate.partNumber,
                               name: itemToUpdate.name,
                               brand: itemToUpdate.brand,
