@@ -306,8 +306,14 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
     let query = supabase.from(table).select('*', { count: 'exact' });
     
     if (search) {
-        if (type === 'in') query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,keterangan.ilike.%${search}%`);
-        else query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,customer.ilike.%${search}%,resi.ilike.%${search}%`);
+        if (type === 'in') {
+            // UPDATED: Tambahkan 'tempo' agar bisa cari Resi/Invoice yang tersimpan di kolom tempo
+            query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,keterangan.ilike.%${search}%,tempo.ilike.%${search}%`);
+        }
+        else {
+            // UPDATED: Tambahkan 'tempo' agar bisa cari Nama Toko yang tersimpan di kolom tempo
+            query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,customer.ilike.%${search}%,resi.ilike.%${search}%,tempo.ilike.%${search}%`);
+        }
     }
     const from = (page - 1) * limit; const to = from + limit - 1;
     
