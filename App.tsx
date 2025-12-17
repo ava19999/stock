@@ -173,7 +173,7 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- UPDATE STATUS & HISTORY (UPDATED FOR RETUR WITH NAME) ---
+  // --- UPDATE STATUS & HISTORY (FIXED: Stock_Ahir) ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -205,7 +205,7 @@ const AppContent: React.FC = () => {
       }
       
       pureName = pureName.trim(); 
-      if (!pureName) pureName = "Pelanggan"; // Fallback jika nama kosong
+      if (!pureName) pureName = "Pelanggan"; 
 
       let updateTime = undefined;
       const today = new Date().toISOString().split('T')[0];
@@ -220,10 +220,13 @@ const AppContent: React.FC = () => {
                   const currentItem = await getItemById(orderItem.id);
                   if (currentItem) {
                       const qtySold = orderItem.cartQuantity;
-                      const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
+                      // Hitung quantity baru
+                      const newQuantity = Math.max(0, currentItem.quantity - qtySold);
+                      const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: newQuantity, lastUpdated: Date.now() };
                       
                       await updateInventory(itemToUpdate);
                       
+                      // FIX: Gunakan newQuantity untuk stockAhir
                       await addBarangKeluar({
                           tanggal: today,
                           kodeToko: 'APP',
@@ -235,7 +238,7 @@ const AppContent: React.FC = () => {
                           brand: currentItem.brand,
                           application: currentItem.application,
                           rak: currentItem.shelf,
-                          stockAwal: currentItem.quantity,
+                          stockAhir: newQuantity, // <--- FIXED: Menggunakan nilai stok akhir yang benar
                           qtyKeluar: qtySold,
                           hargaSatuan: orderItem.customPrice ?? orderItem.price,
                           hargaTotal: (orderItem.customPrice ?? orderItem.price) * qtySold,
@@ -254,22 +257,23 @@ const AppContent: React.FC = () => {
                       const currentItem = await getItemById(orderItem.id);
                       if (currentItem) {
                           const restoreQty = orderItem.cartQuantity;
-                          const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: currentItem.quantity + restoreQty, lastUpdated: Date.now() };
+                          const newQuantity = currentItem.quantity + restoreQty;
+                          const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
                           
                           await updateInventory(itemToUpdate);
                           
-                          // LOGIKA RETUR: Keterangan = Nama Penerima (RETUR)
+                          // FIX: Gunakan newQuantity untuk stockAhir
                           await addBarangMasuk({
                               tanggal: today,
                               tempo: `${resiVal} / ${shopVal}`, 
                               ecommerce: ecommerceVal,          
-                              keterangan: `${pureName} (RETUR)`, // <-- Nama Penerima masuk sini
+                              keterangan: `${pureName} (RETUR)`, 
                               partNumber: itemToUpdate.partNumber,
                               name: itemToUpdate.name,
                               brand: itemToUpdate.brand,
                               application: itemToUpdate.application,
                               rak: itemToUpdate.shelf,
-                              stockAwal: itemToUpdate.quantity - restoreQty,
+                              stockAhir: newQuantity, // <--- FIXED
                               qtyMasuk: restoreQty,
                               hargaSatuan: orderItem.customPrice ?? orderItem.price,
                               hargaTotal: (orderItem.customPrice ?? orderItem.price) * restoreQty
@@ -345,9 +349,11 @@ const AppContent: React.FC = () => {
             const currentItem = await getItemById(item.id);
             if (currentItem) {
                 const qtySold = item.cartQuantity;
-                const updateData = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: Math.max(0, currentItem.quantity - qtySold), lastUpdated: Date.now() };
+                const newQuantity = Math.max(0, currentItem.quantity - qtySold);
+                const updateData = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: newQuantity, lastUpdated: Date.now() };
                 await updateInventory(updateData);
                 
+                // FIX: Gunakan newQuantity untuk stockAhir
                 await addBarangKeluar({
                     tanggal: today,
                     kodeToko: 'SCAN',
@@ -359,7 +365,7 @@ const AppContent: React.FC = () => {
                     brand: currentItem.brand,
                     application: currentItem.application,
                     rak: currentItem.shelf,
-                    stockAwal: currentItem.quantity,
+                    stockAhir: newQuantity, // <--- FIXED
                     qtyKeluar: qtySold,
                     hargaSatuan: item.price,
                     hargaTotal: item.price * qtySold,
