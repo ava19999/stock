@@ -177,8 +177,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     const parts = h.tempo.split(' / ');
                                     displayResi = parts[0] !== '-' ? parts[0] : '-';
                                     displayShop = parts[1] !== '-' ? parts[1] : '-';
+                                } else if (ecommerce === 'RETUR') {
+                                     // FIX: Treat single value as RESI for Returns
+                                     displayResi = h.tempo || '-';
+                                     displayShop = '-';
                                 } else {
-                                    displayShop = h.tempo || '-'; // Kalau bukan split, anggap Tempo biasa
+                                     displayShop = h.tempo || '-';
                                 }
                             } else {
                                 // Jika Barang Keluar (OUT)
@@ -191,9 +195,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             let ketContent = h.type === 'in' ? h.reason.replace(/\(Via:.*?\)/, '').trim() : (customer !== '-' ? customer : keterangan);
                             
                             // Cek apakah ini Retur
-                            const isRetur = ketContent.toUpperCase().includes('(RETUR)');
-                            // Bersihkan tag (RETUR) dari nama agar bisa distyle terpisah (opsional, tapi user minta otomatis tulisan retur)
-                            // Kita biarkan text aslinya tapi tambahkan badge jika terdeteksi
+                            const isRetur = ecommerce === 'RETUR' || ketContent.toUpperCase().includes('(RETUR)');
+                            
+                            // Jika Manual Restock tapi ternyata RETUR, ubah textnya jadi Retur Barang agar tidak membingungkan
+                            if (isRetur && ketContent === 'Manual Restock') {
+                                ketContent = 'Retur Barang';
+                            }
+
                             const cleanName = ketContent.replace(/\(RETUR\)/i, '').trim();
 
                             return (

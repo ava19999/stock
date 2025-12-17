@@ -179,10 +179,11 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   return data ? data.id : null;
 };
 
-// --- UPDATE INVENTORY ---
+// --- UPDATE INVENTORY (UPDATED FOR RETUR) ---
 export const updateInventory = async (
     item: InventoryItem, 
-    transaction?: { type: 'in' | 'out', qty: number, ecommerce: string, resiTempo: string, customer?: string }
+    // UPDATED: Added price field to transaction object
+    transaction?: { type: 'in' | 'out', qty: number, ecommerce: string, resiTempo: string, customer?: string, price?: number }
 ): Promise<InventoryItem | null> => {
   
   const { data: currentDbItem, error: fetchError } = await supabase
@@ -221,15 +222,27 @@ export const updateInventory = async (
       const txQty = Number(transaction.qty);
       const sourceName = transaction.ecommerce || 'Manual Edit';
       
+      // LOGIC HARGA: Gunakan harga khusus transaksi jika ada, jika tidak gunakan cost/sell price item
+      const txPrice = transaction.price !== undefined 
+          ? transaction.price 
+          : (transaction.type === 'in' ? (item.costPrice || 0) : (item.price || 0));
+      const txTotal = txPrice * txQty;
+
       if (transaction.type === 'in') {
+          // LOGIC KETERANGAN: Jika RETUR dan ada customer, gunakan itu. Jika tidak, Manual Restock
+          const isRetur = sourceName === 'RETUR';
+          const ketText = isRetur && transaction.customer 
+              ? `${transaction.customer} (RETUR)` 
+              : 'Manual Restock';
+
           await addBarangMasuk({
               created_at: wibNow,
               tempo: transaction.resiTempo || '-',
-              keterangan: 'Manual Restock', 
+              keterangan: ketText, 
               ecommerce: sourceName, 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
               rak: item.shelf, stockAhir: finalQty, qtyMasuk: txQty,
-              hargaSatuan: item.costPrice || 0, hargaTotal: (item.costPrice || 0) * txQty
+              hargaSatuan: txPrice, hargaTotal: txTotal
           });
       } else {
           await addBarangKeluar({
@@ -240,7 +253,7 @@ export const updateInventory = async (
               customer: transaction.customer || '', 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
               rak: item.shelf, stockAhir: finalQty, qtyKeluar: txQty,
-              hargaSatuan: item.price || 0, hargaTotal: (item.price || 0) * txQty,
+              hargaSatuan: txPrice, hargaTotal: txTotal,
               resi: transaction.resiTempo || '-'
           });
       }
@@ -307,11 +320,9 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
     
     if (search) {
         if (type === 'in') {
-            // UPDATED: Tambahkan 'tempo' agar bisa cari Resi/Invoice yang tersimpan di kolom tempo
             query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,keterangan.ilike.%${search}%,tempo.ilike.%${search}%`);
         }
         else {
-            // UPDATED: Tambahkan 'tempo' agar bisa cari Nama Toko yang tersimpan di kolom tempo
             query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,customer.ilike.%${search}%,resi.ilike.%${search}%,tempo.ilike.%${search}%`);
         }
     }
