@@ -135,7 +135,6 @@ export const fetchInventoryStats = async () => {
     return { totalItems: all.length, totalStock, totalAsset };
 };
 
-// --- FUNGSI YANG SEBELUMNYA HILANG: FETCH SHOP ITEMS ---
 export const fetchShopItems = async (page: number, limit: number, search: string, cat: string) => {
     let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' }).gt('quantity', 0);
     if (search) query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%`);
@@ -331,8 +330,13 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
     const table = type === 'in' ? 'barang_masuk' : 'barang_keluar';
     let query = supabase.from(table).select('*', { count: 'exact' });
     if (search) {
-        if (type === 'in') { query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,keterangan.ilike.%${search}%,tempo.ilike.%${search}%`); }
-        else { query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,customer.ilike.%${search}%,resi.ilike.%${search}%,tempo.ilike.%${search}%`); }
+        if (type === 'in') {
+            // UPDATED: Menambahkan pencarian ke kolom 'tempo' (Resi/Toko) dan 'ecommerce' secara eksplisit
+            query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,keterangan.ilike.%${search}%,tempo.ilike.%${search}%`);
+        }
+        else {
+            query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,customer.ilike.%${search}%,resi.ilike.%${search}%,tempo.ilike.%${search}%`);
+        }
     }
     const from = (page - 1) * limit; const to = from + limit - 1;
     const { data, error, count } = await query.order('created_at', { ascending: false, nullsFirst: false }).range(from, to);

@@ -128,7 +128,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       // LOGIC BARU: Jangan sembarangan ambil yang dalam kurung sebagai customer jika itu (RETUR)
       const nameMatch = keterangan.match(/\((.*?)\)/); 
       if (nameMatch && nameMatch[1]) { 
-          // Jika isinya RETUR, biarkan saja di dalam keterangan, jangan dipisah ke variable customer
           if (nameMatch[1] !== 'RETUR') {
               customer = nameMatch[1]; 
               keterangan = keterangan.replace(/\s*\(.*?\)/, ''); 
@@ -157,7 +156,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-4 border-b flex justify-between items-center bg-gray-50"><h3 className="font-bold text-gray-800 flex items-center gap-2">{showHistoryDetail === 'in' ? <TrendingUp size={18} className="text-green-600"/> : <TrendingDown size={18} className="text-red-600"/>}Detail Riwayat {showHistoryDetail === 'in' ? 'Masuk' : 'Keluar'}</h3><button onClick={() => setShowHistoryDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm font-medium">Tutup</button></div>
-            <div className="p-3 bg-white border-b border-gray-100 flex gap-3 justify-between items-center"><div className="relative flex-1 max-w-md"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} /><input type="text" placeholder="Cari..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none" value={historyDetailSearch} onChange={(e) => { setHistoryDetailSearch(e.target.value); setHistoryDetailPage(1); }} /></div><div className="flex items-center gap-2"><button onClick={() => setHistoryDetailPage(p => Math.max(1, p - 1))} disabled={historyDetailPage === 1} className="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-30"><ChevronLeft size={16}/></button><span className="text-xs font-bold text-gray-600">Hal {historyDetailPage}</span><button onClick={() => setHistoryDetailPage(p => Math.min(historyDetailTotalPages, p + 1))} disabled={historyDetailPage === historyDetailTotalPages || historyDetailTotalPages === 0} className="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-30"><ChevronRight size={16}/></button></div></div>
+            <div className="p-3 bg-white border-b border-gray-100 flex gap-3 justify-between items-center"><div className="relative flex-1 max-w-md"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+            <input 
+                type="text" 
+                placeholder="Cari Resi, Toko, E-Commerce, Nama Barang..." 
+                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none" 
+                value={historyDetailSearch} 
+                onChange={(e) => { setHistoryDetailSearch(e.target.value); setHistoryDetailPage(1); }} 
+            />
+            </div><div className="flex items-center gap-2"><button onClick={() => setHistoryDetailPage(p => Math.max(1, p - 1))} disabled={historyDetailPage === 1} className="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-30"><ChevronLeft size={16}/></button><span className="text-xs font-bold text-gray-600">Hal {historyDetailPage}</span><button onClick={() => setHistoryDetailPage(p => Math.min(historyDetailTotalPages, p + 1))} disabled={historyDetailPage === historyDetailTotalPages || historyDetailTotalPages === 0} className="p-2 border rounded-lg hover:bg-gray-50 disabled:opacity-30"><ChevronRight size={16}/></button></div></div>
             <div className="overflow-auto flex-1 p-0">
                 {historyDetailLoading ? <div className="flex flex-col items-center justify-center h-64 text-blue-500"><Loader2 size={32} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat...</p></div> : historyDetailData.length === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Belum ada riwayat.</div> : (
                     <table className="w-full text-left border-collapse">
@@ -177,12 +184,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     const parts = h.tempo.split(' / ');
                                     displayResi = parts[0] !== '-' ? parts[0] : '-';
                                     displayShop = parts[1] !== '-' ? parts[1] : '-';
-                                } else if (ecommerce === 'RETUR') {
-                                     // FIX: Treat single value as RESI for Returns
-                                     displayResi = h.tempo || '-';
-                                     displayShop = '-';
                                 } else {
-                                     displayShop = h.tempo || '-';
+                                    displayShop = h.tempo || '-';
                                 }
                             } else {
                                 // Jika Barang Keluar (OUT)
@@ -195,13 +198,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             let ketContent = h.type === 'in' ? h.reason.replace(/\(Via:.*?\)/, '').trim() : (customer !== '-' ? customer : keterangan);
                             
                             // Cek apakah ini Retur
-                            const isRetur = ecommerce === 'RETUR' || ketContent.toUpperCase().includes('(RETUR)');
-                            
-                            // Jika Manual Restock tapi ternyata RETUR, ubah textnya jadi Retur Barang agar tidak membingungkan
-                            if (isRetur && ketContent === 'Manual Restock') {
-                                ketContent = 'Retur Barang';
-                            }
-
+                            const isRetur = ketContent.toUpperCase().includes('(RETUR)');
+                            // Bersihkan tag (RETUR) dari nama agar bisa distyle terpisah
                             const cleanName = ketContent.replace(/\(RETUR\)/i, '').trim();
 
                             return (
