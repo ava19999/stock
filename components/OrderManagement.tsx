@@ -73,7 +73,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       return { cleanName: cleanName.trim(), resiText, ecommerce, shopName };
   };
 
-  // --- LOGIKA UTAMA RETUR (UPDATE) ---
+  // --- LOGIKA UTAMA RETUR ---
   const handleProcessReturn = async () => {
       if (!selectedOrderForReturn) return;
 
@@ -112,11 +112,11 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             }, {
                 type: 'in',
                 qty: item.cartQuantity,
-                ecommerce: ecommerce, // Tetap simpan e-commerce asli (misal: Shopee)
-                resiTempo: combinedResiShop, // Mengirim "Resi / Toko" ke kolom Tempo
-                customer: cleanName, // Mengirim Nama Customer untuk dijadikan Keterangan
-                price: hargaSatuan, // Menggunakan harga asli transaksi
-                isReturn: true // Flag Penanda Retur
+                ecommerce: ecommerce, 
+                resiTempo: combinedResiShop, 
+                customer: cleanName, 
+                price: hargaSatuan, 
+                isReturn: true 
             });
 
             // 2. Simpan Detail Lengkap ke Tabel 'retur'
@@ -316,8 +316,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       <div className="flex border-b border-gray-100 bg-gray-50/50">
           {[
               { id: 'pending', label: 'Pesanan Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' },
-              { id: 'processing', label: 'Terjual', icon: Package, count: safeOrders.filter(o=>o?.status==='processing').length, color: 'text-blue-600' },
-              { id: 'history', label: 'Riwayat / Retur', icon: CheckCircle, count: 0, color: 'text-gray-600' }
+              { id: 'processing', label: 'Terjual', icon: Package, count: 0, color: 'text-blue-600' }, // Count dihapus (0)
+              { id: 'history', label: 'Retur', icon: CheckCircle, count: 0, color: 'text-gray-600' } // Label diubah jadi 'Retur'
           ].map((tab: any) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-white relative ${activeTab === tab.id ? `border-purple-600 text-purple-700 bg-white` : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                   <tab.icon size={18} className={activeTab === tab.id ? tab.color : ''} /><span>{tab.label}</span>{tab.count > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{tab.count}</span>}
