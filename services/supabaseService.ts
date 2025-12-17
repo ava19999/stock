@@ -169,7 +169,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
       await addBarangMasuk({
           created_at: wibNow,
           tempo: '', 
-          keterangan: 'Stok Awal', // Default
+          keterangan: 'Stok Awal', 
           ecommerce: 'Stok Awal', 
           partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
           rak: item.shelf, stockAhir: item.quantity, qtyMasuk: item.quantity,
@@ -225,7 +225,7 @@ export const updateInventory = async (
           await addBarangMasuk({
               created_at: wibNow,
               tempo: transaction.resiTempo || '-',
-              keterangan: 'Manual Restock', // Keterangan untuk edit manual
+              keterangan: 'Manual Restock', 
               ecommerce: sourceName, 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
               rak: item.shelf, stockAhir: finalQty, qtyMasuk: txQty,
@@ -264,7 +264,7 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
   return true;
 };
 
-// --- HISTORY & TRANSAKSI (UPDATED: BACA KOLOM KETERANGAN) ---
+// --- HISTORY & TRANSAKSI ---
 export const fetchHistory = async (): Promise<StockHistory[]> => {
     const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
     const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
@@ -272,7 +272,6 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
     const history: StockHistory[] = [];
 
     (dataMasuk || []).forEach((m: any) => {
-        // Tampilkan keterangan jika ada (contoh: "Budi (RETUR)"), jika tidak "Restock"
         const ket = m.keterangan || 'Restock';
         const reasonText = `${ket} (Via: ${m.ecommerce}) (${m.tempo || '-'})`;
 
@@ -377,18 +376,17 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
-// --- INSERT FUNCTIONS (UPDATED: ADA KOLOM KETERANGAN) ---
+// --- INSERT FUNCTIONS ---
 
 export const addBarangMasuk = async (data: any) => { 
     const ecommerceVal = data.ecommerce || 'Lainnya';
-    // Gunakan 'Restock' jika keterangan kosong/tidak diisi
     const keteranganVal = data.keterangan || 'Restock'; 
 
     const { error } = await supabase.from('barang_masuk').insert([{ 
         created_at: data.created_at || getWIBISOString(), 
         tempo: data.tempo, 
         ecommerce: ecommerceVal, 
-        keterangan: keteranganVal, // KOLOM BARU DI DB
+        keterangan: keteranganVal, 
         part_number: data.partNumber || data.part_number, 
         name: data.name, brand: data.brand, application: data.application, rak: data.rak, 
         stock_ahir: data.stockAhir || data.stock_ahir, 
@@ -442,6 +440,24 @@ export const addHistoryLog = async (h: StockHistory) => {
             hargaSatuan: h.price, hargaTotal: h.totalPrice, resi: '-' 
         }); 
     }
+};
+
+// --- NEW FUNCTION: UPDATE ORDER ITEMS (PARTIAL RETURN) ---
+export const updateOrderData = async (orderId: string, newItems: any[], newTotal: number, newStatus: string): Promise<boolean> => {
+    const { error } = await supabase
+        .from('orders')
+        .update({ 
+            items: newItems, 
+            total_amount: newTotal,
+            status: newStatus
+        })
+        .eq('id', orderId);
+    
+    if (error) {
+        console.error("Gagal update order items:", error);
+        return false;
+    }
+    return true;
 };
 
 export const fetchOrders = async (): Promise<Order[]> => { const { data } = await supabase.from('orders').select('*').order('timestamp', { ascending: false }).limit(100); return (data || []).map((o: any) => ({ id: o.id, customerName: o.customer_name, items: o.items, totalAmount: Number(o.total_amount), status: o.status, timestamp: Number(o.timestamp) })); };

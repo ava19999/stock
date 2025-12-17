@@ -17,7 +17,8 @@ import {
   fetchOrders, saveOrder, updateOrderStatusService,
   fetchHistory, addHistoryLog,
   fetchChatSessions, saveChatSession,
-  addBarangMasuk, addBarangKeluar 
+  addBarangMasuk, addBarangKeluar,
+  updateOrderData // <--- Import fungsi baru
 } from './services/supabaseService';
 
 import { generateId, formatRupiah } from './utils';
@@ -173,7 +174,87 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- UPDATE STATUS & HISTORY (FIXED: Stock_Ahir) ---
+  // --- LOGIC BARU: PROCESS PARTIAL RETURN (RETUR SEBAGIAN) ---
+  const handleProcessReturn = async (orderId: string, returnedItems: { itemId: string, qty: number }[]) => {
+      const order = orders.find(o => o.id === orderId);
+      if (!order) return;
+
+      setLoading(true);
+      const today = new Date().toISOString().split('T')[0];
+
+      // Parse info pelanggan untuk log barang masuk
+      let pureName = order.customerName;
+      let resiVal = '-';
+      let shopVal = '';
+      let ecommerceVal = 'APLIKASI';
+
+      const resiMatch = pureName.match(/\(Resi: (.*?)\)/);
+      if (resiMatch) { resiVal = resiMatch[1]; pureName = pureName.replace(/\(Resi:.*?\)/, ''); }
+      const shopMatch = pureName.match(/\(Toko: (.*?)\)/);
+      if (shopMatch) { shopVal = shopMatch[1]; pureName = pureName.replace(/\(Toko:.*?\)/, ''); }
+      const viaMatch = pureName.match(/\(Via: (.*?)\)/);
+      if (viaMatch) { ecommerceVal = viaMatch[1]; pureName = pureName.replace(/\(Via:.*?\)/, ''); }
+      pureName = pureName.trim() || "Pelanggan";
+
+      // Loop barang yang diretur
+      for (const retur of returnedItems) {
+          const itemInOrder = order.items.find(i => i.id === retur.itemId);
+          if (!itemInOrder) continue;
+
+          // 1. Kembalikan Stok (Update Base)
+          const currentItem = await getItemById(retur.itemId);
+          if (currentItem) {
+              const restoreQty = retur.qty;
+              const newQuantity = currentItem.quantity + restoreQty;
+              // Qty Out dikurangi (karena batal jual)
+              const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
+              await updateInventory(itemToUpdate);
+
+              // 2. Catat di Barang Masuk (Log Retur)
+              await addBarangMasuk({
+                  tanggal: today,
+                  tempo: `${resiVal} / ${shopVal}`, 
+                  ecommerce: ecommerceVal,          
+                  keterangan: `${pureName} (RETUR)`, 
+                  partNumber: itemToUpdate.partNumber,
+                  name: itemToUpdate.name,
+                  brand: itemToUpdate.brand,
+                  application: itemToUpdate.application,
+                  rak: itemToUpdate.shelf,
+                  stockAhir: newQuantity,
+                  qtyMasuk: restoreQty,
+                  hargaSatuan: itemInOrder.customPrice ?? itemInOrder.price,
+                  hargaTotal: (itemInOrder.customPrice ?? itemInOrder.price) * restoreQty
+              });
+          }
+      }
+
+      // 3. Update Order di DB (Kurangi jumlah item di pesanan)
+      const newItems = order.items.map(item => {
+          const returInfo = returnedItems.find(r => r.itemId === item.id);
+          if (returInfo) {
+              const newQty = item.cartQuantity - returInfo.qty;
+              return { ...item, cartQuantity: newQty };
+          }
+          return item;
+      }).filter(item => item.cartQuantity > 0); // Hapus item jika qty jadi 0
+
+      // Hitung total baru
+      const newTotal = newItems.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
+      
+      // Tentukan status baru (jika habis semua -> cancelled/RETUR, jika sisa -> tetap processing/TERJUAL)
+      const newStatus = newItems.length === 0 ? 'cancelled' : 'processing';
+
+      if (await updateOrderData(orderId, newItems, newTotal, newStatus)) {
+          showToast('Retur berhasil diproses!');
+          await refreshData();
+      } else {
+          showToast('Gagal update data pesanan', 'error');
+      }
+      setLoading(false);
+  };
+
+  // --- UPDATE STATUS (FULL PROCESS / CANCEL) ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -183,36 +264,16 @@ const AppContent: React.FC = () => {
       let shopVal = '';
       let ecommerceVal = 'APLIKASI';
 
-      // 1. Parse Resi
       const resiMatch = pureName.match(/\(Resi: (.*?)\)/);
-      if (resiMatch) { 
-          resiVal = resiMatch[1];
-          pureName = pureName.replace(/\(Resi:.*?\)/, ''); 
-      }
-
-      // 2. Parse Toko
+      if (resiMatch) { resiVal = resiMatch[1]; pureName = pureName.replace(/\(Resi:.*?\)/, ''); }
       const shopMatch = pureName.match(/\(Toko: (.*?)\)/);
-      if (shopMatch) {
-          shopVal = shopMatch[1];
-          pureName = pureName.replace(/\(Toko:.*?\)/, '');
-      }
-
-      // 3. Parse Via (E-commerce)
+      if (shopMatch) { shopVal = shopMatch[1]; pureName = pureName.replace(/\(Toko:.*?\)/, ''); }
       const viaMatch = pureName.match(/\(Via: (.*?)\)/);
-      if (viaMatch) { 
-          ecommerceVal = viaMatch[1];
-          pureName = pureName.replace(/\(Via:.*?\)/, ''); 
-      }
-      
-      pureName = pureName.trim(); 
-      if (!pureName) pureName = "Pelanggan"; 
+      if (viaMatch) { ecommerceVal = viaMatch[1]; pureName = pureName.replace(/\(Via:.*?\)/, ''); }
+      pureName = pureName.trim() || "Pelanggan";
 
-      let updateTime = undefined;
       const today = new Date().toISOString().split('T')[0];
-
-      if (newStatus === 'completed' || newStatus === 'cancelled') {
-          updateTime = Date.now();
-      }
+      let updateTime = (newStatus === 'completed' || newStatus === 'cancelled') ? Date.now() : undefined;
 
       if (order.status === 'pending' && newStatus === 'processing') {
           if (await updateOrderStatusService(orderId, newStatus)) { 
@@ -220,13 +281,11 @@ const AppContent: React.FC = () => {
                   const currentItem = await getItemById(orderItem.id);
                   if (currentItem) {
                       const qtySold = orderItem.cartQuantity;
-                      // Hitung quantity baru
                       const newQuantity = Math.max(0, currentItem.quantity - qtySold);
                       const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: newQuantity, lastUpdated: Date.now() };
                       
                       await updateInventory(itemToUpdate);
                       
-                      // FIX: Gunakan newQuantity untuk stockAhir
                       await addBarangKeluar({
                           tanggal: today,
                           kodeToko: 'APP',
@@ -238,7 +297,7 @@ const AppContent: React.FC = () => {
                           brand: currentItem.brand,
                           application: currentItem.application,
                           rak: currentItem.shelf,
-                          stockAhir: newQuantity, // <--- FIXED: Menggunakan nilai stok akhir yang benar
+                          stockAhir: newQuantity,
                           qtyKeluar: qtySold,
                           hargaSatuan: orderItem.customPrice ?? orderItem.price,
                           hargaTotal: (orderItem.customPrice ?? orderItem.price) * qtySold,
@@ -247,7 +306,6 @@ const AppContent: React.FC = () => {
                   }
               }
               showToast('Pesanan diproses, stok berkurang.'); refreshData();
-              setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus } : x));
           }
       }
       else if (newStatus === 'cancelled' && order.status !== 'cancelled') {
@@ -262,35 +320,33 @@ const AppContent: React.FC = () => {
                           
                           await updateInventory(itemToUpdate);
                           
-                          // FIX: Gunakan newQuantity untuk stockAhir
                           await addBarangMasuk({
                               tanggal: today,
                               tempo: `${resiVal} / ${shopVal}`, 
                               ecommerce: ecommerceVal,          
-                              keterangan: `${pureName} (RETUR)`, 
+                              keterangan: `${pureName} (RETUR FULL)`, 
                               partNumber: itemToUpdate.partNumber,
                               name: itemToUpdate.name,
                               brand: itemToUpdate.brand,
                               application: itemToUpdate.application,
                               rak: itemToUpdate.shelf,
-                              stockAhir: newQuantity, // <--- FIXED
+                              stockAhir: newQuantity,
                               qtyMasuk: restoreQty,
                               hargaSatuan: orderItem.customPrice ?? orderItem.price,
                               hargaTotal: (orderItem.customPrice ?? orderItem.price) * restoreQty
                           });
                       }
                   }
-                  showToast('Pesanan dibatalkan, stok dikembalikan.');
+                  showToast('Pesanan dibatalkan sepenuhnya.');
               } else {
-                  showToast('Pesanan dibatalkan (Stok belum dipotong).');
+                  showToast('Pesanan ditolak (Stok belum dipotong).');
               }
               refreshData();
-              setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus, timestamp: updateTime || x.timestamp } : x));
           }
       }
       else {
           if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
-              setOrders(prev => prev.map(x => x.id === orderId ? { ...x, status: newStatus, timestamp: updateTime || x.timestamp } : x));
+              refreshData();
           }
       }
   };
@@ -353,7 +409,6 @@ const AppContent: React.FC = () => {
                 const updateData = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: newQuantity, lastUpdated: Date.now() };
                 await updateInventory(updateData);
                 
-                // FIX: Gunakan newQuantity untuk stockAhir
                 await addBarangKeluar({
                     tanggal: today,
                     kodeToko: 'SCAN',
@@ -365,7 +420,7 @@ const AppContent: React.FC = () => {
                     brand: currentItem.brand,
                     application: currentItem.application,
                     rak: currentItem.shelf,
-                    stockAhir: newQuantity, // <--- FIXED
+                    stockAhir: newQuantity,
                     qtyKeluar: qtySold,
                     hargaSatuan: item.price,
                     hargaTotal: item.price * qtySold,
@@ -465,7 +520,10 @@ const AppContent: React.FC = () => {
       <div className="flex-1 overflow-y-auto">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
         {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
-        {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} onUpdateStatus={handleUpdateStatus} />}
+        
+        {/* Pass onProcessReturn to OrderManagement */}
+        {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} />}
+        
         {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
         {activeView === 'chat' && <ChatView isAdmin={isAdmin} currentCustomerId={isAdmin ? undefined : myCustomerId} sessions={chatSessions} onSendMessage={handleSendMessage} />}
         {activeView === 'scan' && isAdmin && <ScanResiView onSave={handleSaveScannedOrder} onSaveBulk={handleBulkSave} isProcessing={loading} />}

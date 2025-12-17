@@ -1,18 +1,25 @@
 // FILE: src/components/OrderManagement.tsx
 import React, { useState, useMemo, useEffect } from 'react';
 import { Order, OrderStatus } from '../types';
-import { Clock, CheckCircle, Package, Truck, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store } from 'lucide-react';
+import { Clock, CheckCircle, Package, Truck, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store, Save } from 'lucide-react';
 import { formatRupiah } from '../utils';
 
 interface OrderManagementProps {
   orders: Order[];
   onUpdateStatus: (orderId: string, status: OrderStatus) => void;
+  // Prop baru untuk menangani retur sebagian
+  onProcessReturn: (orderId: string, returnedItems: { itemId: string, qty: number }[]) => void;
 }
 
-export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], onUpdateStatus }) => {
+export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], onUpdateStatus, onProcessReturn }) => {
   const [activeTab, setActiveTab] = useState<'pending' | 'processing' | 'history'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
   const [orderNotes, setOrderNotes] = useState<Record<string, string>>({});
+
+  // STATE BARU: Untuk Modal Retur
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
+  const [selectedOrderForReturn, setSelectedOrderForReturn] = useState<Order | null>(null);
+  const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
 
   useEffect(() => {
     try {
@@ -31,6 +38,32 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       const newNotes = { ...orderNotes, [orderId]: text };
       setOrderNotes(newNotes);
       localStorage.setItem('stockmaster_order_notes', JSON.stringify(newNotes));
+  };
+
+  // LOGIC BARU: Buka Modal Retur
+  const openReturnModal = (order: Order) => {
+      setSelectedOrderForReturn(order);
+      const initialQty: Record<string, number> = {};
+      order.items.forEach(item => { initialQty[item.id] = 0; });
+      setReturnQuantities(initialQty);
+      setIsReturnModalOpen(true);
+  };
+
+  // LOGIC BARU: Handle Submit Retur
+  const handleSubmitReturn = () => {
+      if (!selectedOrderForReturn) return;
+      const itemsToReturn = Object.entries(returnQuantities)
+          .filter(([_, qty]) => qty > 0)
+          .map(([itemId, qty]) => ({ itemId, qty }));
+
+      if (itemsToReturn.length === 0) {
+          alert("Pilih minimal 1 barang untuk diretur.");
+          return;
+      }
+
+      onProcessReturn(selectedOrderForReturn.id, itemsToReturn);
+      setIsReturnModalOpen(false);
+      setSelectedOrderForReturn(null);
   };
 
   const safeOrders = Array.isArray(orders) ? orders : [];
@@ -120,7 +153,52 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 min-h-[80vh] flex flex-col overflow-hidden">
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 min-h-[80vh] flex flex-col overflow-hidden relative">
+      
+      {/* MODAL RETUR */}
+      {isReturnModalOpen && selectedOrderForReturn && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90%]">
+                  <div className="bg-orange-50 px-6 py-4 border-b border-orange-100 flex justify-between items-center">
+                      <h3 className="text-lg font-bold text-orange-800 flex items-center gap-2"><RotateCcw size={20}/> Form Retur Barang</h3>
+                      <button onClick={() => setIsReturnModalOpen(false)}><X size={20} className="text-orange-400 hover:text-orange-600"/></button>
+                  </div>
+                  <div className="p-6 overflow-y-auto">
+                      <div className="text-sm text-gray-500 mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                          Pilih jumlah barang yang dikembalikan. Stok gudang akan otomatis bertambah.
+                      </div>
+                      <div className="space-y-3">
+                          {selectedOrderForReturn.items.map((item) => (
+                              <div key={item.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-xl hover:border-orange-200 transition-colors">
+                                  <div className="flex-1">
+                                      <div className="font-bold text-gray-800 text-sm">{item.name}</div>
+                                      <div className="text-xs text-gray-500 font-mono">{item.partNumber}</div>
+                                      <div className="text-xs text-blue-600 font-semibold mt-1">Terjual: {item.cartQuantity} unit</div>
+                                  </div>
+                                  <div className="flex items-center gap-3 bg-gray-50 p-1.5 rounded-lg border border-gray-200">
+                                      <button 
+                                          onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.max(0, (prev[item.id] || 0) - 1)}))}
+                                          className="w-8 h-8 flex items-center justify-center bg-white rounded-md shadow-sm border border-gray-200 hover:bg-red-50 text-gray-600 font-bold"
+                                      >-</button>
+                                      <div className="w-8 text-center font-bold text-lg text-gray-800">{returnQuantities[item.id] || 0}</div>
+                                      <button 
+                                          onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.min(item.cartQuantity, (prev[item.id] || 0) + 1)}))}
+                                          className="w-8 h-8 flex items-center justify-center bg-white rounded-md shadow-sm border border-gray-200 hover:bg-green-50 text-gray-600 font-bold"
+                                      >+</button>
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+                  <div className="p-4 border-t bg-gray-50 flex justify-end gap-3">
+                      <button onClick={() => setIsReturnModalOpen(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">Batal</button>
+                      <button onClick={handleSubmitReturn} className="px-6 py-2 text-sm font-bold bg-orange-600 text-white hover:bg-orange-700 rounded-lg shadow-md transition-colors flex items-center gap-2"><Save size={16}/> Proses Retur</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* HEADER TABEL */}
       <div className="px-6 py-5 border-b border-gray-100 bg-white flex justify-between items-center">
         <div>
             <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2"><ClipboardList className="text-purple-600" /> Manajemen Pesanan</h2>
@@ -128,11 +206,13 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
         </div>
       </div>
 
+      {/* TAB NAVIGATION */}
       <div className="flex border-b border-gray-100 bg-gray-50/50">
           {[
               { id: 'pending', label: 'Pesanan Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' },
               { id: 'processing', label: 'Terjual', icon: Package, count: safeOrders.filter(o=>o?.status==='processing').length, color: 'text-blue-600' },
-              { id: 'history', label: 'Riwayat', icon: CheckCircle, count: 0, color: 'text-gray-600' }
+              // LABEL DIUBAH MENJADI RETUR
+              { id: 'history', label: 'Retur', icon: CheckCircle, count: 0, color: 'text-gray-600' }
           ].map((tab: any) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-white relative ${activeTab === tab.id ? `border-purple-600 text-purple-700 bg-white` : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                   <tab.icon size={18} className={activeTab === tab.id ? tab.color : ''} /><span>{tab.label}</span>{tab.count > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{tab.count}</span>}
@@ -218,7 +298,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                     {index === 0 && (
                                         <>
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
-                                                {/* UPDATED: Status 'TERJUAL' lebih besar */}
                                                 <div className={`inline-block px-3 py-1.5 rounded-lg text-xs font-extrabold border uppercase tracking-wider mb-2 shadow-sm ${getStatusColor(order.status)}`}>{getStatusLabel(order.status)}</div>
                                                 <div className="text-[10px] text-gray-400 font-medium">Total Order:</div><div className="text-sm font-extrabold text-purple-700">{formatRupiah(order.totalAmount || 0)}</div>
                                             </td>
@@ -229,10 +308,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                     <div className="flex flex-col gap-2 items-center">
                                                         {order.status === 'pending' && (<><button onClick={() => onUpdateStatus(order.id, 'processing')} className="w-full py-1.5 bg-purple-600 text-white text-[10px] font-bold rounded hover:bg-purple-700 shadow-sm transition-all flex items-center justify-center gap-1"><Package size={12} /> Proses</button><button onClick={() => onUpdateStatus(order.id, 'cancelled')} className="w-full py-1.5 bg-white border border-gray-300 text-gray-600 text-[10px] font-bold rounded hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors">Tolak</button></>)}
                                                         
-                                                        {/* UPDATED: Hanya Tombol Retur (Kecil) */}
+                                                        {/* TOMBOL RETUR (MEMBUKA MODAL) */}
                                                         {order.status === 'processing' && (
                                                             <button 
-                                                                onClick={() => onUpdateStatus(order.id, 'cancelled')} 
+                                                                onClick={() => openReturnModal(order)} 
                                                                 className="w-2/3 py-1 bg-orange-50 border border-orange-200 text-orange-600 text-[9px] font-bold rounded hover:bg-orange-100 transition-colors flex items-center justify-center gap-1"
                                                             >
                                                                 <RotateCcw size={10} /> Retur
