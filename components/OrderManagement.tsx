@@ -95,7 +95,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       let resiText = `#${orderId.slice(0, 8)}`;
       let isResi = false;
       let ecommerce = '-';
-      let shopName = '-'; // NEW: Variable untuk menyimpan nama toko
+      let shopName = '-';
 
       try {
           // 1. Ambil Resi
@@ -106,7 +106,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
               cleanName = cleanName.replace(/\s*\(Resi:.*?\)/, '');
           }
 
-          // 2. Ambil Toko (NEW LOGIC)
+          // 2. Ambil Toko
           const shopMatch = cleanName.match(/\(Toko: (.*?)\)/);
           if (shopMatch && shopMatch[1]) {
               shopName = shopMatch[1];
@@ -201,7 +201,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 <thead className="bg-gray-50 text-xs font-bold text-gray-600 uppercase tracking-wider border-b border-gray-200">
                     <tr>
                         <th className="p-4 w-32">Tanggal</th>
-                        <th className="p-4 w-32">Resi / ID</th>
+                        
+                        {/* CHANGED: Header Title */}
+                        <th className="p-4 w-32">Resi / Tempo</th>
+                        
                         <th className="p-4 w-32">E-Commerce</th> 
                         <th className="p-4 w-40">Pelanggan</th>
                         <th className="p-4 w-32">No. Part</th>
@@ -252,7 +255,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                 <span className={`block px-2 py-1 rounded w-fit ${isResi ? 'bg-blue-50 text-blue-700 font-bold border border-blue-100' : 'text-gray-500 bg-gray-50'}`}>
                                                     {resiText}
                                                 </span>
-                                                {/* NEW: Tampilkan Nama Toko Di Bawah Resi */}
+                                                {/* Tampilkan Nama Toko Di Bawah Resi */}
                                                 {shopName !== '-' && (
                                                     <div className="mt-2 flex items-center gap-1.5 text-gray-600 bg-gray-50 px-2 py-1 rounded w-fit border border-gray-200">
                                                         <Store size={10} className="text-gray-400" />
