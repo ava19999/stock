@@ -182,11 +182,32 @@ const AppContent: React.FC = () => {
 
       let pureName = order.customerName;
       let extraInfo = '';
+      
+      // 1. Parse Resi
       const resiMatch = pureName.match(/\(Resi: (.*?)\)/);
-      if (resiMatch) { extraInfo += ` (Resi: ${resiMatch[1]})`; pureName = pureName.replace(/\(Resi:.*?\)/, ''); }
+      if (resiMatch) { 
+          extraInfo += ` (Resi: ${resiMatch[1]})`; 
+          pureName = pureName.replace(/\(Resi:.*?\)/, ''); 
+      }
+
+      // 2. Parse Toko (NEW: Untuk mengisi field Tempo)
+      let shopName = '';
+      const shopMatch = pureName.match(/\(Toko: (.*?)\)/);
+      if (shopMatch) {
+          shopName = shopMatch[1];
+          pureName = pureName.replace(/\(Toko:.*?\)/, '');
+      }
+
+      // 3. Parse Via (Untuk mengisi field Ecommerce)
       const viaMatch = pureName.match(/\(Via: (.*?)\)/);
-      if (viaMatch) { extraInfo += ` (Via: ${viaMatch[1]})`; pureName = pureName.replace(/\(Via:.*?\)/, ''); }
-      pureName = pureName.trim();
+      let ecommerceName = 'APLIKASI';
+      if (viaMatch) { 
+          ecommerceName = viaMatch[1];
+          extraInfo += ` (Via: ${viaMatch[1]})`; 
+          pureName = pureName.replace(/\(Via:.*?\)/, ''); 
+      }
+      
+      pureName = pureName.trim(); // Ini adalah Nama Penerima
 
       let updateTime = undefined;
       const today = new Date().toISOString().split('T')[0];
@@ -209,9 +230,9 @@ const AppContent: React.FC = () => {
                       await addBarangKeluar({
                           tanggal: today,
                           kodeToko: 'APP',
-                          tempo: 'MJM',
-                          ecommerce: 'APLIKASI',
-                          customer: pureName,
+                          tempo: shopName, // <--- Nama Toko mengisi Tempo
+                          ecommerce: ecommerceName, // <--- E-commerce otomatis
+                          customer: pureName, // <--- Nama Penerima mengisi Keterangan (Customer)
                           partNumber: currentItem.partNumber,
                           name: currentItem.name,
                           brand: currentItem.brand,
