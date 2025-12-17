@@ -73,7 +73,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       return { cleanName: cleanName.trim(), resiText, ecommerce, shopName };
   };
 
-  // --- LOGIKA UTAMA RETUR (MENGGUNAKAN TABEL BARU) ---
+  // --- LOGIKA UTAMA RETUR (UPDATE) ---
   const handleProcessReturn = async () => {
       if (!selectedOrderForReturn) return;
 
@@ -97,27 +97,31 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       try {
         const { resiText, shopName, ecommerce, cleanName } = getOrderDetails(selectedOrderForReturn);
         
+        // FORMAT GABUNGAN: "RESI / TOKO" untuk kolom tempo
+        const combinedResiShop = `${resiText} / ${shopName}`;
+
         // Loop barang yang diretur
         for (const item of itemsToReturnData) {
             const hargaSatuan = item.customPrice ?? item.price ?? 0;
             const totalRetur = hargaSatuan * item.cartQuantity;
 
-            // 1. Update Stok Fisik (tetap update stok ke base & log sederhana ke barang_masuk)
+            // 1. Update Stok Fisik & Masukkan ke Detail Riwayat Masuk (Log)
             await updateInventory({
                 ...item,
-                quantity: item.quantity // Quantity saat ini di database akan diambil di dalam fungsi
+                quantity: item.quantity 
             }, {
                 type: 'in',
                 qty: item.cartQuantity,
-                ecommerce: 'RETUR', 
-                resiTempo: 'LOG_RETUR', 
-                customer: cleanName,
-                isReturn: true
+                ecommerce: ecommerce, // Tetap simpan e-commerce asli (misal: Shopee)
+                resiTempo: combinedResiShop, // Mengirim "Resi / Toko" ke kolom Tempo
+                customer: cleanName, // Mengirim Nama Customer untuk dijadikan Keterangan
+                price: hargaSatuan, // Menggunakan harga asli transaksi
+                isReturn: true // Flag Penanda Retur
             });
 
             // 2. Simpan Detail Lengkap ke Tabel 'retur'
             const returData: ReturRecord = {
-                tanggal_pemesanan: new Date(selectedOrderForReturn.timestamp).toISOString(), // TYPO FIXED
+                tanggal_pemesanan: new Date(selectedOrderForReturn.timestamp).toISOString(), 
                 resi: resiText,
                 toko: shopName,
                 ecommerce: ecommerce,
@@ -146,19 +150,18 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
         }).filter(item => (item.cartQuantity || 0) > 0);
 
         if (remainingItems.length === 0) {
-            // Full Return (Semua barang diretur)
+            // Full Return
             await updateOrderData(
                 selectedOrderForReturn.id,
                 selectedOrderForReturn.items,
                 selectedOrderForReturn.totalAmount,
                 'cancelled'
             );
-            alert('Retur berhasil! Data disimpan ke tabel Retur dan stok dikembalikan.');
+            alert('Retur Berhasil! Stok fisik dikembalikan dan riwayat tercatat.');
         } else {
-            // Partial Return (Sebagian diretur)
+            // Partial Return
             const returnTotal = itemsToReturnData.reduce((sum, item) => sum + ((item.customPrice ?? item.price ?? 0) * item.cartQuantity), 0);
             
-            // Simpan Order Dummy untuk history visual di Order Management
             const newReturnOrder: Order = {
                 id: `${selectedOrderForReturn.id}-RET`,
                 customerName: `${selectedOrderForReturn.customerName} (RETUR)`,
@@ -169,7 +172,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             };
             await saveOrder(newReturnOrder);
 
-            // Update Sisa Barang di Order Asli
             const remainingTotal = remainingItems.reduce((sum, item) => sum + ((item.customPrice ?? item.price ?? 0) * item.cartQuantity), 0);
             await updateOrderData(
                 selectedOrderForReturn.id,
@@ -177,7 +179,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 remainingTotal,
                 'processing'
             );
-            alert('Retur Sebagian berhasil! Data disimpan ke tabel Retur.');
+            alert('Retur Sebagian Berhasil! Stok fisik dikembalikan.');
         }
 
         setIsReturnModalOpen(false);
