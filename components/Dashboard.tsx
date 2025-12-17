@@ -6,7 +6,7 @@ import { ItemForm } from './ItemForm';
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
   ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin, FileText,
-  LayoutGrid, List, ShoppingBag, History, X, ChevronLeft, Loader2, AlertTriangle, AlertCircle, User
+  LayoutGrid, List, ShoppingBag, History, X, ChevronLeft, Loader2, AlertTriangle, AlertCircle, User, Store
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -167,24 +167,54 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             const total = h.totalPrice || (price * (Number(h.quantity) || 0)); 
                             const { ecommerce, customer, keterangan, resi } = parseHistoryReason(h.reason); 
                             
-                            // LOGIC BARU: Split Resi/Tempo (Atas Bawah)
-                            let displayResi = resi;
-                            let displayTempo = h.tempo || '-';
-                            if (h.type === 'in' && h.tempo && h.tempo.includes(' / ')) {
-                                const parts = h.tempo.split(' / ');
-                                displayResi = parts[0];
-                                displayTempo = parts[1];
+                            // LOGIC TAMPILAN RESI / TEMPO / TOKO
+                            let displayResi = '-';
+                            let displayShop = '-';
+                            
+                            // Jika Barang Masuk (IN) -> Cek apakah format Retur (Resi / Toko)
+                            if (h.type === 'in') {
+                                if (h.tempo && h.tempo.includes(' / ')) {
+                                    const parts = h.tempo.split(' / ');
+                                    displayResi = parts[0] !== '-' ? parts[0] : '-';
+                                    displayShop = parts[1] !== '-' ? parts[1] : '-';
+                                } else {
+                                    displayShop = h.tempo || '-'; // Kalau bukan split, anggap Tempo biasa
+                                }
+                            } else {
+                                // Jika Barang Keluar (OUT)
+                                displayResi = resi !== '-' ? resi : (h.resi || '-');
+                                displayShop = h.tempo || '-';
                             }
+
+                            // LOGIC KETERANGAN & RETUR
+                            // Bersihkan "(Via: ...)" agar tidak double
+                            let ketContent = h.type === 'in' ? h.reason.replace(/\(Via:.*?\)/, '').trim() : (customer !== '-' ? customer : keterangan);
+                            
+                            // Cek apakah ini Retur
+                            const isRetur = ketContent.toUpperCase().includes('(RETUR)');
+                            // Bersihkan tag (RETUR) dari nama agar bisa distyle terpisah (opsional, tapi user minta otomatis tulisan retur)
+                            // Kita biarkan text aslinya tapi tambahkan badge jika terdeteksi
+                            const cleanName = ketContent.replace(/\(RETUR\)/i, '').trim();
 
                             return (
                             <tr key={h.id} className="hover:bg-blue-50 transition-colors">
                                 <td className="p-3 text-gray-600 whitespace-nowrap align-top">{h.timestamp ? <><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div></> : '-'}</td>
                                 
-                                {/* KOLOM RESI / TEMPO (ATAS BAWAH) */}
-                                <td className="p-3 align-top">
-                                    <div className="flex flex-col gap-1 items-start">
-                                        {displayResi && displayResi !== '-' && <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100 truncate max-w-[120px]">{displayResi}</span>}
-                                        {displayTempo && displayTempo !== '-' && <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-100 truncate max-w-[120px]">{displayTempo}</span>}
+                                {/* KOLOM RESI / TEMPO (Format Order Management) */}
+                                <td className="p-3 align-top font-mono text-xs">
+                                    <div className="flex flex-col gap-1.5 items-start">
+                                        {displayResi !== '-' && displayResi !== '' && (
+                                            <span className="inline-block px-2 py-0.5 rounded font-bold bg-blue-50 text-blue-700 border border-blue-100 truncate max-w-[120px]">
+                                                {displayResi}
+                                            </span>
+                                        )}
+                                        {displayShop !== '-' && displayShop !== '' && (
+                                            <div className="flex items-center gap-1 text-gray-600 bg-gray-100 px-2 py-0.5 rounded border border-gray-200 shadow-sm">
+                                                <Store size={10} className="text-gray-500" />
+                                                <span className="font-bold text-[10px] uppercase truncate max-w-[120px]">{displayShop}</span>
+                                            </div>
+                                        )}
+                                        {displayResi === '-' && displayShop === '-' && <span className="text-gray-300">-</span>}
                                     </div>
                                 </td>
                                 
@@ -195,10 +225,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 <td className="p-3 text-right text-gray-600 font-mono align-top text-xs">{formatRupiah(price)}</td>
                                 <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">{formatRupiah(total)}</td>
                                 
-                                {/* KOLOM KETERANGAN (Fixed) */}
+                                {/* KOLOM KETERANGAN: Nama Pelanggan & Badge Retur */}
                                 <td className="p-3 align-top text-gray-700 font-medium text-xs">
-                                    {/* Jika Barang Masuk, tampilkan reason lengkap tanpa Via */}
-                                    {h.type === 'in' ? h.reason.replace(/\(Via:.*?\)/, '').trim() : (customer !== '-' ? customer : keterangan)}
+                                    <div className="flex flex-col items-start gap-1">
+                                        <span className="font-bold text-gray-900">{cleanName}</span>
+                                        {isRetur && (
+                                            <span className="bg-red-100 text-red-700 px-1.5 py-0.5 rounded text-[10px] font-bold border border-red-200 flex items-center gap-1">
+                                                <TrendingDown size={10} /> RETUR
+                                            </span>
+                                        )}
+                                        {!isRetur && cleanName === 'Restock' && (
+                                            <span className="text-[10px] text-gray-400 italic">Penambahan Stok</span>
+                                        )}
+                                    </div>
                                 </td>
                             </tr>); 
                         })}</tbody>
@@ -219,7 +258,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
       
-      {/* ... rest of the component (Stats & Grid/List View) ... */}
+      {/* STATS CARDS */}
       <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide snap-x md:grid md:grid-cols-5 md:gap-4 md:overflow-visible md:mx-0 md:px-0 md:pb-0">
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Package size={32} className="text-blue-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Package size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Item</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalItems, false)}</div></div>
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Layers size={32} className="text-purple-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Layers size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Stok</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalStock, false)}</div></div>
