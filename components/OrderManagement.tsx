@@ -7,7 +7,6 @@ import { formatRupiah } from '../utils';
 interface OrderManagementProps {
   orders: Order[];
   onUpdateStatus: (orderId: string, status: OrderStatus) => void;
-  // Prop baru untuk menangani retur sebagian
   onProcessReturn: (orderId: string, returnedItems: { itemId: string, qty: number }[]) => void;
 }
 
@@ -16,7 +15,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [searchTerm, setSearchTerm] = useState('');
   const [orderNotes, setOrderNotes] = useState<Record<string, string>>({});
 
-  // STATE BARU: Untuk Modal Retur
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
   const [selectedOrderForReturn, setSelectedOrderForReturn] = useState<Order | null>(null);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
@@ -40,7 +38,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       localStorage.setItem('stockmaster_order_notes', JSON.stringify(newNotes));
   };
 
-  // LOGIC BARU: Buka Modal Retur
   const openReturnModal = (order: Order) => {
       setSelectedOrderForReturn(order);
       const initialQty: Record<string, number> = {};
@@ -49,7 +46,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       setIsReturnModalOpen(true);
   };
 
-  // LOGIC BARU: Handle Submit Retur
   const handleSubmitReturn = () => {
       if (!selectedOrderForReturn) return;
       const itemsToReturn = Object.entries(returnQuantities)
@@ -94,21 +90,23 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     });
   }, [safeOrders, activeTab, searchTerm]);
 
+  // --- UPDATED: STATUS COLOR ---
   const getStatusColor = (status: OrderStatus) => {
     switch (status) {
       case 'pending': return 'bg-amber-100 text-amber-700 border-amber-200';
       case 'processing': return 'bg-blue-100 text-blue-700 border-blue-200';
-      case 'completed': return 'bg-green-100 text-green-700 border-green-200';
-      case 'cancelled': return 'bg-red-100 text-red-700 border-red-200';
+      case 'completed': return 'bg-yellow-100 text-yellow-700 border-yellow-200'; // Retur Sebagian (Kuning)
+      case 'cancelled': return 'bg-red-100 text-red-700 border-red-200'; // Retur Semua (Merah)
       default: return 'bg-gray-100 text-gray-700';
     }
   };
 
+  // --- UPDATED: STATUS LABEL ---
   const getStatusLabel = (status: OrderStatus) => {
-      if (status === 'cancelled') return 'RETUR';
+      if (status === 'cancelled') return 'RETUR SEMUA';
+      if (status === 'completed') return 'RETUR SEBAGIAN';
       if (status === 'processing') return 'TERJUAL';
       if (status === 'pending') return 'BARU';
-      if (status === 'completed') return 'SELESAI';
       return status;
   };
 
@@ -211,7 +209,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           {[
               { id: 'pending', label: 'Pesanan Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' },
               { id: 'processing', label: 'Terjual', icon: Package, count: safeOrders.filter(o=>o?.status==='processing').length, color: 'text-blue-600' },
-              // CHANGED: LABEL 'Riwayat' -> 'Retur'
               { id: 'history', label: 'Retur', icon: CheckCircle, count: 0, color: 'text-gray-600' }
           ].map((tab: any) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-white relative ${activeTab === tab.id ? `border-purple-600 text-purple-700 bg-white` : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
@@ -220,6 +217,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           ))}
       </div>
 
+      {/* SEARCH BAR */}
       {(activeTab === 'processing' || activeTab === 'history') && (
           <div className="px-6 py-3 bg-gray-50 border-b border-gray-100 animate-in slide-in-from-top-2">
               <div className="relative max-w-md">
@@ -298,7 +296,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                     {index === 0 && (
                                         <>
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
-                                                <div className={`inline-block px-3 py-1.5 rounded-lg text-xs font-extrabold border uppercase tracking-wider mb-2 shadow-sm ${getStatusColor(order.status)}`}>{getStatusLabel(order.status)}</div>
+                                                {/* UPDATED: LABEL STATUS KHUSUS */}
+                                                <div className={`inline-block px-3 py-1.5 rounded-lg text-[10px] font-extrabold border uppercase tracking-wider mb-2 shadow-sm ${getStatusColor(order.status)}`}>{getStatusLabel(order.status)}</div>
                                                 <div className="text-[10px] text-gray-400 font-medium">Total Order:</div><div className="text-sm font-extrabold text-purple-700">{formatRupiah(order.totalAmount || 0)}</div>
                                             </td>
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
@@ -308,7 +307,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                     <div className="flex flex-col gap-2 items-center">
                                                         {order.status === 'pending' && (<><button onClick={() => onUpdateStatus(order.id, 'processing')} className="w-full py-1.5 bg-purple-600 text-white text-[10px] font-bold rounded hover:bg-purple-700 shadow-sm transition-all flex items-center justify-center gap-1"><Package size={12} /> Proses</button><button onClick={() => onUpdateStatus(order.id, 'cancelled')} className="w-full py-1.5 bg-white border border-gray-300 text-gray-600 text-[10px] font-bold rounded hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors">Tolak</button></>)}
                                                         
-                                                        {/* TOMBOL RETUR (MEMBUKA MODAL) */}
                                                         {order.status === 'processing' && (
                                                             <button 
                                                                 onClick={() => openReturnModal(order)} 
