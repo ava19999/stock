@@ -68,6 +68,9 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
               ecommerce = viaMatch[1];
               cleanName = cleanName.replace(/\s*\(Via:.*?\)/, '');
           }
+          // LOGIC BARU: Hapus tulisan (RETUR) dari nama agar bersih
+          cleanName = cleanName.replace(/\(RETUR\)/i, ''); 
+
       } catch (e) { console.error("Error parsing name", e); }
 
       return { cleanName: cleanName.trim(), resiText, ecommerce, shopName };
@@ -316,8 +319,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       <div className="flex border-b border-gray-100 bg-gray-50/50">
           {[
               { id: 'pending', label: 'Pesanan Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' },
-              { id: 'processing', label: 'Terjual', icon: Package, count: 0, color: 'text-blue-600' }, // Count dihapus (0)
-              { id: 'history', label: 'Retur', icon: CheckCircle, count: 0, color: 'text-gray-600' } // Label diubah jadi 'Retur'
+              { id: 'processing', label: 'Terjual', icon: Package, count: 0, color: 'text-blue-600' }, // Count 0
+              { id: 'history', label: 'Retur', icon: CheckCircle, count: 0, color: 'text-gray-600' } // Label Retur, Count 0
           ].map((tab: any) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-white relative ${activeTab === tab.id ? `border-purple-600 text-purple-700 bg-white` : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                   <tab.icon size={18} className={activeTab === tab.id ? tab.color : ''} /><span>{tab.label}</span>{tab.count > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{tab.count}</span>}
@@ -405,7 +408,13 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                     {index === 0 && (
                                         <>
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
-                                                <div className={`inline-block px-3 py-1.5 rounded-lg text-[10px] font-extrabold border uppercase tracking-wider mb-2 shadow-sm ${getStatusColor(order.status)}`}>{getStatusLabel(order.status)}</div>
+                                                <div className={`inline-block px-3 py-1.5 rounded-lg text-[10px] font-extrabold border uppercase tracking-wider mb-2 shadow-sm ${getStatusColor(order.status)}`}>
+                                                    {/* LOGIC STATUS TAMPILAN BARU */}
+                                                    {order.status === 'cancelled' 
+                                                        ? (order.id.endsWith('-RET') ? 'RETUR SEBAGIAN' : 'FULL RETUR')
+                                                        : getStatusLabel(order.status)
+                                                    }
+                                                </div>
                                                 <div className="text-[10px] text-gray-400 font-medium">Total Order:</div><div className="text-sm font-extrabold text-purple-700">{formatRupiah(order.totalAmount || 0)}</div>
                                             </td>
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
