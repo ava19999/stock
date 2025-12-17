@@ -73,7 +73,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   const getStatusLabel = (status: OrderStatus) => {
       if (status === 'cancelled') return 'RETUR';
-      if (status === 'processing') return 'TERJUAL'; // CHANGED: Dikirim -> TERJUAL
+      if (status === 'processing') return 'TERJUAL';
       if (status === 'pending') return 'BARU';
       if (status === 'completed') return 'SELESAI';
       return status;
@@ -131,10 +131,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       <div className="flex border-b border-gray-100 bg-gray-50/50">
           {[
               { id: 'pending', label: 'Pesanan Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' },
-              
-              // CHANGED: Label 'Dikirim' -> 'Terjual'
               { id: 'processing', label: 'Terjual', icon: Package, count: safeOrders.filter(o=>o?.status==='processing').length, color: 'text-blue-600' },
-              
               { id: 'history', label: 'Riwayat', icon: CheckCircle, count: 0, color: 'text-gray-600' }
           ].map((tab: any) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-white relative ${activeTab === tab.id ? `border-purple-600 text-purple-700 bg-white` : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
@@ -221,16 +218,26 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                     {index === 0 && (
                                         <>
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
-                                                <div className={`inline-block px-2 py-1 rounded text-[10px] font-bold border uppercase tracking-wide mb-2 ${getStatusColor(order.status)}`}>{getStatusLabel(order.status)}</div>
+                                                {/* UPDATED: Status 'TERJUAL' lebih besar */}
+                                                <div className={`inline-block px-3 py-1.5 rounded-lg text-xs font-extrabold border uppercase tracking-wider mb-2 shadow-sm ${getStatusColor(order.status)}`}>{getStatusLabel(order.status)}</div>
                                                 <div className="text-[10px] text-gray-400 font-medium">Total Order:</div><div className="text-sm font-extrabold text-purple-700">{formatRupiah(order.totalAmount || 0)}</div>
                                             </td>
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
                                                 {activeTab === 'history' ? (
                                                     <div className="relative group/note"><textarea className="w-full text-xs p-2 border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none resize-none min-h-[60px] transition-all" placeholder="Tambah keterangan..." value={orderNotes[order.id] || ''} onChange={(e) => handleNoteChange(order.id, e.target.value)} /><div className="absolute top-2 right-2 text-gray-300 pointer-events-none group-focus-within/note:text-blue-300"><Edit3 size={10} /></div></div>
                                                 ) : (
-                                                    <div className="flex flex-col gap-2">
+                                                    <div className="flex flex-col gap-2 items-center">
                                                         {order.status === 'pending' && (<><button onClick={() => onUpdateStatus(order.id, 'processing')} className="w-full py-1.5 bg-purple-600 text-white text-[10px] font-bold rounded hover:bg-purple-700 shadow-sm transition-all flex items-center justify-center gap-1"><Package size={12} /> Proses</button><button onClick={() => onUpdateStatus(order.id, 'cancelled')} className="w-full py-1.5 bg-white border border-gray-300 text-gray-600 text-[10px] font-bold rounded hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors">Tolak</button></>)}
-                                                        {order.status === 'processing' && (<><button onClick={() => onUpdateStatus(order.id, 'completed')} className="w-full py-1.5 bg-green-600 text-white text-[10px] font-bold rounded hover:bg-green-700 shadow-sm transition-all flex items-center justify-center gap-1"><Truck size={12} /> Selesai</button><button onClick={() => onUpdateStatus(order.id, 'cancelled')} className="w-full py-1.5 bg-orange-50 border border-orange-200 text-orange-600 text-[10px] font-bold rounded hover:bg-orange-100 transition-colors flex items-center justify-center gap-1"><RotateCcw size={12} /> Retur</button></>)}
+                                                        
+                                                        {/* UPDATED: Hanya Tombol Retur (Kecil) */}
+                                                        {order.status === 'processing' && (
+                                                            <button 
+                                                                onClick={() => onUpdateStatus(order.id, 'cancelled')} 
+                                                                className="w-2/3 py-1 bg-orange-50 border border-orange-200 text-orange-600 text-[9px] font-bold rounded hover:bg-orange-100 transition-colors flex items-center justify-center gap-1"
+                                                            >
+                                                                <RotateCcw size={10} /> Retur
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 )}
                                             </td>
