@@ -178,7 +178,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   return data ? data.id : null;
 };
 
-// --- UPDATE INVENTORY (MENGURUS FISIK STOK & LOG DEFAULT) ---
+// --- UPDATE INVENTORY ---
 export const updateInventory = async (
     item: InventoryItem, 
     transaction?: { type: 'in' | 'out', qty: number, ecommerce: string, resiTempo: string, customer?: string, price?: number, isReturn?: boolean }
@@ -226,7 +226,6 @@ export const updateInventory = async (
       const txTotal = txPrice * txQty;
 
       if (transaction.type === 'in') {
-          // LOGIC BARU: Penanganan Keterangan saat Retur
           let ketText = 'Manual Restock';
           if (transaction.isReturn) {
               const custName = transaction.customer || 'Customer';
@@ -269,7 +268,6 @@ export const updateInventory = async (
   };
 };
 
-// --- FUNGSI BARU: INSERT KE TABEL RETUR ---
 export const addReturTransaction = async (data: ReturRecord): Promise<boolean> => {
     const { error } = await supabase.from('retur').insert([{
         tanggal_pemesanan: data.tanggal_pemesanan, 
@@ -289,6 +287,31 @@ export const addReturTransaction = async (data: ReturRecord): Promise<boolean> =
 
     if (error) {
         console.error("Gagal simpan ke tabel Retur:", error);
+        return false;
+    }
+    return true;
+};
+
+// --- FUNGSI BARU: FETCH DATA RETUR UNTUK DITAMPILKAN ---
+export const fetchReturRecords = async (): Promise<ReturRecord[]> => {
+    const { data, error } = await supabase.from('retur').select('*').order('tanggal_retur', { ascending: false });
+    if (error) {
+        console.error("Gagal ambil data retur:", error);
+        return [];
+    }
+    return data || [];
+};
+
+// --- FUNGSI UPDATE KETERANGAN RETUR (HANYA TABEL RETUR) ---
+export const updateReturKeterangan = async (resi: string, keterangan: string): Promise<boolean> => {
+    // Hanya update tabel RETUR sesuai permintaan
+    const { error: returError } = await supabase
+        .from('retur')
+        .update({ keterangan: keterangan })
+        .eq('resi', resi); 
+
+    if (returError) {
+        console.error("Gagal update keterangan retur:", returError);
         return false;
     }
     return true;
@@ -331,7 +354,6 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
     let query = supabase.from(table).select('*', { count: 'exact' });
     if (search) {
         if (type === 'in') {
-            // UPDATED: Menambahkan pencarian ke kolom 'tempo' (Resi/Toko) dan 'ecommerce' secara eksplisit
             query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,keterangan.ilike.%${search}%,tempo.ilike.%${search}%`);
         }
         else {
@@ -390,7 +412,6 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
-// --- INSERT FUNCTIONS ---
 export const addBarangMasuk = async (data: any) => { 
     const ecommerceVal = data.ecommerce || 'Lainnya';
     const keteranganVal = data.keterangan || 'Restock'; 
@@ -442,28 +463,10 @@ export const updateOrderData = async (orderId: string, newItems: any[], newTotal
     return true;
 };
 
-export const fetchOrders = async (): Promise<Order[]> => { const { data } = await supabase.from('orders').select('*').order('timestamp', { ascending: false }).limit(100); return (data || []).map((o: any) => ({ id: o.id, customerName: o.customer_name, items: o.items, totalAmount: Number(o.total_amount), status: o.status, timestamp: Number(o.timestamp) })); };
-export const saveOrder = async (order: Order): Promise<boolean> => { const { error } = await supabase.from('orders').insert([{ id: order.id, customer_name: order.customerName, items: order.items, total_amount: order.totalAmount, status: order.status, timestamp: order.timestamp }]); return !error; };
+export const fetchOrders = async (): Promise<Order[]> => { const { data } = await supabase.from('orders').select('*').order('timestamp', { ascending: false }).limit(100); return (data || []).map((o: any) => ({ id: o.id, customerName: o.customer_name, items: o.items, totalAmount: Number(o.total_amount), status: o.status, timestamp: Number(o.timestamp), keterangan: o.keterangan })); };
+export const saveOrder = async (order: Order): Promise<boolean> => { const { error } = await supabase.from('orders').insert([{ id: order.id, customer_name: order.customerName, items: order.items, total_amount: order.totalAmount, status: order.status, timestamp: order.timestamp, keterangan: order.keterangan }]); return !error; };
 export const updateOrderStatusService = async (id: string, status: string, timestamp?: number): Promise<boolean> => { const updateData: any = { status }; if (timestamp) { updateData.timestamp = timestamp; } const { error } = await supabase.from('orders').update(updateData).eq('id', id); return !error; };
 export const fetchChatSessions = async (): Promise<ChatSession[]> => { const { data } = await supabase.from('chat_sessions').select('*'); return (data || []).map((c: any) => ({ customerId: c.customer_id, customerName: c.customer_name, messages: c.messages, lastMessage: c.last_message, lastTimestamp: c.last_timestamp, unreadAdminCount: c.unread_admin_count, unreadUserCount: c.unread_user_count })); };
 export const saveChatSession = async (s: ChatSession): Promise<boolean> => { const { error } = await supabase.from('chat_sessions').upsert([{ customer_id: s.customerId, customer_name: s.customerName, messages: s.messages, last_message: s.lastMessage, last_timestamp: s.lastTimestamp, unread_admin_count: s.unreadAdminCount, unread_user_count: s.unreadUserCount }]); return !error; };
-
-// --- EXPORTS LAINNYA ---
-export const fetchPriceHistoryBySource = async (partNumber: string) => { 
-    const { data, error } = await supabase.from('barang_masuk').select('ecommerce, harga_satuan, created_at').eq('part_number', partNumber).order('created_at', { ascending: false }); 
-    if (error || !data) return []; 
-    const uniqueSources: Record<string, any> = {}; 
-    data.forEach((item: any) => { 
-        const sourceName = item.ecommerce || 'Unknown'; 
-        if (!uniqueSources[sourceName]) { 
-            uniqueSources[sourceName] = { source: sourceName, price: Number(item.harga_satuan), date: item.created_at ? new Date(item.created_at).toLocaleDateString('id-ID') : '-' }; 
-        } 
-    }); 
-    return Object.values(uniqueSources); 
-};
-
-export const clearBarangKeluar = async (): Promise<boolean> => { 
-    const { error } = await supabase.from('barang_keluar').delete().neq('id', 0); 
-    if (error) { console.error("Gagal hapus barang keluar:", error); return false; } 
-    return true; 
-};
+export const fetchPriceHistoryBySource = async (partNumber: string) => { const { data, error } = await supabase.from('barang_masuk').select('ecommerce, harga_satuan, created_at').eq('part_number', partNumber).order('created_at', { ascending: false }); if (error || !data) return []; const uniqueSources: Record<string, any> = {}; data.forEach((item: any) => { const sourceName = item.ecommerce || 'Unknown'; if (!uniqueSources[sourceName]) { uniqueSources[sourceName] = { source: sourceName, price: Number(item.harga_satuan), date: item.created_at ? new Date(item.created_at).toLocaleDateString('id-ID') : '-' }; } }); return Object.values(uniqueSources); };
+export const clearBarangKeluar = async (): Promise<boolean> => { const { error } = await supabase.from('barang_keluar').delete().neq('id', 0); if (error) { console.error("Gagal hapus barang keluar:", error); return false; } return true; };

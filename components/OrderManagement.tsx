@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Order, OrderStatus, ReturRecord } from '../types';
 import { Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store, Save, Loader } from 'lucide-react';
 import { formatRupiah } from '../utils';
-import { updateInventory, updateOrderData, saveOrder, addReturTransaction } from '../services/supabaseService';
+import { updateInventory, updateOrderData, saveOrder, addReturTransaction, updateReturKeterangan, fetchReturRecords } from '../services/supabaseService';
 
 interface OrderManagementProps {
   orders: Order[];
@@ -15,26 +15,57 @@ interface OrderManagementProps {
 export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], onUpdateStatus, onProcessReturn, onRefresh }) => {
   const [activeTab, setActiveTab] = useState<'pending' | 'processing' | 'history'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
-  const [orderNotes, setOrderNotes] = useState<Record<string, string>>({});
+  
+  // State untuk keterangan yang sedang diedit
+  const [localNotes, setLocalNotes] = useState<Record<string, string>>({});
+  // State untuk menyimpan data Retur asli dari database agar keterangan bisa dimuat
+  const [returDbRecords, setReturDbRecords] = useState<ReturRecord[]>([]);
 
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
   const [selectedOrderForReturn, setSelectedOrderForReturn] = useState<Order | null>(null);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(false);
 
+  // FETCH DATA RETUR SAAT TAB HISTORY/RETUR AKTIF
   useEffect(() => {
-    try {
-        const savedNotes = localStorage.getItem('stockmaster_order_notes');
-        if (savedNotes) setOrderNotes(JSON.parse(savedNotes));
-    } catch (e) { console.error("Gagal load notes", e); }
-  }, []);
+      if (activeTab === 'history') {
+          fetchReturRecords().then(records => {
+              setReturDbRecords(records);
+              
+              // Mapping keterangan dari tabel Retur ke Local Notes
+              // Kita gunakan RESI sebagai kunci pencocokan
+              const dbNotes: Record<string, string> = {};
+              
+              // Iterasi orders yang ada di state UI
+              orders.forEach(order => {
+                  const { resiText } = getOrderDetails(order);
+                  // Cari record di tabel retur yang resinya cocok
+                  const foundRetur = records.find(r => r.resi === resiText);
+                  if (foundRetur && foundRetur.keterangan) {
+                      dbNotes[order.id] = foundRetur.keterangan;
+                  }
+              });
+              
+              setLocalNotes(prev => ({...prev, ...dbNotes}));
+          });
+      }
+  }, [activeTab, orders]);
 
   useEffect(() => { setSearchTerm(''); }, [activeTab]);
 
   const handleNoteChange = (orderId: string, text: string) => {
-      const newNotes = { ...orderNotes, [orderId]: text };
-      setOrderNotes(newNotes);
-      localStorage.setItem('stockmaster_order_notes', JSON.stringify(newNotes));
+      setLocalNotes(prev => ({ ...prev, [orderId]: text }));
+  };
+
+  // SIMPAN KETERANGAN HANYA KE TABEL RETUR
+  const handleNoteSave = async (order: Order) => {
+      const newNote = localNotes[order.id];
+      if (newNote !== undefined) {
+          const { resiText } = getOrderDetails(order);
+          // Hanya update tabel Retur
+          await updateReturKeterangan(resiText, newNote);
+          // Kita tidak perlu refresh full page, cukup local state sudah terupdate
+      }
   };
 
   const openReturnModal = (order: Order) => {
@@ -68,7 +99,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
               ecommerce = viaMatch[1];
               cleanName = cleanName.replace(/\s*\(Via:.*?\)/, '');
           }
-          // LOGIC BARU: Hapus tulisan (RETUR) dari nama agar bersih
           cleanName = cleanName.replace(/\(RETUR\)/i, ''); 
 
       } catch (e) { console.error("Error parsing name", e); }
@@ -76,7 +106,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       return { cleanName: cleanName.trim(), resiText, ecommerce, shopName };
   };
 
-  // --- LOGIKA UTAMA RETUR ---
   const handleProcessReturn = async () => {
       if (!selectedOrderForReturn) return;
 
@@ -99,16 +128,12 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
       try {
         const { resiText, shopName, ecommerce, cleanName } = getOrderDetails(selectedOrderForReturn);
-        
-        // FORMAT GABUNGAN: "RESI / TOKO" untuk kolom tempo
         const combinedResiShop = `${resiText} / ${shopName}`;
 
-        // Loop barang yang diretur
         for (const item of itemsToReturnData) {
             const hargaSatuan = item.customPrice ?? item.price ?? 0;
             const totalRetur = hargaSatuan * item.cartQuantity;
 
-            // 1. Update Stok Fisik & Masukkan ke Detail Riwayat Masuk (Log)
             await updateInventory({
                 ...item,
                 quantity: item.quantity 
@@ -122,7 +147,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 isReturn: true 
             });
 
-            // 2. Simpan Detail Lengkap ke Tabel 'retur'
             const returData: ReturRecord = {
                 tanggal_pemesanan: new Date(selectedOrderForReturn.timestamp).toISOString(), 
                 resi: resiText,
@@ -142,7 +166,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             await addReturTransaction(returData);
         }
 
-        // 3. Update Status Order (Split Order)
         const remainingItems = selectedOrderForReturn.items.map(item => {
             const returItem = itemsToReturnData.find(r => r.id === item.id);
             if (returItem) {
@@ -153,7 +176,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
         }).filter(item => (item.cartQuantity || 0) > 0);
 
         if (remainingItems.length === 0) {
-            // Full Return
             await updateOrderData(
                 selectedOrderForReturn.id,
                 selectedOrderForReturn.items,
@@ -162,7 +184,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             );
             alert('Retur Berhasil! Stok fisik dikembalikan dan riwayat tercatat.');
         } else {
-            // Partial Return
             const returnTotal = itemsToReturnData.reduce((sum, item) => sum + ((item.customPrice ?? item.price ?? 0) * item.cartQuantity), 0);
             
             const newReturnOrder: Order = {
@@ -255,7 +276,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 min-h-[80vh] flex flex-col overflow-hidden relative">
-      
       {/* MODAL RETUR */}
       {isReturnModalOpen && selectedOrderForReturn && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
@@ -319,8 +339,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       <div className="flex border-b border-gray-100 bg-gray-50/50">
           {[
               { id: 'pending', label: 'Pesanan Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' },
-              { id: 'processing', label: 'Terjual', icon: Package, count: 0, color: 'text-blue-600' }, // Count 0
-              { id: 'history', label: 'Retur', icon: CheckCircle, count: 0, color: 'text-gray-600' } // Label Retur, Count 0
+              { id: 'processing', label: 'Terjual', icon: Package, count: 0, color: 'text-blue-600' }, 
+              { id: 'history', label: 'Retur', icon: CheckCircle, count: 0, color: 'text-gray-600' }
           ].map((tab: any) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-white relative ${activeTab === tab.id ? `border-purple-600 text-purple-700 bg-white` : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                   <tab.icon size={18} className={activeTab === tab.id ? tab.color : ''} /><span>{tab.label}</span>{tab.count > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{tab.count}</span>}
@@ -409,7 +429,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                         <>
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
                                                 <div className={`inline-block px-3 py-1.5 rounded-lg text-[10px] font-extrabold border uppercase tracking-wider mb-2 shadow-sm ${getStatusColor(order.status)}`}>
-                                                    {/* LOGIC STATUS TAMPILAN BARU */}
                                                     {order.status === 'cancelled' 
                                                         ? (order.id.endsWith('-RET') ? 'RETUR SEBAGIAN' : 'FULL RETUR')
                                                         : getStatusLabel(order.status)
@@ -419,7 +438,16 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                             </td>
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
                                                 {activeTab === 'history' ? (
-                                                    <div className="relative group/note"><textarea className="w-full text-xs p-2 border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none resize-none min-h-[60px] transition-all" placeholder="Tambah keterangan..." value={orderNotes[order.id] || ''} onChange={(e) => handleNoteChange(order.id, e.target.value)} /><div className="absolute top-2 right-2 text-gray-300 pointer-events-none group-focus-within/note:text-blue-300"><Edit3 size={10} /></div></div>
+                                                    <div className="relative group/note">
+                                                        <textarea 
+                                                            className="w-full text-xs p-2 border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none resize-none min-h-[60px] transition-all" 
+                                                            placeholder="Tambah keterangan..." 
+                                                            value={localNotes[order.id] || ''} 
+                                                            onChange={(e) => handleNoteChange(order.id, e.target.value)}
+                                                            onBlur={() => handleNoteSave(order)} 
+                                                        />
+                                                        <div className="absolute top-2 right-2 text-gray-300 pointer-events-none group-focus-within/note:text-blue-300"><Edit3 size={10} /></div>
+                                                    </div>
                                                 ) : (
                                                     <div className="flex flex-col gap-2 items-center">
                                                         {order.status === 'pending' && (<><button onClick={() => onUpdateStatus(order.id, 'processing')} className="w-full py-1.5 bg-purple-600 text-white text-[10px] font-bold rounded hover:bg-purple-700 shadow-sm transition-all flex items-center justify-center gap-1"><Package size={12} /> Proses</button><button onClick={() => onUpdateStatus(order.id, 'cancelled')} className="w-full py-1.5 bg-white border border-gray-300 text-gray-600 text-[10px] font-bold rounded hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors">Tolak</button></>)}
