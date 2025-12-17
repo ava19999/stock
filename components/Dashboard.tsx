@@ -80,7 +80,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadStats(); }, [loadStats]);
 
-  // Handlers
   const handleEditClick = (item: InventoryItem) => {
       setEditingItem(item);
       setShowItemForm(true);
@@ -91,21 +90,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setShowItemForm(true);
   };
 
-  // --- LOGIKA OPTIMISTIC UPDATE ---
   const handleFormSuccess = (updatedItem?: InventoryItem) => {
       if (updatedItem) {
-          // Edit: Update langsung di state lokal
           setLocalItems(currentItems => 
               currentItems.map(item => item.id === updatedItem.id ? updatedItem : item)
           );
-          
           if (editingItem) {
              const diff = updatedItem.quantity - editingItem.quantity;
              setStats(prev => ({ ...prev, totalStock: prev.totalStock + diff }));
           }
           setShowItemForm(false);
       } else {
-          // Tambah Baru: Reload karena ID dari server
           setShowItemForm(false);
           loadData(); 
           loadStats();
@@ -118,7 +113,34 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => { if (showHistoryDetail) { setHistoryDetailLoading(true); const timer = setTimeout(async () => { const { data, count } = await fetchHistoryLogsPaginated(showHistoryDetail, historyDetailPage, 50, historyDetailSearch); setHistoryDetailData(data); setHistoryDetailTotalPages(Math.ceil(count / 50)); setHistoryDetailLoading(false); }, 500); return () => clearTimeout(timer); } else { setHistoryDetailData([]); setHistoryDetailPage(1); setHistoryDetailSearch(''); } }, [showHistoryDetail, historyDetailPage, historyDetailSearch]);
   useEffect(() => { if (selectedItemHistory && selectedItemHistory.partNumber) { setLoadingItemHistory(true); setItemHistoryData([]); fetchItemHistory(selectedItemHistory.partNumber).then((data) => { setItemHistoryData(data); setLoadingItemHistory(false); }).catch(() => setLoadingItemHistory(false)); } }, [selectedItemHistory]);
   
-  const parseHistoryReason = (reason: string) => { let resi = '-'; let ecommerce = '-'; let customer = '-'; let keterangan = reason || ''; const resiMatch = keterangan.match(/\(Resi: (.*?)\)/); if (resiMatch && resiMatch[1]) { resi = resiMatch[1]; keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, ''); } const viaMatch = keterangan.match(/\(Via: (.*?)\)/); if (viaMatch && viaMatch[1]) { ecommerce = viaMatch[1]; keterangan = keterangan.replace(/\s*\(Via:.*?\)/, ''); } const nameMatch = keterangan.match(/\((.*?)\)/); if (nameMatch && nameMatch[1]) { customer = nameMatch[1]; keterangan = keterangan.replace(/\s*\(.*?\)/, ''); } if (keterangan.toLowerCase().includes('cancel order')) { keterangan = 'Retur Pesanan'; } if (!keterangan.trim()) keterangan = 'Transaksi'; return { resi, ecommerce, customer, keterangan: keterangan.trim() }; };
+  const parseHistoryReason = (reason: string) => { 
+      let resi = '-'; 
+      let ecommerce = '-'; 
+      let customer = '-'; 
+      let keterangan = reason || ''; 
+      
+      const resiMatch = keterangan.match(/\(Resi: (.*?)\)/); 
+      if (resiMatch && resiMatch[1]) { resi = resiMatch[1]; keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, ''); } 
+      
+      const viaMatch = keterangan.match(/\(Via: (.*?)\)/); 
+      if (viaMatch && viaMatch[1]) { ecommerce = viaMatch[1]; keterangan = keterangan.replace(/\s*\(Via:.*?\)/, ''); } 
+      
+      // LOGIC BARU: Jangan sembarangan ambil yang dalam kurung sebagai customer jika itu (RETUR)
+      const nameMatch = keterangan.match(/\((.*?)\)/); 
+      if (nameMatch && nameMatch[1]) { 
+          // Jika isinya RETUR, biarkan saja di dalam keterangan, jangan dipisah ke variable customer
+          if (nameMatch[1] !== 'RETUR') {
+              customer = nameMatch[1]; 
+              keterangan = keterangan.replace(/\s*\(.*?\)/, ''); 
+          }
+      } 
+      
+      if (keterangan.toLowerCase().includes('cancel order')) { keterangan = 'Retur Pesanan'; } 
+      if (!keterangan.trim()) keterangan = 'Transaksi'; 
+      
+      return { resi, ecommerce, customer, keterangan: keterangan.trim() }; 
+  };
+
   const filteredItemHistory = useMemo(() => { if (!selectedItemHistory) return []; let itemHistory = [...itemHistoryData]; if (itemHistorySearch.trim() !== '') { const lowerSearch = itemHistorySearch.toLowerCase(); itemHistory = itemHistory.filter(h => { const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason); return ( keterangan.toLowerCase().includes(lowerSearch) || resi.toLowerCase().includes(lowerSearch) || ecommerce.toLowerCase().includes(lowerSearch) || customer.toLowerCase().includes(lowerSearch) || h.reason.toLowerCase().includes(lowerSearch) ); }); } return itemHistory; }, [itemHistoryData, selectedItemHistory, itemHistorySearch]);
 
   return (
@@ -140,7 +162,46 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 {historyDetailLoading ? <div className="flex flex-col items-center justify-center h-64 text-blue-500"><Loader2 size={32} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat...</p></div> : historyDetailData.length === 0 ? <div className="p-8 text-center text-gray-400 text-sm">Belum ada riwayat.</div> : (
                     <table className="w-full text-left border-collapse">
                         <thead className="bg-gray-100 text-gray-600 text-xs font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm"><tr><th className="p-3 border-b w-28">Tanggal</th><th className="p-3 border-b w-36">Resi / Tempo</th><th className="p-3 border-b w-32">E-Commerce</th><th className="p-3 border-b w-32">No. Part</th><th className="p-3 border-b">Nama Barang</th><th className="p-3 border-b text-right w-20">Qty</th><th className="p-3 border-b text-right w-32">Harga</th><th className="p-3 border-b text-right w-32">Total</th><th className="p-3 border-b w-48">Ket</th></tr></thead>
-                        <tbody className="divide-y divide-gray-100 text-sm">{historyDetailData.map((h) => { const price = h.price || 0; const total = h.totalPrice || (price * (Number(h.quantity) || 0)); const { ecommerce, customer, keterangan, resi } = parseHistoryReason(h.reason); return (<tr key={h.id} className="hover:bg-blue-50 transition-colors"><td className="p-3 text-gray-600 whitespace-nowrap align-top">{h.timestamp ? <><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div></> : '-'}</td><td className="p-3 align-top"><div className="flex flex-col gap-1">{h.resi && h.resi !== '-' && <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100 truncate max-w-[120px]">{h.resi}</span>}{h.tempo && h.tempo !== '-' && <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-100 truncate max-w-[120px]">{h.tempo}</span>}</div></td><td className="p-3 align-top"><span className={`inline-block px-2 py-1 rounded text-xs font-medium flex items-center gap-1 w-fit ${ecommerce !== '-' ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'text-gray-300'}`}>{ecommerce}</span></td><td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber || '-'}</td><td className="p-3 font-medium text-gray-800 max-w-[200px] align-top"><div className="line-clamp-2">{h.name}</div></td><td className={`p-3 text-right font-bold align-top ${showHistoryDetail==='in'?'text-green-600':'text-red-600'}`}>{showHistoryDetail==='in' ? '+' : '-'}{h.quantity}</td><td className="p-3 text-right text-gray-600 font-mono align-top text-xs">{formatRupiah(price)}</td><td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">{formatRupiah(total)}</td><td className="p-3 align-top text-gray-700 font-medium text-xs">{customer !== '-' ? customer : keterangan}</td></tr>); })}</tbody>
+                        <tbody className="divide-y divide-gray-100 text-sm">{historyDetailData.map((h) => { 
+                            const price = h.price || 0; 
+                            const total = h.totalPrice || (price * (Number(h.quantity) || 0)); 
+                            const { ecommerce, customer, keterangan, resi } = parseHistoryReason(h.reason); 
+                            
+                            // LOGIC BARU: Split Resi/Tempo (Atas Bawah)
+                            let displayResi = resi;
+                            let displayTempo = h.tempo || '-';
+                            if (h.type === 'in' && h.tempo && h.tempo.includes(' / ')) {
+                                const parts = h.tempo.split(' / ');
+                                displayResi = parts[0];
+                                displayTempo = parts[1];
+                            }
+
+                            return (
+                            <tr key={h.id} className="hover:bg-blue-50 transition-colors">
+                                <td className="p-3 text-gray-600 whitespace-nowrap align-top">{h.timestamp ? <><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div></> : '-'}</td>
+                                
+                                {/* KOLOM RESI / TEMPO (ATAS BAWAH) */}
+                                <td className="p-3 align-top">
+                                    <div className="flex flex-col gap-1 items-start">
+                                        {displayResi && displayResi !== '-' && <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100 truncate max-w-[120px]">{displayResi}</span>}
+                                        {displayTempo && displayTempo !== '-' && <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-yellow-50 text-yellow-700 border border-yellow-100 truncate max-w-[120px]">{displayTempo}</span>}
+                                    </div>
+                                </td>
+                                
+                                <td className="p-3 align-top"><span className={`inline-block px-2 py-1 rounded text-xs font-medium flex items-center gap-1 w-fit ${ecommerce !== '-' ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'text-gray-300'}`}>{ecommerce}</span></td>
+                                <td className="p-3 font-mono text-gray-500 text-xs align-top">{h.partNumber || '-'}</td>
+                                <td className="p-3 font-medium text-gray-800 max-w-[200px] align-top"><div className="line-clamp-2">{h.name}</div></td>
+                                <td className={`p-3 text-right font-bold align-top ${showHistoryDetail==='in'?'text-green-600':'text-red-600'}`}>{showHistoryDetail==='in' ? '+' : '-'}{h.quantity}</td>
+                                <td className="p-3 text-right text-gray-600 font-mono align-top text-xs">{formatRupiah(price)}</td>
+                                <td className="p-3 text-right text-gray-800 font-bold font-mono align-top text-xs">{formatRupiah(total)}</td>
+                                
+                                {/* KOLOM KETERANGAN (Fixed) */}
+                                <td className="p-3 align-top text-gray-700 font-medium text-xs">
+                                    {/* Jika Barang Masuk, tampilkan reason lengkap tanpa Via */}
+                                    {h.type === 'in' ? h.reason.replace(/\(Via:.*?\)/, '').trim() : (customer !== '-' ? customer : keterangan)}
+                                </td>
+                            </tr>); 
+                        })}</tbody>
                     </table>
                 )}
             </div>
@@ -153,11 +214,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                 <div className="p-4 border-b flex justify-between items-start bg-gray-50"><div className="flex-1"><h3 className="font-bold text-gray-900 text-lg flex items-center gap-2"><History size={20} className="text-blue-600"/> Riwayat: {selectedItemHistory.name}</h3></div><button onClick={() => setSelectedItemHistory(null)} className="p-1 hover:bg-gray-200 rounded-full transition-colors ml-4"><X size={24} className="text-gray-500"/></button></div>
                 <div className="p-3 bg-white border-b border-gray-100"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} /><input autoFocus type="text" placeholder="Cari..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm outline-none" value={itemHistorySearch} onChange={(e) => setItemHistorySearch(e.target.value)} /></div></div>
-                <div className="overflow-auto flex-1 p-0">{loadingItemHistory ? <div className="flex flex-col items-center justify-center h-64 text-blue-500"><Loader2 size={32} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat...</p></div> : filteredItemHistory.length === 0 ? <div className="flex flex-col items-center justify-center h-64 text-gray-400"><History size={48} className="opacity-20 mb-3"/><p>Tidak ada riwayat.</p></div> : (<table className="w-full text-left border-collapse"><thead className="bg-gray-50 text-gray-600 text-xs font-bold uppercase sticky top-0 z-10 shadow-sm"><tr><th className="p-3 border-b w-32">Tanggal</th><th className="p-3 border-b w-24 text-center">Tipe</th><th className="p-3 border-b w-20 text-right">Jml</th><th className="p-3 border-b w-28 text-right">Harga</th><th className="p-3 border-b w-28 text-right">Total</th><th className="p-3 border-b">Ket</th></tr></thead><tbody className="divide-y divide-gray-100 text-sm">{filteredItemHistory.map(h => { const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason); return (<tr key={h.id} className="hover:bg-gray-50"><td className="p-3 align-top text-gray-600">{h.timestamp ? <><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div></> : '-'}</td><td className="p-3 align-top text-center"><span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${h.type === 'in' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{h.type === 'in' ? 'Masuk' : 'Keluar'}</span></td><td className={`p-3 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>{h.type === 'in' ? '+' : '-'}{h.quantity}</td><td className="p-3 align-top text-right font-mono text-gray-600 text-xs">{formatRupiah(h.price)}</td><td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(h.totalPrice)}</td><td className="p-3 align-top text-gray-700"><div className="font-bold text-gray-900 text-xs mb-1.5">{customer !== '-' ? customer : keterangan}</div><div className="flex flex-wrap gap-1">{resi !== '-' && <div className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px]">Resi: {resi}</div>}{ecommerce !== '-' && <div className="bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px]">{ecommerce}</div>}</div></td></tr>); })}</tbody></table>)}</div>
+                <div className="overflow-auto flex-1 p-0">{loadingItemHistory ? <div className="flex flex-col items-center justify-center h-64 text-blue-500"><Loader2 size={32} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat...</p></div> : filteredItemHistory.length === 0 ? <div className="flex flex-col items-center justify-center h-64 text-gray-400"><History size={48} className="opacity-20 mb-3"/><p>Tidak ada riwayat.</p></div> : (<table className="w-full text-left border-collapse"><thead className="bg-gray-50 text-gray-600 text-xs font-bold uppercase sticky top-0 z-10 shadow-sm"><tr><th className="p-3 border-b w-32">Tanggal</th><th className="p-3 border-b w-24 text-center">Tipe</th><th className="p-3 border-b w-20 text-right">Jml</th><th className="p-3 border-b w-28 text-right">Harga</th><th className="p-3 border-b w-28 text-right">Total</th><th className="p-3 border-b">Ket</th></tr></thead><tbody className="divide-y divide-gray-100 text-sm">{filteredItemHistory.map(h => { const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason); return (<tr key={h.id} className="hover:bg-gray-50"><td className="p-3 align-top text-gray-600">{h.timestamp ? <><div className="font-medium">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-xs text-gray-400">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div></> : '-'}</td><td className="p-3 align-top text-center"><span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${h.type === 'in' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{h.type === 'in' ? 'Masuk' : 'Keluar'}</span></td><td className={`p-3 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>{h.type === 'in' ? '+' : '-'}{h.quantity}</td><td className="p-3 align-top text-right font-mono text-gray-600 text-xs">{formatRupiah(h.price)}</td><td className="p-3 align-top text-right font-bold font-mono text-gray-800 text-xs">{formatRupiah(h.totalPrice)}</td><td className="p-3 align-top text-gray-700"><div className="font-bold text-gray-900 text-xs mb-1.5">{h.type === 'in' ? h.reason.replace(/\(Via:.*?\)/, '').trim() : (customer !== '-' ? customer : keterangan)}</div><div className="flex flex-wrap gap-1">{resi !== '-' && <div className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px]">Resi: {resi}</div>}{ecommerce !== '-' && <div className="bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[10px]">{ecommerce}</div>}</div></td></tr>); })}</tbody></table>)}</div>
             </div>
         </div>
       )}
       
+      {/* ... rest of the component (Stats & Grid/List View) ... */}
       <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide snap-x md:grid md:grid-cols-5 md:gap-4 md:overflow-visible md:mx-0 md:px-0 md:pb-0">
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Package size={32} className="text-blue-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Package size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Item</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalItems, false)}</div></div>
         <div className="min-w-[120px] snap-start bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between h-20 relative overflow-hidden group"><div className="absolute right-0 top-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity"><Layers size={32} className="text-purple-600" /></div><div className="flex items-center gap-1.5 text-gray-500 mb-1"><Layers size={12} /><span className="text-[9px] uppercase font-bold tracking-wider">Stok</span></div><div className="text-xl font-bold text-gray-800">{formatCompactNumber(stats.totalStock, false)}</div></div>
