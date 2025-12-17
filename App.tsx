@@ -173,7 +173,7 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- UPDATE STATUS & HISTORY ---
+  // --- UPDATE STATUS & HISTORY (UPDATED FOR RETUR WITH NAME) ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -204,7 +204,8 @@ const AppContent: React.FC = () => {
           pureName = pureName.replace(/\(Via:.*?\)/, ''); 
       }
       
-      pureName = pureName.trim(); // Ini adalah Nama Penerima
+      pureName = pureName.trim(); 
+      if (!pureName) pureName = "Pelanggan"; // Fallback jika nama kosong
 
       let updateTime = undefined;
       const today = new Date().toISOString().split('T')[0];
@@ -257,12 +258,12 @@ const AppContent: React.FC = () => {
                           
                           await updateInventory(itemToUpdate);
                           
-                          // LOGIKA BARU: Simpan RETUR menggunakan kolom KETERANGAN
+                          // LOGIKA RETUR: Keterangan = Nama Penerima (RETUR)
                           await addBarangMasuk({
                               tanggal: today,
-                              tempo: `${resiVal} / ${shopVal}`, // Resi + Toko
+                              tempo: `${resiVal} / ${shopVal}`, 
                               ecommerce: ecommerceVal,          
-                              keterangan: `${pureName} (RETUR)`, // Masuk ke kolom Keterangan
+                              keterangan: `${pureName} (RETUR)`, // <-- Nama Penerima masuk sini
                               partNumber: itemToUpdate.partNumber,
                               name: itemToUpdate.name,
                               brand: itemToUpdate.brand,
