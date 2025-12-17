@@ -211,7 +211,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           {[
               { id: 'pending', label: 'Pesanan Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' },
               { id: 'processing', label: 'Terjual', icon: Package, count: safeOrders.filter(o=>o?.status==='processing').length, color: 'text-blue-600' },
-              // LABEL DIUBAH MENJADI RETUR
+              // CHANGED: LABEL 'Riwayat' -> 'Retur'
               { id: 'history', label: 'Retur', icon: CheckCircle, count: 0, color: 'text-gray-600' }
           ].map((tab: any) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-white relative ${activeTab === tab.id ? `border-purple-600 text-purple-700 bg-white` : 'border-transparent text-gray-400 hover:text-gray-600'}`}>

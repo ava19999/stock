@@ -442,7 +442,7 @@ export const addHistoryLog = async (h: StockHistory) => {
     }
 };
 
-// --- NEW FUNCTION: UPDATE ORDER ITEMS (PARTIAL RETURN) ---
+// --- FUNGSI UPDATE ORDER (PENTING UNTUK PARTIAL RETUR) ---
 export const updateOrderData = async (orderId: string, newItems: any[], newTotal: number, newStatus: string): Promise<boolean> => {
     const { error } = await supabase
         .from('orders')

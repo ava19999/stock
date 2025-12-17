@@ -18,7 +18,7 @@ import {
   fetchHistory, addHistoryLog,
   fetchChatSessions, saveChatSession,
   addBarangMasuk, addBarangKeluar,
-  updateOrderData // <--- Import fungsi baru
+  updateOrderData 
 } from './services/supabaseService';
 
 import { generateId, formatRupiah } from './utils';
@@ -174,7 +174,7 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- LOGIC BARU: PROCESS PARTIAL RETURN (RETUR SEBAGIAN) ---
+  // --- LOGIC BARU: PROCESS PARTIAL RETURN ---
   const handleProcessReturn = async (orderId: string, returnedItems: { itemId: string, qty: number }[]) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -182,7 +182,7 @@ const AppContent: React.FC = () => {
       setLoading(true);
       const today = new Date().toISOString().split('T')[0];
 
-      // Parse info pelanggan untuk log barang masuk
+      // Parse info pelanggan
       let pureName = order.customerName;
       let resiVal = '-';
       let shopVal = '';
@@ -206,16 +206,16 @@ const AppContent: React.FC = () => {
           if (currentItem) {
               const restoreQty = retur.qty;
               const newQuantity = currentItem.quantity + restoreQty;
-              // Qty Out dikurangi (karena batal jual)
+              // Qty Out dikurangi (netralisir penjualan)
               const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
               await updateInventory(itemToUpdate);
 
-              // 2. Catat di Barang Masuk (Log Retur)
+              // 2. CATAT DI BARANG MASUK (SEBAGAI LOG RETUR)
               await addBarangMasuk({
                   tanggal: today,
-                  tempo: `${resiVal} / ${shopVal}`, 
+                  tempo: `${resiVal} / ${shopVal}`, // Info asal penjualan
                   ecommerce: ecommerceVal,          
-                  keterangan: `${pureName} (RETUR)`, 
+                  keterangan: `${pureName} (RETUR)`, // Label jelas
                   partNumber: itemToUpdate.partNumber,
                   name: itemToUpdate.name,
                   brand: itemToUpdate.brand,
@@ -237,16 +237,17 @@ const AppContent: React.FC = () => {
               return { ...item, cartQuantity: newQty };
           }
           return item;
-      }).filter(item => item.cartQuantity > 0); // Hapus item jika qty jadi 0
+      }).filter(item => item.cartQuantity > 0); 
 
       // Hitung total baru
       const newTotal = newItems.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
       
-      // Tentukan status baru (jika habis semua -> cancelled/RETUR, jika sisa -> tetap processing/TERJUAL)
-      const newStatus = newItems.length === 0 ? 'cancelled' : 'processing';
+      // LOGIKA STATUS: 
+      // Agar pindah ke Tab "Retur" (Riwayat), status harus 'cancelled' atau 'completed'.
+      const newStatus = newItems.length === 0 ? 'cancelled' : 'completed';
 
       if (await updateOrderData(orderId, newItems, newTotal, newStatus)) {
-          showToast('Retur berhasil diproses!');
+          showToast('Retur berhasil diproses & Stok kembali!');
           await refreshData();
       } else {
           showToast('Gagal update data pesanan', 'error');
@@ -254,7 +255,7 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- UPDATE STATUS (FULL PROCESS / CANCEL) ---
+  // --- UPDATE STATUS BIASA (FULL PROCESS / CANCEL) ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -309,6 +310,7 @@ const AppContent: React.FC = () => {
           }
       }
       else if (newStatus === 'cancelled' && order.status !== 'cancelled') {
+          // TOLAK PESANAN (FULL)
           if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
               if (order.status !== 'pending') {
                   for (const orderItem of order.items) {
@@ -420,7 +422,7 @@ const AppContent: React.FC = () => {
                     brand: currentItem.brand,
                     application: currentItem.application,
                     rak: currentItem.shelf,
-                    stockAhir: newQuantity,
+                    stockAhir: newQuantity, 
                     qtyKeluar: qtySold,
                     hargaSatuan: item.price,
                     hargaTotal: item.price * qtySold,
@@ -553,8 +555,7 @@ const AppContent: React.FC = () => {
                     <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}><Home size={22} className={activeView==='shop'?'fill-blue-100':''} /><span className="text-[10px] font-medium">Belanja</span></button>
                     <button onClick={()=>setActiveView('orders')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='orders'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}>
                         <div className="relative"><ClipboardList size={22} className={activeView==='orders'?'fill-blue-100':''} />{myPendingOrdersCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-white"></span>}</div>
-                        <span className="text-[10px] font-medium">Pesanan</span>
-                    </button>
+                        <span className="text-[10px] font-medium">Pesanan</span></button>
                     <button onClick={()=>setActiveView('chat')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='chat'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}><MessageSquare size={22} className={activeView==='chat'?'fill-blue-100':''} /><span className="text-[10px] font-medium">Chat</span></button>
                 </>
             )}
