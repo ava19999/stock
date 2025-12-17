@@ -31,7 +31,7 @@ export interface BarangMasuk {
   brand: string;
   application: string;
   rak: string;
-  stockAhir: number; // UPDATED: Sesuai permintaan (Stock Ahir)
+  stockAhir: number;
   qtyMasuk: number;
   hargaSatuan: number;
   hargaTotal: number;
@@ -49,15 +49,13 @@ export interface BarangKeluar {
   brand: string;
   application: string;
   rak: string;
-  stockAhir: number; // UPDATED: Sesuai permintaan (Stock Ahir)
+  stockAhir: number;
   qtyKeluar: number;
   hargaSatuan: number;
   hargaTotal: number;
   resi: string;
 }
 
-// Interface StockHistory tetap menggunakan struktur ini untuk kemudahan UI
-// Service akan menghitung ulang previousStock dari stockAhir
 export interface StockHistory {
   id: string;
   itemId: string;
@@ -103,4 +101,22 @@ export interface AIAnalysisResult {
   suggestedName?: string;
   suggestedDescription?: string;
   suggestedShelfCategory?: string;
+}
+
+// INTERFACE BARU UNTUK TABEL RETUR (SUDAH DIPERBAIKI)
+export interface ReturRecord {
+  id?: number;
+  tanggal_pemesanan: string | null; // TYPO FIXED
+  resi: string | null;
+  toko: string | null;
+  ecommerce: string | null;
+  customer: string | null;
+  part_number: string | null;
+  nama_barang: string | null;
+  quantity: number;
+  harga_satuan: number;
+  harga_total: number;
+  tanggal_retur: string;
+  status: string;
+  keterangan: string | null;
 }

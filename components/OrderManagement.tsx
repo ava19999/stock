@@ -1,9 +1,9 @@
+// FILE: src/components/OrderManagement.tsx
 import React, { useState, useMemo, useEffect } from 'react';
-import { Order, OrderStatus } from '../types';
+import { Order, OrderStatus, ReturRecord } from '../types';
 import { Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store, Save, Loader } from 'lucide-react';
 import { formatRupiah } from '../utils';
-// Pastikan import saveOrder ditambahkan
-import { updateInventory, updateOrderData, saveOrder } from '../services/supabaseService';
+import { updateInventory, updateOrderData, saveOrder, addReturTransaction } from '../services/supabaseService';
 
 interface OrderManagementProps {
   orders: Order[];
@@ -45,16 +45,43 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       setIsReturnModalOpen(true);
   };
 
-  // --- LOGIKA UTAMA RETUR (SPLIT ORDER) ---
+  const getOrderDetails = (order: Order) => {
+      let cleanName = order.customerName || 'Tanpa Nama';
+      let orderId = order.id || '???';
+      let resiText = `#${orderId.slice(0, 8)}`;
+      let ecommerce = '-';
+      let shopName = '-';
+
+      try {
+          const resiMatch = cleanName.match(/\(Resi: (.*?)\)/);
+          if (resiMatch && resiMatch[1]) {
+              resiText = resiMatch[1];
+              cleanName = cleanName.replace(/\s*\(Resi:.*?\)/, '');
+          }
+          const shopMatch = cleanName.match(/\(Toko: (.*?)\)/);
+          if (shopMatch && shopMatch[1]) {
+              shopName = shopMatch[1];
+              cleanName = cleanName.replace(/\s*\(Toko:.*?\)/, '');
+          }
+          const viaMatch = cleanName.match(/\(Via: (.*?)\)/);
+          if (viaMatch && viaMatch[1]) {
+              ecommerce = viaMatch[1];
+              cleanName = cleanName.replace(/\s*\(Via:.*?\)/, '');
+          }
+      } catch (e) { console.error("Error parsing name", e); }
+
+      return { cleanName: cleanName.trim(), resiText, ecommerce, shopName };
+  };
+
+  // --- LOGIKA UTAMA RETUR (MENGGUNAKAN TABEL BARU) ---
   const handleProcessReturn = async () => {
       if (!selectedOrderForReturn) return;
 
-      // 1. Identifikasi Barang yang Diretur
       const itemsToReturnData = selectedOrderForReturn.items
         .map(item => {
             const qtyRetur = returnQuantities[item.id] || 0;
             if (qtyRetur > 0) {
-                return { ...item, cartQuantity: qtyRetur }; // Buat object item baru dengan qty retur
+                return { ...item, cartQuantity: qtyRetur };
             }
             return null;
         })
@@ -68,75 +95,91 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       setIsLoading(true);
 
       try {
-        // 2. Kembalikan Stok ke Gudang (Looping item retur)
+        const { resiText, shopName, ecommerce, cleanName } = getOrderDetails(selectedOrderForReturn);
+        
+        // Loop barang yang diretur
         for (const item of itemsToReturnData) {
+            const hargaSatuan = item.customPrice ?? item.price ?? 0;
+            const totalRetur = hargaSatuan * item.cartQuantity;
+
+            // 1. Update Stok Fisik (tetap update stok ke base & log sederhana ke barang_masuk)
             await updateInventory({
                 ...item,
-                quantity: item.quantity // Gunakan stok master saat ini (tidak diubah disini)
+                quantity: item.quantity // Quantity saat ini di database akan diambil di dalam fungsi
             }, {
-                type: 'in', 
+                type: 'in',
                 qty: item.cartQuantity,
-                ecommerce: 'RETUR',
-                resiTempo: `Retur ${selectedOrderForReturn.id.substring(0,6)}`,
-                customer: selectedOrderForReturn.customerName
+                ecommerce: 'RETUR', 
+                resiTempo: 'LOG_RETUR', 
+                customer: cleanName,
+                isReturn: true
             });
+
+            // 2. Simpan Detail Lengkap ke Tabel 'retur'
+            const returData: ReturRecord = {
+                tanggal_pemesanan: new Date(selectedOrderForReturn.timestamp).toISOString(), // TYPO FIXED
+                resi: resiText,
+                toko: shopName,
+                ecommerce: ecommerce,
+                customer: cleanName,
+                part_number: item.partNumber,
+                nama_barang: item.name,
+                quantity: item.cartQuantity,
+                harga_satuan: hargaSatuan,
+                harga_total: totalRetur,
+                tanggal_retur: new Date().toISOString(),
+                status: 'Diterima',
+                keterangan: 'Retur Barang'
+            };
+
+            await addReturTransaction(returData);
         }
 
-        // 3. Hitung Sisa Barang untuk Pesanan Asli
+        // 3. Update Status Order (Split Order)
         const remainingItems = selectedOrderForReturn.items.map(item => {
             const returItem = itemsToReturnData.find(r => r.id === item.id);
             if (returItem) {
-                // Kurangi qty asli dengan qty retur
                 const newQty = (item.cartQuantity || 0) - returItem.cartQuantity;
                 return { ...item, cartQuantity: newQty };
             }
             return item;
-        }).filter(item => (item.cartQuantity || 0) > 0); // Hapus jika habis (0)
+        }).filter(item => (item.cartQuantity || 0) > 0);
 
-        const isFullReturn = remainingItems.length === 0;
-
-        if (isFullReturn) {
-            // SKENARIO A: RETUR SEMUA (Full Return)
-            // Cukup ubah status pesanan asli jadi 'cancelled' agar pindah ke tab Retur
+        if (remainingItems.length === 0) {
+            // Full Return (Semua barang diretur)
             await updateOrderData(
                 selectedOrderForReturn.id,
-                selectedOrderForReturn.items, // Item biarkan utuh agar history tercatat
+                selectedOrderForReturn.items,
                 selectedOrderForReturn.totalAmount,
                 'cancelled'
             );
-            alert('Semua barang berhasil diretur. Pesanan dipindahkan ke Riwayat.');
-
+            alert('Retur berhasil! Data disimpan ke tabel Retur dan stok dikembalikan.');
         } else {
-            // SKENARIO B: RETUR SEBAGIAN (Partial Return)
-            // 1. Buat Pesanan BARU untuk barang yang diretur (Masuk Tab Retur)
+            // Partial Return (Sebagian diretur)
             const returnTotal = itemsToReturnData.reduce((sum, item) => sum + ((item.customPrice ?? item.price ?? 0) * item.cartQuantity), 0);
             
+            // Simpan Order Dummy untuk history visual di Order Management
             const newReturnOrder: Order = {
-                id: `${selectedOrderForReturn.id}-RET`, // ID Unik untuk Retur
+                id: `${selectedOrderForReturn.id}-RET`,
                 customerName: `${selectedOrderForReturn.customerName} (RETUR)`,
                 items: itemsToReturnData,
                 totalAmount: returnTotal,
-                status: 'cancelled', // Status 'cancelled' masuk ke Tab History/Retur
+                status: 'cancelled',
                 timestamp: Date.now()
             };
-            
-            // Simpan pesanan retur baru
             await saveOrder(newReturnOrder);
 
-            // 2. Update Pesanan ASLI dengan sisa barang (Tetap di Tab Terjual)
+            // Update Sisa Barang di Order Asli
             const remainingTotal = remainingItems.reduce((sum, item) => sum + ((item.customPrice ?? item.price ?? 0) * item.cartQuantity), 0);
-            
             await updateOrderData(
                 selectedOrderForReturn.id,
                 remainingItems,
                 remainingTotal,
-                'processing' // Tetap processing agar muncul di Tab Terjual
+                'processing'
             );
-
-            alert('Retur sebagian berhasil!\n\n• Barang retur -> Tab Riwayat\n• Sisa barang -> Tetap di Tab Terjual');
+            alert('Retur Sebagian berhasil! Data disimpan ke tabel Retur.');
         }
 
-        // Reset & Refresh
         setIsReturnModalOpen(false);
         setSelectedOrderForReturn(null);
         if (onRefresh) onRefresh();
@@ -195,36 +238,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       return status;
   };
 
-  const getOrderDetails = (order: Order) => {
-      let cleanName = order.customerName || 'Tanpa Nama';
-      let orderId = order.id || '???';
-      let resiText = `#${orderId.slice(0, 8)}`;
-      let isResi = false;
-      let ecommerce = '-';
-      let shopName = '-';
-
-      try {
-          const resiMatch = cleanName.match(/\(Resi: (.*?)\)/);
-          if (resiMatch && resiMatch[1]) {
-              resiText = resiMatch[1];
-              isResi = true;
-              cleanName = cleanName.replace(/\s*\(Resi:.*?\)/, '');
-          }
-          const shopMatch = cleanName.match(/\(Toko: (.*?)\)/);
-          if (shopMatch && shopMatch[1]) {
-              shopName = shopMatch[1];
-              cleanName = cleanName.replace(/\s*\(Toko:.*?\)/, '');
-          }
-          const viaMatch = cleanName.match(/\(Via: (.*?)\)/);
-          if (viaMatch && viaMatch[1]) {
-              ecommerce = viaMatch[1];
-              cleanName = cleanName.replace(/\s*\(Via:.*?\)/, '');
-          }
-      } catch (e) { console.error("Error parsing name", e); }
-
-      return { cleanName: cleanName.trim(), resiText, isResi, ecommerce, shopName };
-  };
-
   const formatDate = (ts: number) => {
       try {
           const date = new Date(ts || Date.now());
@@ -249,8 +262,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                   <div className="p-6 overflow-y-auto">
                       <div className="text-sm text-gray-500 mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
                           Pilih jumlah barang yang dikembalikan.<br/>
-                          <span className="text-orange-600 font-bold">• Barang Retur akan dipisah ke tab Riwayat.</span><br/>
-                          <span className="text-blue-600 font-bold">• Sisa Barang tetap di tab Terjual.</span>
+                          <span className="text-orange-600 font-bold">• Data retur akan disimpan ke tabel khusus 'Retur'.</span><br/>
+                          <span className="text-blue-600 font-bold">• Stok fisik gudang akan bertambah otomatis.</span>
                       </div>
                       <div className="space-y-3">
                           {selectedOrderForReturn.items.map((item) => (
@@ -282,7 +295,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                         disabled={isLoading}
                         className="px-6 py-2 text-sm font-bold bg-orange-600 text-white hover:bg-orange-700 rounded-lg shadow-md transition-colors flex items-center gap-2 disabled:opacity-50"
                       >
-                        {isLoading ? <Loader size={16} className="animate-spin"/> : <Save size={16}/>} Proses Retur
+                        {isLoading ? <Loader size={16} className="animate-spin"/> : <Save size={16}/>} Simpan Retur
                       </button>
                   </div>
               </div>
@@ -343,7 +356,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     ) : (
                         filteredOrders.map(order => {
                             if (!order) return null;
-                            const { cleanName, resiText, isResi, ecommerce, shopName } = getOrderDetails(order);
+                            const { cleanName, resiText, ecommerce, shopName } = getOrderDetails(order);
+                            const isResi = resiText.startsWith('#') === false;
                             const dt = formatDate(order.timestamp);
                             const items = Array.isArray(order.items) ? order.items : [];
                             if (items.length === 0) return null;
