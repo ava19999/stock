@@ -1,7 +1,7 @@
 // FILE: src/components/OrderManagement.tsx
 import React, { useState, useMemo, useEffect } from 'react';
 import { Order, OrderStatus, ReturRecord } from '../types';
-import { Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store, Save, Loader } from 'lucide-react';
+import { Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store, Save, Loader, Calendar } from 'lucide-react';
 import { formatRupiah } from '../utils';
 import { updateInventory, updateOrderData, saveOrder, addReturTransaction, updateReturKeterangan, fetchReturRecords } from '../services/supabaseService';
 
@@ -16,9 +16,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [activeTab, setActiveTab] = useState<'pending' | 'processing' | 'history'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
   
-  // State untuk keterangan yang sedang diedit
   const [localNotes, setLocalNotes] = useState<Record<string, string>>({});
-  // State untuk menyimpan data Retur asli dari database agar keterangan bisa dimuat
   const [returDbRecords, setReturDbRecords] = useState<ReturRecord[]>([]);
 
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
@@ -26,26 +24,20 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(false);
 
-  // FETCH DATA RETUR SAAT TAB HISTORY/RETUR AKTIF
+  // FETCH DATA RETUR UNTUK DITAMPILKAN (KETERANGAN & TANGGAL RETUR)
   useEffect(() => {
       if (activeTab === 'history') {
           fetchReturRecords().then(records => {
               setReturDbRecords(records);
               
-              // Mapping keterangan dari tabel Retur ke Local Notes
-              // Kita gunakan RESI sebagai kunci pencocokan
               const dbNotes: Record<string, string> = {};
-              
-              // Iterasi orders yang ada di state UI
               orders.forEach(order => {
                   const { resiText } = getOrderDetails(order);
-                  // Cari record di tabel retur yang resinya cocok
                   const foundRetur = records.find(r => r.resi === resiText);
                   if (foundRetur && foundRetur.keterangan) {
                       dbNotes[order.id] = foundRetur.keterangan;
                   }
               });
-              
               setLocalNotes(prev => ({...prev, ...dbNotes}));
           });
       }
@@ -57,14 +49,11 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       setLocalNotes(prev => ({ ...prev, [orderId]: text }));
   };
 
-  // SIMPAN KETERANGAN HANYA KE TABEL RETUR
   const handleNoteSave = async (order: Order) => {
       const newNote = localNotes[order.id];
       if (newNote !== undefined) {
           const { resiText } = getOrderDetails(order);
-          // Hanya update tabel Retur
           await updateReturKeterangan(resiText, newNote);
-          // Kita tidak perlu refresh full page, cukup local state sudah terupdate
       }
   };
 
@@ -371,13 +360,15 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                         <th className="p-4 text-right w-20">Qty</th>
                         <th className="p-4 text-right w-32">Harga Satuan</th>
                         <th className="p-4 text-right w-32">Total</th>
+                        {/* KOLOM BARU: TANGGAL RETUR */}
+                        {activeTab === 'history' && <th className="p-4 w-32 text-center text-red-600">Tanggal Retur</th>}
                         <th className="p-4 text-center w-32">Status</th>
                         <th className="p-4 text-center w-48">{activeTab === 'history' ? 'Keterangan' : 'Aksi'}</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm">
                     {filteredOrders.length === 0 ? (
-                        <tr><td colSpan={11} className="p-12 text-center text-gray-400"><ClipboardList size={48} className="opacity-20 mx-auto mb-3" /><p className="font-medium">{searchTerm ? 'Tidak ditemukan pesanan yang cocok' : 'Tidak ada data pesanan'}</p></td></tr>
+                        <tr><td colSpan={12} className="p-12 text-center text-gray-400"><ClipboardList size={48} className="opacity-20 mx-auto mb-3" /><p className="font-medium">{searchTerm ? 'Tidak ditemukan pesanan yang cocok' : 'Tidak ada data pesanan'}</p></td></tr>
                     ) : (
                         filteredOrders.map(order => {
                             if (!order) return null;
@@ -386,6 +377,16 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                             const dt = formatDate(order.timestamp);
                             const items = Array.isArray(order.items) ? order.items : [];
                             if (items.length === 0) return null;
+
+                            // LOGIC AMBIL TANGGAL RETUR
+                            let returnDateDisplay = '-';
+                            if (activeTab === 'history') {
+                                const returRecord = returDbRecords.find(r => r.resi === resiText);
+                                if (returRecord && returRecord.tanggal_retur) {
+                                    const d = new Date(returRecord.tanggal_retur);
+                                    returnDateDisplay = d.toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: '2-digit'});
+                                }
+                            }
 
                             return items.map((item, index) => {
                                 const dealPrice = item.customPrice ?? item.price ?? 0;
@@ -425,8 +426,24 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                     <td className="p-4 align-top text-right font-bold text-gray-800">{item.cartQuantity || 0}</td>
                                     <td className="p-4 align-top text-right text-gray-500 font-mono text-xs"><div className={hasCustomPrice ? "text-orange-600 font-bold" : ""}>{formatRupiah(dealPrice)}</div>{hasCustomPrice && (<div className="flex items-center justify-end gap-1 text-[9px] text-orange-500 mt-0.5"><Tag size={8}/> Khusus</div>)}</td>
                                     <td className="p-4 align-top text-right font-bold text-gray-900 font-mono text-xs">{formatRupiah(dealTotal)}</td>
+                                    
                                     {index === 0 && (
                                         <>
+                                            {/* KOLOM TANGGAL RETUR */}
+                                            {activeTab === 'history' && (
+                                                <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
+                                                    {returnDateDisplay !== '-' ? (
+                                                        <div className="flex flex-col items-center gap-1">
+                                                            <div className="bg-red-50 text-red-700 px-2 py-1 rounded-lg border border-red-100 flex items-center gap-1 w-fit">
+                                                                <Calendar size={10}/> <span className="text-[10px] font-bold">{returnDateDisplay}</span>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-gray-300">-</span>
+                                                    )}
+                                                </td>
+                                            )}
+
                                             <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
                                                 <div className={`inline-block px-3 py-1.5 rounded-lg text-[10px] font-extrabold border uppercase tracking-wider mb-2 shadow-sm ${getStatusColor(order.status)}`}>
                                                     {order.status === 'cancelled' 
