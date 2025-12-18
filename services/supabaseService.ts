@@ -1,6 +1,6 @@
 // FILE: src/services/supabaseService.ts
 import { supabase } from '../lib/supabase';
-import { InventoryItem, InventoryFormData, StockHistory, BarangMasuk, BarangKeluar, Order, ChatSession, ReturRecord, CartItem } from '../types';
+import { InventoryItem, InventoryFormData, StockHistory, BarangMasuk, BarangKeluar, Order, ChatSession, ReturRecord } from '../types';
 
 const TABLE_NAME = 'base';
 
@@ -409,69 +409,22 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
-// --- INSERT FUNCTIONS ---
-export const addBarangMasuk = async (data: any) => { 
-    const ecommerceVal = data.ecommerce || 'Lainnya';
-    const keteranganVal = data.keterangan || 'Restock'; 
-    const { error } = await supabase.from('barang_masuk').insert([{ 
-        created_at: data.created_at || getWIBISOString(), 
-        tempo: data.tempo, ecommerce: ecommerceVal, keterangan: keteranganVal, 
-        part_number: data.partNumber || data.part_number, name: data.name, brand: data.brand, application: data.application, rak: data.rak, 
-        stock_ahir: data.stockAhir || data.stock_ahir, qty_masuk: data.qtyMasuk || data.qty_masuk, 
-        harga_satuan: data.hargaSatuan || data.harga_satuan, harga_total: data.hargaTotal || data.harga_total 
-    }]); 
-    if(error) console.error("addBarangMasuk Error", error);
-    return !error; 
-};
-
-export const addBarangKeluar = async (data: any) => { 
-    const { error } = await supabase.from('barang_keluar').insert([{ 
-        created_at: data.created_at || getWIBISOString(), 
-        kode_toko: data.kodeToko || data.kode_toko, tempo: data.tempo, ecommerce: data.ecommerce, customer: data.customer, 
-        part_number: data.partNumber || data.part_number, name: data.name, brand: data.brand, application: data.application, rak: data.rak, 
-        stock_ahir: data.stockAhir || data.stock_ahir, qty_keluar: data.qtyKeluar || data.qty_keluar, 
-        harga_satuan: data.hargaSatuan || data.harga_satuan, harga_total: data.hargaTotal || data.harga_total, resi: data.resi 
-    }]); 
-    if(error) console.error("addBarangKeluar Error", error);
-    return !error; 
-};
-
-export const addHistoryLog = async (h: StockHistory) => { 
-    const now = getWIBISOString(); 
-    if (h.type === 'in') {
-        return addBarangMasuk({ 
-            created_at: now, tempo: '', keterangan: 'System Log', ecommerce: 'SYSTEM', 
-            partNumber: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-', 
-            stockAhir: h.previousStock + h.quantity, qtyMasuk: h.quantity, 
-            hargaSatuan: h.price, hargaTotal: h.totalPrice 
-        }); 
-    } else {
-        return addBarangKeluar({ 
-            created_at: now, kodeToko: 'SYS', tempo: '', ecommerce: 'SYSTEM', customer: '', 
-            partNumber: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-', 
-            stockAhir: h.previousStock - h.quantity, qtyKeluar: h.quantity, 
-            hargaSatuan: h.price, hargaTotal: h.totalPrice, resi: '-' 
-        }); 
-    }
-};
-
-// --- FUNGSI BARU UNTUK HANDLE ORDER DARI TABEL FLAT ---
+// --- FUNGSI UTAMA ORDERS (MODIFIED FOR FLAT TABLE) ---
 
 export const fetchOrders = async (): Promise<Order[]> => { 
-    // Ambil data flat dari tabel orders baru
+    // Ambil data flat
     const { data } = await supabase.from('orders').select('*').order('tanggal', { ascending: false }).limit(200); 
     
     if (!data) return [];
 
-    // Grouping berdasarkan RESI (karena data flat per item)
+    // Grouping berdasarkan RESI
     const groupedOrders: Record<string, Order> = {};
 
     data.forEach((row: any) => {
-        const resi = row.resi || 'UNKNOWN';
+        const resi = row.resi || row.id || 'UNKNOWN'; // Fallback
         
         if (!groupedOrders[resi]) {
             // Rekonstruksi string customerName agar UI tetap bisa parsing (Toko, Via, dll)
-            // Format yang diharapkan UI: "NamaCustomer (Toko: NamaToko) (Via: Ecommerce) (Resi: ...)"
             const customerStr = row.customer || '-';
             const tokoStr = row.toko ? ` (Toko: ${row.toko})` : '';
             const viaStr = row.ecommerce ? ` (Via: ${row.ecommerce})` : '';
@@ -486,24 +439,22 @@ export const fetchOrders = async (): Promise<Order[]> => {
                 totalAmount: 0,
                 status: row.status as any,
                 timestamp: row.tanggal ? new Date(row.tanggal).getTime() : Date.now(),
-                keterangan: '' // Keterangan ambil dari tabel retur jika perlu, tapi di order list biasanya kosong
+                keterangan: '' 
             };
         }
 
-        // Tambahkan item ke list items
+        // Add Item
         groupedOrders[resi].items.push({
-            id: row.part_number, // Gunakan part number sebagai ID sementara
+            id: row.part_number, 
             partNumber: row.part_number,
             name: row.nama_barang,
-            quantity: 0, // Ini stok gudang (tidak relevan di list order)
+            quantity: 0, 
             price: Number(row.harga_satuan),
             cartQuantity: Number(row.quantity),
             customPrice: Number(row.harga_satuan),
-            // Field lain dummy
             brand: '', application: '', shelf: '', ecommerce: '', imageUrl: '', lastUpdated: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, costPrice: 0, kingFanoPrice: 0
         });
 
-        // Akumulasi total
         groupedOrders[resi].totalAmount += Number(row.harga_total);
     });
 
@@ -511,13 +462,11 @@ export const fetchOrders = async (): Promise<Order[]> => {
 };
 
 export const saveOrder = async (order: Order): Promise<boolean> => { 
-    // Helper untuk ekstrak detail dari customerName string yang ada di UI
-    // Karena UI mengirim objek Order dengan format lama
     const parseDetails = (name: string) => {
         let cleanName = name;
         let toko = '-';
         let ecommerce = '-';
-        let resi = order.id; // Default resi
+        let resi = order.id; 
 
         const resiMatch = name.match(/\(Resi: (.*?)\)/);
         if (resiMatch) { resi = resiMatch[1]; cleanName = cleanName.replace(/\(Resi:.*?\)/, ''); }
@@ -530,23 +479,23 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
 
         return { 
             customer: cleanName.replace(/\(RETUR\)/i, '').trim(), 
-            toko: toko !== '-' ? toko : null, 
-            ecommerce: ecommerce !== '-' ? ecommerce : null,
+            toko: (toko !== '-' && toko) ? toko : null, 
+            ecommerce: (ecommerce !== '-' && ecommerce) ? ecommerce : null,
             resi: resi
         };
     };
 
     const details = parseDetails(order.customerName);
-    const orderDate = new Date(order.timestamp).toISOString();
+    // FIX: Format Date YYYY-MM-DD
+    const orderDate = new Date(order.timestamp).toISOString().split('T')[0];
 
-    // Map items ke baris-baris data untuk tabel flat
     const rows = order.items.map(item => ({
         tanggal: orderDate,
         resi: details.resi,
         toko: details.toko,
         ecommerce: details.ecommerce,
         customer: details.customer,
-        part_number: item.partNumber,
+        part_number: item.partNumber || '-', 
         nama_barang: item.name,
         quantity: item.cartQuantity,
         harga_satuan: item.customPrice || item.price,
@@ -564,32 +513,32 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
 };
 
 export const updateOrderStatusService = async (id: string, status: string, timestamp?: number): Promise<boolean> => { 
-    // Update status berdasarkan RESI (karena id di UI adalah resi)
     const updateData: any = { status }; 
-    if (timestamp) { updateData.tanggal = new Date(timestamp).toISOString(); } 
+    if (timestamp) { 
+        // FIX: Date Format
+        updateData.tanggal = new Date(timestamp).toISOString().split('T')[0]; 
+    } 
     
     const { error } = await supabase.from('orders').update(updateData).eq('resi', id); 
     return !error; 
 };
 
-// Fungsi ini dipakai untuk partial return: menghapus item lama dan insert item sisa
 export const updateOrderData = async (orderId: string, newItems: any[], newTotal: number, newStatus: string): Promise<boolean> => {
-    // 1. Ambil data order lama untuk mendapatkan detail customer (toko, via, dll)
-    // Kita ambil salah satu row saja karena detail customer sama untuk satu resi
+    // 1. Ambil data lama (limit 1) untuk info customer
     const { data: oldData } = await supabase.from('orders').select('*').eq('resi', orderId).limit(1).single();
     
     if (!oldData) return false;
 
-    // 2. Hapus semua baris dengan resi tersebut
+    // 2. Hapus semua baris
     const { error: delError } = await supabase.from('orders').delete().eq('resi', orderId);
     if (delError) {
         console.error("Gagal hapus order lama:", delError);
         return false;
     }
 
-    // 3. Insert baris baru dengan item yang tersisa
+    // 3. Insert baris baru
     const rows = newItems.map((item: any) => ({
-        tanggal: oldData.tanggal, // Pertahankan tanggal asli
+        tanggal: oldData.tanggal, 
         resi: orderId,
         toko: oldData.toko,
         ecommerce: oldData.ecommerce,
