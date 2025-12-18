@@ -151,12 +151,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
         />
       )}
 
-      {/* --- STATS SECTION (MODERN - SCROLLABLE ON MOBILE) --- */}
+      {/* --- STATS SECTION --- */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
         <div className="px-4 py-3">
-            <div className="flex gap-3 overflow-x-auto scrollbar-hide snap-x">
-                {/* Total Item */}
-                <div className="min-w-[140px] snap-start bg-gradient-to-br from-blue-50 to-white p-3 rounded-xl border border-blue-100 flex flex-col justify-between h-24">
+            {/* Mobile: Scroll, Desktop: Grid 5 Columns */}
+            <div className="flex gap-3 overflow-x-auto scrollbar-hide snap-x md:grid md:grid-cols-5 md:overflow-visible">
+                
+                {/* 1. Total Item */}
+                <div className="min-w-[140px] snap-start bg-gradient-to-br from-blue-50 to-white p-3 rounded-xl border border-blue-100 flex flex-col justify-between h-24 md:w-auto">
                     <div className="flex items-center gap-2 text-blue-600 mb-1">
                         <div className="p-1.5 bg-blue-100 rounded-lg"><Package size={14} /></div>
                         <span className="text-[10px] font-bold uppercase tracking-wider">Item</span>
@@ -164,8 +166,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <div className="text-2xl font-extrabold text-gray-800">{formatCompactNumber(stats.totalItems, false)}</div>
                 </div>
 
-                {/* Total Stok */}
-                <div className="min-w-[140px] snap-start bg-gradient-to-br from-purple-50 to-white p-3 rounded-xl border border-purple-100 flex flex-col justify-between h-24">
+                {/* 2. Total Stok */}
+                <div className="min-w-[140px] snap-start bg-gradient-to-br from-purple-50 to-white p-3 rounded-xl border border-purple-100 flex flex-col justify-between h-24 md:w-auto">
                     <div className="flex items-center gap-2 text-purple-600 mb-1">
                          <div className="p-1.5 bg-purple-100 rounded-lg"><Layers size={14} /></div>
                         <span className="text-[10px] font-bold uppercase tracking-wider">Stok</span>
@@ -173,18 +175,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <div className="text-2xl font-extrabold text-gray-800">{formatCompactNumber(stats.totalStock, false)}</div>
                 </div>
 
-                 {/* Aset */}
-                 <div className="min-w-[180px] snap-start bg-gradient-to-br from-gray-900 to-gray-800 p-3 rounded-xl shadow-md text-white flex flex-col justify-between h-24 relative overflow-hidden">
-                    <div className="absolute right-0 top-0 p-2 opacity-10"><Wallet size={48} /></div>
-                    <div className="flex items-center gap-2 text-gray-300 mb-1">
-                        <Wallet size={14} />
-                        <span className="text-[10px] font-bold uppercase tracking-wider">Nilai Aset</span>
-                    </div>
-                    <div className="text-xl font-bold tracking-tight text-white truncate">{formatCompactNumber(stats.totalAsset)}</div>
-                </div>
-
-                {/* Masuk Hari Ini */}
-                <button onClick={() => setShowHistoryDetail('in')} className="min-w-[130px] snap-start bg-white p-3 rounded-xl border border-green-100 flex flex-col justify-between h-24 active:scale-95 transition-transform">
+                {/* 3. Masuk Hari Ini */}
+                <button onClick={() => setShowHistoryDetail('in')} className="min-w-[130px] snap-start bg-white p-3 rounded-xl border border-green-100 flex flex-col justify-between h-24 active:scale-95 transition-transform md:w-auto text-left hover:border-green-300">
                     <div className="flex items-center justify-between w-full">
                         <div className="flex items-center gap-2 text-green-600">
                              <div className="p-1.5 bg-green-100 rounded-lg"><TrendingUp size={14} /></div>
@@ -197,8 +189,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                 </button>
 
-                {/* Keluar Hari Ini */}
-                <button onClick={() => setShowHistoryDetail('out')} className="min-w-[130px] snap-start bg-white p-3 rounded-xl border border-red-100 flex flex-col justify-between h-24 active:scale-95 transition-transform">
+                {/* 4. Keluar Hari Ini */}
+                <button onClick={() => setShowHistoryDetail('out')} className="min-w-[130px] snap-start bg-white p-3 rounded-xl border border-red-100 flex flex-col justify-between h-24 active:scale-95 transition-transform md:w-auto text-left hover:border-red-300">
                      <div className="flex items-center justify-between w-full">
                         <div className="flex items-center gap-2 text-red-600">
                              <div className="p-1.5 bg-red-100 rounded-lg"><TrendingDown size={14} /></div>
@@ -210,10 +202,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <div className="text-[9px] text-red-600 font-medium flex items-center">Lihat Detail <ChevronRight size={10} /></div>
                     </div>
                 </button>
+
+                 {/* 5. Aset (PALING BELAKANG/KANAN) */}
+                 <div className="min-w-[180px] snap-start bg-gradient-to-br from-gray-900 to-gray-800 p-3 rounded-xl shadow-md text-white flex flex-col justify-between h-24 relative overflow-hidden md:w-auto">
+                    <div className="absolute right-0 top-0 p-2 opacity-10"><Wallet size={48} /></div>
+                    <div className="flex items-center gap-2 text-gray-300 mb-1">
+                        <Wallet size={14} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Nilai Aset</span>
+                    </div>
+                    <div className="text-xl font-bold tracking-tight text-white truncate">{formatCompactNumber(stats.totalAsset)}</div>
+                </div>
+
             </div>
         </div>
 
-        {/* --- SEARCH & FILTER BAR (MODERN) --- */}
+        {/* --- SEARCH & FILTER BAR --- */}
         <div className="px-4 pb-3">
             <div className="flex gap-2 items-center mb-2">
                  <div className="relative flex-1">
@@ -244,7 +247,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* --- CONTENT GRID/LIST (MODERN) --- */}
+      {/* --- CONTENT GRID/LIST --- */}
       <div className="p-4">
         {loading ? (
              <div className="flex flex-col items-center justify-center py-20 text-gray-400">
@@ -344,10 +347,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
         )}
       </div>
 
-      {/* --- MODAL DETAIL RIWAYAT (DIKEMBALIKAN KE TAMPILAN TABEL/LAMA) --- */}
+      {/* --- MODAL DETAIL RIWAYAT (RESPONSIVE HP & PC) --- */}
       {showHistoryDetail && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
-            <div className="bg-white w-full max-w-7xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm p-0 md:p-4 animate-in fade-in">
+            {/* RESPONSIVE BOX:
+                HP: w-full, h-[95vh] (Full height bottom sheet), rounded-t-2xl (sudut atas melengkung)
+                PC: max-w-7xl, rounded-2xl (modal tengah normal)
+            */}
+            <div className="bg-white w-full md:max-w-7xl h-[95vh] md:h-auto md:max-h-[90vh] rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden flex flex-col">
                 <div className="px-4 py-3 border-b flex justify-between items-center bg-gray-50">
                     <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
                         {showHistoryDetail === 'in' ? <TrendingUp size={18} className="text-green-600"/> : <TrendingDown size={18} className="text-red-600"/>}
@@ -474,10 +481,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
-      {/* --- MODAL RIWAYAT PER ITEM (DIKEMBALIKAN KE TAMPILAN TABEL/LAMA) --- */}
+      {/* --- MODAL RIWAYAT PER ITEM (RESPONSIVE HP & PC) --- */}
       {selectedItemHistory && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-            <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-0 md:p-4 animate-in fade-in">
+             {/* RESPONSIVE BOX:
+                HP: w-full, h-[90vh], rounded-t-2xl
+                PC: max-w-4xl, rounded-2xl
+            */}
+            <div className="bg-white w-full md:max-w-4xl h-[90vh] md:h-auto md:max-h-[85vh] rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden flex flex-col">
                 <div className="px-4 py-3 border-b flex justify-between items-start bg-gray-50">
                     <div className="flex-1">
                         <h3 className="font-bold text-gray-900 text-base flex items-center gap-2">
@@ -501,46 +512,48 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     ) : filteredItemHistory.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-48 text-gray-400"><History size={32} className="opacity-20 mb-2"/><p className="text-xs">Tidak ada riwayat.</p></div>
                     ) : (
-                        <table className="w-full text-left border-collapse">
-                            <thead className="bg-gray-50 text-gray-500 text-[10px] font-bold uppercase sticky top-0 z-10 border-b border-gray-200">
-                                <tr>
-                                    <th className="px-3 py-2 w-28 bg-gray-50">Tanggal</th>
-                                    <th className="px-3 py-2 w-20 text-center bg-gray-50">Tipe</th>
-                                    <th className="px-3 py-2 w-16 text-right bg-gray-50">Qty</th>
-                                    <th className="px-3 py-2 w-24 text-right bg-gray-50">Harga</th>
-                                    <th className="px-3 py-2 w-24 text-right bg-gray-50">Total</th>
-                                    <th className="px-3 py-2 bg-gray-50">Keterangan</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100 text-xs bg-white">
-                                {filteredItemHistory.map(h => { 
-                                    const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason); 
-                                    return (
-                                    <tr key={h.id} className="hover:bg-blue-50/10 transition-colors">
-                                        <td className="px-3 py-2 align-top text-gray-700">
-                                            {h.timestamp ? <><div className="font-bold">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-[9px] text-gray-400 font-mono">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div></> : '-'}
-                                        </td>
-                                        <td className="px-3 py-2 align-top text-center">
-                                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border ${h.type === 'in' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-red-50 text-red-700 border-red-100'}`}>
-                                                {h.type === 'in' ? 'Masuk' : 'Keluar'}
-                                            </span>
-                                        </td>
-                                        <td className={`px-3 py-2 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>
-                                            {h.type === 'in' ? '+' : '-'}{h.quantity}
-                                        </td>
-                                        <td className="px-3 py-2 align-top text-right font-mono text-gray-500 text-[10px]">{formatRupiah(h.price)}</td>
-                                        <td className="px-3 py-2 align-top text-right font-bold font-mono text-gray-800 text-[10px]">{formatRupiah(h.totalPrice)}</td>
-                                        <td className="px-3 py-2 align-top text-gray-700">
-                                            <div className="font-bold text-gray-900 text-[10px] mb-1">{h.type === 'in' ? h.reason.replace(/\(Via:.*?\)/, '').trim() : (customer !== '-' ? customer : keterangan)}</div>
-                                            <div className="flex flex-wrap gap-1">
-                                                {resi !== '-' && <div className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[9px] border border-blue-100 font-mono">{resi}</div>}
-                                                {ecommerce !== '-' && <div className="bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[9px] border border-orange-100">{ecommerce}</div>}
-                                            </div>
-                                        </td>
-                                    </tr>); 
-                                })}
-                            </tbody>
-                        </table>
+                        <div className="min-w-[700px]">
+                            <table className="w-full text-left border-collapse">
+                                <thead className="bg-gray-50 text-gray-500 text-[10px] font-bold uppercase sticky top-0 z-10 border-b border-gray-200">
+                                    <tr>
+                                        <th className="px-3 py-2 w-28 bg-gray-50">Tanggal</th>
+                                        <th className="px-3 py-2 w-20 text-center bg-gray-50">Tipe</th>
+                                        <th className="px-3 py-2 w-16 text-right bg-gray-50">Qty</th>
+                                        <th className="px-3 py-2 w-24 text-right bg-gray-50">Harga</th>
+                                        <th className="px-3 py-2 w-24 text-right bg-gray-50">Total</th>
+                                        <th className="px-3 py-2 bg-gray-50">Keterangan</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 text-xs bg-white">
+                                    {filteredItemHistory.map(h => { 
+                                        const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason); 
+                                        return (
+                                        <tr key={h.id} className="hover:bg-blue-50/10 transition-colors">
+                                            <td className="px-3 py-2 align-top text-gray-700">
+                                                {h.timestamp ? <><div className="font-bold">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-[9px] text-gray-400 font-mono">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div></> : '-'}
+                                            </td>
+                                            <td className="px-3 py-2 align-top text-center">
+                                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border ${h.type === 'in' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-red-50 text-red-700 border-red-100'}`}>
+                                                    {h.type === 'in' ? 'Masuk' : 'Keluar'}
+                                                </span>
+                                            </td>
+                                            <td className={`px-3 py-2 align-top text-right font-bold ${h.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>
+                                                {h.type === 'in' ? '+' : '-'}{h.quantity}
+                                            </td>
+                                            <td className="px-3 py-2 align-top text-right font-mono text-gray-500 text-[10px]">{formatRupiah(h.price)}</td>
+                                            <td className="px-3 py-2 align-top text-right font-bold font-mono text-gray-800 text-[10px]">{formatRupiah(h.totalPrice)}</td>
+                                            <td className="px-3 py-2 align-top text-gray-700">
+                                                <div className="font-bold text-gray-900 text-[10px] mb-1">{h.type === 'in' ? h.reason.replace(/\(Via:.*?\)/, '').trim() : (customer !== '-' ? customer : keterangan)}</div>
+                                                <div className="flex flex-wrap gap-1">
+                                                    {resi !== '-' && <div className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[9px] border border-blue-100 font-mono">{resi}</div>}
+                                                    {ecommerce !== '-' && <div className="bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded text-[9px] border border-orange-100">{ecommerce}</div>}
+                                                </div>
+                                            </td>
+                                        </tr>); 
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     )}
                 </div>
             </div>
