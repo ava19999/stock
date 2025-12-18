@@ -13,8 +13,6 @@ interface ItemFormProps {
 
 export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuccess }) => {
   const isEditMode = !!initialData;
-  
-  // Base Form State
   const [formData, setFormData] = useState<InventoryFormData>({
     partNumber: '', name: '', brand: '', application: '',
     quantity: 0, shelf: '',QX: '', price: 0, costPrice: 0,
@@ -128,7 +126,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-gray-50 md:bg-black/60 md:backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-white w-full h-full md:h-auto md:max-h-[90vh] md:max-w-4xl md:rounded-2xl shadow-none md:shadow-2xl flex flex-col overflow-hidden">
         
-        {/* HEADER MOBILE & DESKTOP */}
+        {/* HEADER */}
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 bg-white sticky top-0 z-20">
           <button onClick={onCancel} className="p-2 rounded-full hover:bg-gray-100 transition-colors md:hidden">
             <ArrowLeft size={20} />
@@ -214,7 +212,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                </div>
 
                {/* HARGA */}
-               <div className="bg-white p-4 rounded-2xlqh border border-gray-100 shadow-sm space-y-4">
+               <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-4">
                   <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1"><DollarSign size={12}/> Harga</h3>
                   <div className="relative">
                       <label className="text-[10px] font-bold text-gray-500 uppercase">Harga Modal (HPP)</label>
@@ -235,7 +233,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                   <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="text-[10px] font-bold text-gray-500 uppercase">Harga Jual</label>
-                        <input type="number" name="price" value={formData.price} onChange={handleChange} className="w-full mt-1 p-2.5 bg-blue-50 text-blue-700 font-mono font-bold text-sm rounded-xlYW border-none focus:ring-2 focus:ring-blue-200" />
+                        <input type="number" name="price" value={formData.price} onChange={handleChange} className="w-full mt-1 p-2.5 bg-blue-50 text-blue-700 font-mono font-bold text-sm rounded-xl border-none focus:ring-2 focus:ring-blue-200" />
                       </div>
                       <div>
                         <label className="text-[10px] font-bold text-purple-500 uppercase">Hrg King Fano</label>
