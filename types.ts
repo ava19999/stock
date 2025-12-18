@@ -120,7 +120,7 @@ export interface ReturRecord {
   keterangan: string | null;
 }
 
-// --- INTERFACE LENGKAP UNTUK SCAN RESI ---
+// --- INTERFACE UNTUK SCAN RESI ---
 export interface ScanResiLog {
   id?: number;
   tanggal: string;      // date

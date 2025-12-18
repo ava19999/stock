@@ -1,15 +1,14 @@
 // FILE: src/components/ScanResiView.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { ScanBarcode, Loader2, ChevronDown, Check, Upload, FileSpreadsheet, Calendar, AlertCircle } from 'lucide-react';
+import { ScanBarcode, Loader2, ChevronDown, Check, Upload, FileSpreadsheet, Calendar, AlertCircle, Send, Square, CheckSquare } from 'lucide-react';
 import { compressImage } from '../utils';
 import { ResiAnalysisResult, analyzeResiImage } from '../services/geminiService';
-import { addScanResiLog, fetchScanResiLogs } from '../services/supabaseService'; 
+import { addScanResiLog, fetchScanResiLogs, updateScanResiFromExcel, processShipmentToOrders } from '../services/supabaseService'; 
 import { ScanResiLog } from '../types';
+import * as XLSX from 'xlsx'; // Pastikan install: npm install xlsx
 
 // Daftar Toko Internal
 const STORE_LIST = ['MJM', 'LARIS', 'BJW'];
-
-// Daftar Marketplace
 const MARKETPLACES = ['Shopee', 'Tiktok', 'Tokopedia', 'Lazada', 'Offline'];
 
 interface ScanResiProps {
@@ -28,28 +27,39 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
   const [showMarketplacePopup, setShowMarketplacePopup] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [isSavingLog, setIsSavingLog] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isProcessingShipment, setIsProcessingShipment] = useState(false);
 
   // State Data Tabel
   const [scanLogs, setScanLogs] = useState<ScanResiLog[]>([]);
+  // State Checkbox (Resi yang dipilih/siap kirim)
+  const [selectedResis, setSelectedResis] = useState<string[]>([]);
 
   // Refs
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load data tabel saat pertama kali buka
   useEffect(() => {
     loadScanLogs();
-    // Auto focus ke input
     setTimeout(() => { barcodeInputRef.current?.focus(); }, 100);
   }, []);
+
+  // Efek samping: Auto-Check jika status "Siap Kirim" saat data dimuat/berubah
+  useEffect(() => {
+    const autoChecked = scanLogs
+        .filter(log => log.status === 'Siap Kirim')
+        .map(log => log.resi);
+    
+    // Gabungkan dengan manual selection (opsional, disini kita overwrite agar sinkron status)
+    setSelectedResis(autoChecked);
+  }, [scanLogs]);
 
   const loadScanLogs = async () => {
     const logs = await fetchScanResiLogs();
     setScanLogs(logs);
   };
 
-  // --- HANDLER SAAT SCAN (ENTER) ---
   const handleBarcodeInput = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -57,22 +67,17 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
       if (!scannedCode) return;
 
       setIsSavingLog(true);
-      
-      // Simpan ke Tabel scan_resi
       const success = await addScanResiLog(scannedCode, selectedMarketplace, selectedStore);
-      
       if (success) {
-          await loadScanLogs(); // Refresh tabel data terbaru
-          setBarcodeInput(''); // Kosongkan input agar siap scan lagi
+          await loadScanLogs();
+          setBarcodeInput('');
       } else {
-          alert("Gagal menyimpan data ke database. Cek koneksi.");
+          alert("Gagal menyimpan data.");
       }
-      
       setIsSavingLog(false);
     }
   };
 
-  // --- HANDLER KAMERA ---
   const handleCameraCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -80,7 +85,6 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     try {
       const compressed = await compressImage(await readFileAsBase64(file));
       const analysis = await analyzeResiImage(compressed);
-      
       if (analysis && analysis.resi) {
          const success = await addScanResiLog(analysis.resi, selectedMarketplace, selectedStore);
          if(success) {
@@ -88,23 +92,125 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
              alert(`Resi ${analysis.resi} tersimpan.`);
          }
       } else {
-        alert("Resi tidak terbaca oleh AI.");
+        alert("Resi tidak terbaca.");
       }
-    } catch (error) {
-      console.error("Error cam", error);
-    } finally {
+    } catch (error) { console.error(error); } 
+    finally {
       setAnalyzing(false);
       if (cameraInputRef.current) cameraInputRef.current.value = '';
     }
   };
 
-  // Handler Upload Excel (Placeholder)
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // --- LOGIKA PARSING EXCEL ---
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      alert(`Fitur Upload Excel untuk melengkapi data ${selectedMarketplace} akan diproses.`);
-    }
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!file) return;
+
+    setIsUploading(true);
+    
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+        try {
+            const bstr = evt.target?.result;
+            const wb = XLSX.read(bstr, { type: 'binary' });
+            const wsname = wb.SheetNames[0];
+            const ws = wb.Sheets[wsname];
+            // Konversi ke JSON
+            const data: any[] = XLSX.utils.sheet_to_json(ws);
+
+            // Mapping Data Excel ke Struktur Database
+            // Sesuaikan "Key" di bawah ini dengan Header di Excel Anda
+            const updates = data.map((row: any) => {
+                // Cari key yang mungkin (Case Insensitive mapping logic simple)
+                const getVal = (keys: string[]) => {
+                    for (let k of keys) {
+                        if (row[k] !== undefined) return row[k];
+                        // Coba lowercase
+                        const lowerKey = Object.keys(row).find(rk => rk.toLowerCase() === k.toLowerCase());
+                        if (lowerKey) return row[lowerKey];
+                    }
+                    return null;
+                };
+
+                const resi = getVal(['No. Resi', 'No. Pesanan', 'Resi', 'Order ID']);
+                const username = getVal(['Username', 'Nama Pembeli', 'Pembeli', 'Customer']);
+                const partNo = getVal(['No. Referensi', 'SKU Induk', 'SKU', 'Part Number', 'Part No']);
+                const produk = getVal(['Nama Produk', 'Nama Barang', 'Product Name']);
+                const qty = getVal(['Jumlah', 'Qty', 'Quantity']);
+                const harga = getVal(['Harga Awal', 'Harga Satuan', 'Price']);
+                
+                // Hitung total
+                const qtyNum = Number(qty) || 0;
+                const hargaNum = Number(harga) || 0;
+
+                if (resi) {
+                    return {
+                        resi: String(resi).trim(),
+                        customer: username || '-',
+                        part_number: partNo || null, // Kosongkan jika tidak ada
+                        nama_barang: produk || '-', // Nama dari Excel
+                        quantity: qtyNum,
+                        harga_satuan: hargaNum,
+                        harga_total: qtyNum * hargaNum
+                    };
+                }
+                return null;
+            }).filter(item => item !== null); // Hapus baris yang tidak ada resinya
+
+            // Kirim update ke Database
+            if (updates.length > 0) {
+                const success = await updateScanResiFromExcel(updates);
+                if (success) {
+                    alert(`Berhasil memproses ${updates.length} data dari Excel.`);
+                    await loadScanLogs(); // Reload tabel untuk lihat hasil matching
+                } else {
+                    alert("Gagal mengupdate database.");
+                }
+            } else {
+                alert("Tidak ditemukan kolom Resi di file Excel.");
+            }
+
+        } catch (error) {
+            console.error("Parse Error:", error);
+            alert("Gagal membaca file Excel.");
+        } finally {
+            setIsUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  // --- LOGIKA PROSES KIRIM ---
+  const handleProcessKirim = async () => {
+      if (selectedResis.length === 0) return;
+      
+      const confirmMsg = `Proses ${selectedResis.length} resi menjadi Terjual?\n\nItem akan masuk ke Manajemen Pesanan dengan nama sesuai Base Inventory.`;
+      if (!window.confirm(confirmMsg)) return;
+
+      setIsProcessingShipment(true);
+      
+      // Filter log lengkap berdasarkan resi yang diceklis
+      const logsToProcess = scanLogs.filter(log => selectedResis.includes(log.resi));
+      
+      const success = await processShipmentToOrders(logsToProcess);
+      
+      if (success) {
+          alert("Berhasil diproses kirim!");
+          await loadScanLogs(); // Reload (Status akan berubah jadi 'Terjual' & uncheck)
+          setSelectedResis([]); // Clear selection
+      } else {
+          alert("Terjadi kesalahan saat memproses.");
+      }
+      
+      setIsProcessingShipment(false);
+  };
+
+  // Toggle Checkbox Manual
+  const toggleSelect = (resi: string) => {
+      setSelectedResis(prev => 
+        prev.includes(resi) ? prev.filter(r => r !== resi) : [...prev, resi]
+      );
   };
 
   const readFileAsBase64 = (file: File): Promise<string> => {
@@ -116,33 +222,34 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     });
   };
 
-  // Helper warna marketplace
   const getMarketplaceColor = (mp: string) => {
     switch(mp) {
         case 'Shopee': return 'bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200';
         case 'Tokopedia': return 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200';
         case 'Tiktok': return 'bg-black text-white border-gray-800 hover:bg-gray-800';
-        case 'Lazada': return 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200';
         default: return 'bg-gray-100 text-gray-700 border-gray-200';
     }
   };
+
+  // Hitung statistik
+  const readyToSendCount = selectedResis.length;
 
   return (
     <div className="w-full space-y-4 h-full flex flex-col">
       {/* --- AREA SCANNER --- */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-4 sticky top-0 z-20">
         <div className="flex flex-col md:flex-row gap-3">
-            
-            {/* GROUP 1: Selectors */}
+            {/* GROUP 1: Selectors & Upload */}
             <div className="flex gap-2">
                 <div className="relative flex shadow-sm rounded-lg flex-1 md:flex-none">
                     <button 
                         onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
                         className={`flex items-center gap-2 px-3 py-2.5 text-sm font-bold border rounded-l-lg transition-colors flex-1 md:w-32 justify-center ${getMarketplaceColor(selectedMarketplace)}`}
-                        title="Upload Excel Match"
+                        title="Upload Excel untuk mencocokkan data"
                     >
-                        <FileSpreadsheet size={16} />
-                        {selectedMarketplace}
+                        {isUploading ? <Loader2 size={16} className="animate-spin"/> : <FileSpreadsheet size={16} />}
+                        {isUploading ? 'Loading...' : selectedMarketplace}
                     </button>
                     <button 
                         onClick={() => setShowMarketplacePopup(!showMarketplacePopup)}
@@ -151,8 +258,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                         <ChevronDown className="w-4 h-4 text-gray-500" />
                     </button>
 
-                    <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
-
+                    {/* Popup Marketplace */}
                     {showMarketplacePopup && (
                         <div className="absolute top-full left-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-gray-100 z-50 animate-in fade-in zoom-in-95 overflow-hidden">
                             {MARKETPLACES.map((mp) => (
@@ -168,6 +274,8 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                         </div>
                     )}
                 </div>
+
+                <input type="file" ref={fileInputRef} accept=".xlsx, .xls, .csv" className="hidden" onChange={handleFileUpload} />
 
                 <select
                     value={selectedStore}
@@ -190,7 +298,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                 onChange={(e) => setBarcodeInput(e.target.value)}
                 onKeyDown={handleBarcodeInput}
                 className="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 block w-full pl-10 p-2.5 font-mono font-medium shadow-sm"
-                placeholder={`Scan Resi ${selectedMarketplace} di sini...`}
+                placeholder={`Scan Resi ${selectedMarketplace}...`}
                 autoComplete="off"
                 disabled={isSavingLog}
               />
@@ -209,28 +317,46 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
         </div>
       </div>
 
-      {/* --- TABEL DATA SCAN RESI --- */}
+      {/* --- AREA TOMBOL PROSES & TABEL --- */}
       <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+        {/* Header Tabel dengan Tombol Proses */}
         <div className="px-5 py-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-            <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2">
-                <Calendar size={16} className="text-blue-600"/> Data Scan Resi
-            </h3>
-            <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{scanLogs.length}</span>
+            <div className="flex items-center gap-4">
+                <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2">
+                    <Calendar size={16} className="text-blue-600"/> Data Scan Resi
+                </h3>
+                <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{scanLogs.length} Item</span>
+            </div>
+
+            {/* TOMBOL PROSES KIRIM */}
+            {readyToSendCount > 0 && (
+                <button
+                    onClick={handleProcessKirim}
+                    disabled={isProcessingShipment}
+                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition-all animate-in fade-in slide-in-from-right-5"
+                >
+                    {isProcessingShipment ? <Loader2 size={14} className="animate-spin"/> : <Send size={14} />}
+                    Proses Kirim ({readyToSendCount})
+                </button>
+            )}
         </div>
         
-        {/* Container Tabel dengan Scroll Horizontal jika layar kecil */}
+        {/* Container Tabel */}
         <div className="flex-1 overflow-auto">
-            <table className="w-full text-left border-collapse min-w-[1000px]">
+            <table className="w-full text-left border-collapse min-w-[1100px]">
                 <thead className="bg-white sticky top-0 z-10 shadow-sm">
                     <tr>
+                        <th className="px-4 py-3 border-b border-gray-100 w-10 text-center">
+                            {/* Check All (Optional implementation) */}
+                            <CheckSquare size={16} className="text-gray-300 mx-auto"/>
+                        </th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Tanggal</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Resi</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Toko</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Via</th>
-                        
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Pelanggan</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Part.No</th>
-                        <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Barang</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Barang (Excel)</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 text-center">Qty</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 text-right">Satuan</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 text-right">Total</th>
@@ -240,7 +366,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                 <tbody className="divide-y divide-gray-50 text-xs">
                     {scanLogs.length === 0 ? (
                         <tr>
-                            <td colSpan={11} className="p-8 text-center text-gray-400">
+                            <td colSpan={12} className="p-8 text-center text-gray-400">
                                 <div className="flex flex-col items-center gap-2">
                                     <ScanBarcode size={32} className="opacity-20"/>
                                     <p>Belum ada resi yang di-scan hari ini</p>
@@ -249,68 +375,54 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                         </tr>
                     ) : (
                         scanLogs.map((log, idx) => {
-                            // Formatting tanggal menjadi Date Only (DD/MM/YYYY)
                             const dateObj = new Date(log.tanggal);
-                            const displayDate = dateObj.toLocaleDateString('id-ID', {
-                                year: 'numeric',
-                                month: '2-digit',
-                                day: '2-digit'
-                            });
+                            const displayDate = dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
                             
-                            const isComplete = log.part_number && log.nama_barang;
+                            // Logika Status dan Checklist
+                            const isReady = log.status === 'Siap Kirim';
+                            const isSold = log.status === 'Terjual';
+                            const isSelected = selectedResis.includes(log.resi);
 
                             return (
-                                <tr key={log.id || idx} className="hover:bg-blue-50/30 transition-colors">
-                                    {/* 1. Tanggal */}
+                                <tr key={log.id || idx} className={`transition-colors ${isSold ? 'bg-gray-50 opacity-60' : (isSelected ? 'bg-blue-50' : 'hover:bg-gray-50')}`}>
+                                    {/* Checkbox */}
+                                    <td className="px-4 py-3 text-center">
+                                        {!isSold && (
+                                            <button onClick={() => toggleSelect(log.resi)} disabled={!isReady} className="focus:outline-none">
+                                                {isSelected ? (
+                                                    <CheckSquare size={16} className="text-blue-600"/>
+                                                ) : (
+                                                    <Square size={16} className={isReady ? "text-gray-400 hover:text-blue-500" : "text-gray-200 cursor-not-allowed"}/>
+                                                )}
+                                            </button>
+                                        )}
+                                        {isSold && <Check size={16} className="text-green-500 mx-auto"/>}
+                                    </td>
+
                                     <td className="px-4 py-3 text-gray-500 font-mono whitespace-nowrap">{displayDate}</td>
-                                    
-                                    {/* 2. Resi */}
                                     <td className="px-4 py-3 font-bold text-gray-900 font-mono select-all">{log.resi}</td>
-                                    
-                                    {/* 3. Toko */}
                                     <td className="px-4 py-3 text-gray-600 font-semibold">{log.toko || '-'}</td>
-                                    
-                                    {/* 4. Via (Marketplace) */}
-                                    <td className="px-4 py-3">
-                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                                            log.ecommerce === 'Shopee' ? 'bg-orange-50 text-orange-700 border-orange-100' :
-                                            log.ecommerce === 'Tokopedia' ? 'bg-green-50 text-green-700 border-green-100' :
-                                            log.ecommerce === 'Tiktok' ? 'bg-gray-800 text-white border-gray-700' :
-                                            'bg-gray-100 text-gray-600 border-gray-200'
-                                        }`}>{log.ecommerce}</span>
-                                    </td>
-                                    
-                                    {/* 5. Pelanggan (Customer) */}
-                                    <td className="px-4 py-3 text-gray-500">{log.customer || '-'}</td>
-                                    
-                                    {/* 6. Part.No */}
+                                    <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-gray-100 text-gray-600 border-gray-200">{log.ecommerce}</span></td>
+                                    <td className="px-4 py-3 text-gray-700 font-medium">{log.customer || '-'}</td>
                                     <td className="px-4 py-3 text-gray-500 font-mono">{log.part_number || '-'}</td>
-                                    
-                                    {/* 7. Barang */}
                                     <td className="px-4 py-3 text-gray-500 truncate max-w-[150px]" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td>
-                                    
-                                    {/* 8. Qty */}
                                     <td className="px-4 py-3 text-gray-500 text-center">{log.quantity || '-'}</td>
+                                    <td className="px-4 py-3 text-gray-500 text-right">{log.harga_satuan ? `Rp${log.harga_satuan.toLocaleString('id-ID')}` : '-'}</td>
+                                    <td className="px-4 py-3 text-gray-800 font-bold text-right">{log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}</td>
                                     
-                                    {/* 9. Satuan (Harga Satuan) */}
-                                    <td className="px-4 py-3 text-gray-500 text-right">
-                                        {log.harga_satuan ? `Rp${log.harga_satuan.toLocaleString('id-ID')}` : '-'}
-                                    </td>
-
-                                    {/* 10. Total (Harga Total) */}
-                                    <td className="px-4 py-3 text-gray-500 text-right font-semibold">
-                                        {log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}
-                                    </td>
-
-                                    {/* 11. Status */}
+                                    {/* Status Column */}
                                     <td className="px-4 py-3 text-center whitespace-nowrap">
-                                        {isComplete ? (
-                                            <span className="inline-flex items-center gap-1 text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded-full border border-green-100">
-                                                <Check size={10}/> Lengkap
+                                        {isSold ? (
+                                            <span className="inline-flex items-center gap-1 text-gray-500 font-bold bg-gray-200 px-2 py-0.5 rounded-full text-[10px]">
+                                                Terjual
+                                            </span>
+                                        ) : isReady ? (
+                                            <span className="inline-flex items-center gap-1 text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded-full border border-green-100 text-[10px]">
+                                                <Check size={10}/> Siap Kirim
                                             </span>
                                         ) : (
-                                            <span className="inline-flex items-center gap-1 text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100">
-                                                <AlertCircle size={10}/> Pending Upload
+                                            <span className="inline-flex items-center gap-1 text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100 text-[10px]">
+                                                <AlertCircle size={10}/> Data Kosong
                                             </span>
                                         )}
                                     </td>

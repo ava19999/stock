@@ -521,7 +521,7 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
         resi: details.resi, 
         toko: details.toko, 
         ecommerce: details.ecommerce, 
-        customer: details.customer,
+        customer: details.customer, 
         part_number: item.partNumber || '-', 
         nama_barang: item.name, 
         quantity: item.cartQuantity,
@@ -572,10 +572,9 @@ export const updateReturKeterangan = async (resi: string, keterangan: string): P
 export const fetchPriceHistoryBySource = async (partNumber: string) => { const { data, error } = await supabase.from('barang_masuk').select('ecommerce, harga_satuan, created_at').eq('part_number', partNumber).order('created_at', { ascending: false }); if (error || !data) return []; const uniqueSources: Record<string, any> = {}; data.forEach((item: any) => { const sourceName = item.ecommerce || 'Unknown'; if (!uniqueSources[sourceName]) { uniqueSources[sourceName] = { source: sourceName, price: Number(item.harga_satuan), date: item.created_at ? new Date(item.created_at).toLocaleDateString('id-ID') : '-' }; } }); return Object.values(uniqueSources); };
 export const clearBarangKeluar = async (): Promise<boolean> => { const { error } = await supabase.from('barang_keluar').delete().neq('id', 0); if (error) { console.error("Gagal hapus barang keluar:", error); return false; } return true; };
 
-// --- FUNGSI BARU: SCAN RESI LOG ---
+// --- FUNGSI SCAN RESI LOG ---
 
 export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
-    // Ambil data hari ini atau 50 data terakhir
     const { data, error } = await supabase
         .from('scan_resi')
         .select('*')
@@ -590,14 +589,12 @@ export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
 };
 
 export const addScanResiLog = async (resi: string, ecommerce: string, toko: string): Promise<boolean> => {
-    // Insert data scan sederhana (tanpa detail barang dulu)
     const { error } = await supabase.from('scan_resi').insert([{
         tanggal: new Date().toISOString(),
         resi: resi,
         ecommerce: ecommerce,
         toko: toko,
-        status: 'Menunggu Upload Excel', // Default
-        // Field customer, part_number, dll dibiarkan null
+        status: 'Pending', // Status Awal
     }]);
 
     if (error) {
@@ -605,4 +602,92 @@ export const addScanResiLog = async (resi: string, ecommerce: string, toko: stri
         return false;
     }
     return true;
+};
+
+// --- FUNGSI BARU: UPDATE DARI EXCEL & PROSES KIRIM ---
+
+// 1. Update Massal dari Excel (Matching by Resi)
+export const updateScanResiFromExcel = async (updates: any[]): Promise<boolean> => {
+    // Karena Supabase tidak support update batch berbeda-beda value per row dengan mudah,
+    // Kita gunakan Promise.all untuk update per row (aman untuk jumlah ratusan/harian)
+    try {
+        const promises = updates.map(async (item) => {
+            // Logic Status: Jika data lengkap -> Siap Kirim
+            let newStatus = 'Pending';
+            if (item.customer && item.part_number && item.nama_barang && item.quantity && item.harga_total) {
+                newStatus = 'Siap Kirim';
+            }
+
+            return supabase
+                .from('scan_resi')
+                .update({
+                    customer: item.customer,
+                    part_number: item.part_number,
+                    nama_barang: item.nama_barang,
+                    quantity: item.quantity,
+                    harga_satuan: item.harga_satuan,
+                    harga_total: item.harga_total,
+                    status: newStatus // Update status otomatis
+                })
+                .eq('resi', item.resi);
+        });
+
+        await Promise.all(promises);
+        return true;
+    } catch (error) {
+        console.error("Gagal update batch excel:", error);
+        return false;
+    }
+};
+
+// 2. Proses Kirim (Pindah ke Orders + Update Status)
+export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Promise<boolean> => {
+    try {
+        for (const log of selectedLogs) {
+            // A. Cari Nama Barang Asli di Base Inventory berdasarkan Part Number
+            let realItemName = log.nama_barang; // Default nama dari excel
+            
+            if (log.part_number) {
+                const { data: baseItem } = await supabase
+                    .from(TABLE_NAME) // Tabel 'base'
+                    .select('name')
+                    .eq('part_number', log.part_number)
+                    .single();
+                
+                if (baseItem) {
+                    realItemName = baseItem.name; // Pakai nama asli database
+                }
+            }
+
+            // B. Masukkan ke tabel 'orders' (Manajemen Pesanan - Tab Terjual)
+            const { error: insertError } = await supabase.from('orders').insert([{
+                tanggal: new Date().toISOString(),
+                resi: log.resi,
+                toko: log.toko,
+                ecommerce: log.ecommerce,
+                customer: log.customer,
+                part_number: log.part_number,
+                nama_barang: realItemName, // PENTING: Nama disesuaikan dengan Base
+                quantity: log.quantity,
+                harga_satuan: log.harga_satuan,
+                harga_total: log.harga_total,
+                status: 'completed' // Masuk ke Terjual
+            }]);
+
+            if (insertError) {
+                console.error(`Gagal insert order ${log.resi}:`, insertError);
+                continue; 
+            }
+
+            // C. Update status di tabel 'scan_resi' menjadi 'Terjual'
+            await supabase
+                .from('scan_resi')
+                .update({ status: 'Terjual' })
+                .eq('id', log.id);
+        }
+        return true;
+    } catch (error) {
+        console.error("Error processing shipment:", error);
+        return false;
+    }
 };
