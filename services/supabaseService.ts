@@ -594,7 +594,7 @@ export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
         .from('scan_resi')
         .select('*')
         .order('tanggal', { ascending: false })
-        .limit(100);
+        .limit(500); // PERBAIKAN: Limit dinaikkan ke 500 untuk mendukung pagination
 
     if (error) {
         console.error("Gagal ambil log scan resi:", error);
