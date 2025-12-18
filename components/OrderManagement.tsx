@@ -25,12 +25,13 @@ interface OrderManagementProps {
 }
 
 export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], onUpdateStatus, onProcessReturn, onRefresh }) => {
-  const [activeTab, setActiveTab] = useState<'pending' | 'processing' | 'history'>('pending');
+  // Tab 'processing' kita mapping sebagai 'Terjual' di UI
+  const [activeTab, setActiveTab] = useState<'pending' | 'processing' | 'history'>('processing'); // Default ke Terjual jika diinginkan, atau ubah ke 'pending'
   const [searchTerm, setSearchTerm] = useState('');
   
   // PAGINATION STATE
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 100; // Limit 100 data per halaman
+  const itemsPerPage = 100; 
 
   const [returDbRecords, setReturDbRecords] = useState<ReturRecord[]>([]);
 
@@ -250,6 +251,9 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     } else {
         return safeOrders.filter(o => {
             if (!o) return false;
+            // MAPPING PENTING:
+            // Tab 'pending' -> status 'pending' (Pesanan Baru)
+            // Tab 'processing' -> status 'processing' (Terjual / Siap Kirim)
             if (activeTab === 'pending') return o.status === 'pending';
             if (activeTab === 'processing') return o.status === 'processing';
             return false;
@@ -276,7 +280,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const getStatusColor = (status: OrderStatus) => {
     switch (status) {
       case 'pending': return 'bg-amber-100 text-amber-700 border-amber-200';
-      case 'processing': return 'bg-blue-100 text-blue-700 border-blue-200';
+      case 'processing': return 'bg-blue-100 text-blue-700 border-blue-200'; // Warna untuk TERJUAL
       case 'completed': return 'bg-green-100 text-green-700 border-green-200';
       case 'cancelled': return 'bg-red-100 text-red-700 border-red-200';
       default: return 'bg-gray-100 text-gray-700';
@@ -286,7 +290,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const getStatusLabel = (status: OrderStatus) => {
       if (status === 'cancelled') return 'RETUR / BATAL';
       if (status === 'completed') return 'SELESAI';
-      if (status === 'processing') return 'TERJUAL';
+      if (status === 'processing') return 'TERJUAL'; // LABEL Processing = TERJUAL
       if (status === 'pending') return 'BARU';
       return status;
   };
@@ -375,12 +379,18 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       <div className="flex border-b border-gray-100 bg-gray-50/50">
           {[
               { id: 'pending', label: 'Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' },
-              { id: 'processing', label: 'Terjual', icon: Package, count: 0, color: 'text-blue-600' }, 
+              
+              // MAPPING: Tab 'processing' = 'Terjual' (Sesuai Logic)
+              { id: 'processing', label: 'Terjual', icon: Package, count: safeOrders.filter(o=>o?.status==='processing').length, color: 'text-blue-600' }, 
+              
               { id: 'history', label: 'Retur', icon: CheckCircle, count: returDbRecords.length, color: 'text-red-600' }
           ].map((tab: any) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-3 text-xs font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-white relative ${activeTab === tab.id ? `border-purple-600 text-purple-700 bg-white` : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                   <tab.icon size={16} className={activeTab === tab.id ? tab.color : ''} /><span>{tab.label}</span>
                   {tab.id === 'pending' && tab.count > 0 && <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full min-w-[16px] text-center">{tab.count}</span>}
+                  
+                  {/* Tampilkan count juga untuk tab processing / terjual */}
+                  {tab.id === 'processing' && tab.count > 0 && <span className="bg-blue-500 text-white text-[9px] px-1.5 py-0.5 rounded-full min-w-[16px] text-center">{tab.count}</span>}
               </button>
           ))}
       </div>

@@ -728,7 +728,7 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                 }
             }
 
-            // B. Masukkan ke tabel 'orders' (Manajemen Pesanan - Tab Terjual)
+            // B. Masukkan ke tabel 'orders' (Manajemen Pesanan)
             const { error: insertError } = await supabase.from('orders').insert([{
                 tanggal: new Date().toISOString(),
                 resi: log.resi,
@@ -740,7 +740,7 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                 quantity: log.quantity,
                 harga_satuan: log.harga_satuan,
                 harga_total: log.harga_total,
-                status: 'completed' // Masuk ke Terjual
+                status: 'processing' // UBAH DISINI: Masuk sebagai 'processing' agar muncul di tab Terjual
             }]);
 
             if (insertError) {
@@ -749,7 +749,7 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                 continue; 
             }
 
-            // C. Update status di tabel 'scan_resi' menjadi 'Terjual'
+            // C. Update status di tabel 'scan_resi' menjadi 'Terjual' (Ini hanya log scan, tidak apa-apa Terjual/Completed)
             await supabase
                 .from('scan_resi')
                 .update({ status: 'Terjual' })
