@@ -34,7 +34,6 @@ const getWIBISOString = (): string => {
 // Helper khusus untuk format tanggal YYYY-MM-DD sesuai WIB dari timestamp angka
 const getWIBDateString = (timestamp: number): string => {
     // Geser timestamp ke WIB
-    // (Kita tambahkan 7 jam ke timestamp aslinya agar saat diambil komponen UTC-nya, nilainya sama dengan WIB)
     const wibTime = new Date(timestamp + (7 * 3600000));
     return wibTime.toISOString().split('T')[0];
 };
@@ -205,10 +204,19 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   return data ? data.id : null;
 };
 
-// --- UPDATE INVENTORY ---
+// --- UPDATE INVENTORY (DIPERBARUI: Support parameter store/toko) ---
 export const updateInventory = async (
     item: InventoryItem, 
-    transaction?: { type: 'in' | 'out', qty: number, ecommerce: string, resiTempo: string, customer?: string, price?: number, isReturn?: boolean }
+    transaction?: { 
+        type: 'in' | 'out', 
+        qty: number, 
+        ecommerce: string, 
+        resiTempo: string, 
+        customer?: string, 
+        price?: number, 
+        isReturn?: boolean,
+        store?: string // PARAMETER BARU: Untuk menyimpan nama toko ke kolom tempo
+    }
 ): Promise<InventoryItem | null> => {
   
   const { data: currentDbItem, error: fetchError } = await supabase
@@ -269,10 +277,11 @@ export const updateInventory = async (
               hargaSatuan: txPrice, hargaTotal: txTotal
           });
       } else {
+          // UPDATE: Gunakan transaction.store untuk mengisi kolom tempo jika ada
           await addBarangKeluar({
               created_at: wibNow,
               kodeToko: 'MANUAL', 
-              tempo: '', 
+              tempo: transaction.store || '', // <-- ISI KOLOM TEMPO DENGAN NAMA TOKO
               ecommerce: sourceName,
               customer: transaction.customer || '', 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
@@ -594,7 +603,7 @@ export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
         .from('scan_resi')
         .select('*')
         .order('tanggal', { ascending: false })
-        .limit(500); // PERBAIKAN: Limit dinaikkan ke 500 untuk mendukung pagination
+        .limit(500); // Pagination 500 data
 
     if (error) {
         console.error("Gagal ambil log scan resi:", error);
@@ -605,7 +614,7 @@ export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
 
 export const addScanResiLog = async (resi: string, ecommerce: string, toko: string): Promise<boolean> => {
     const { error } = await supabase.from('scan_resi').insert([{
-        tanggal: getWIBISOString(), // PERBAIKAN: Gunakan WIB
+        tanggal: getWIBISOString(), // WIB
         resi: resi,
         ecommerce: ecommerce,
         toko: toko,
@@ -623,8 +632,6 @@ export const addScanResiLog = async (resi: string, ecommerce: string, toko: stri
 
 // 1. Update Massal dari Excel (Matching by Resi)
 export const updateScanResiFromExcel = async (updates: any[]): Promise<boolean> => {
-    // Karena Supabase tidak support update batch berbeda-beda value per row dengan mudah,
-    // Kita gunakan Promise.all untuk update per row (aman untuk jumlah ratusan/harian)
     try {
         const promises = updates.map(async (item) => {
             // Logic Status: Jika data lengkap -> Siap Kirim
@@ -655,7 +662,7 @@ export const updateScanResiFromExcel = async (updates: any[]): Promise<boolean> 
     }
 };
 
-// 2. Fungsi Update Single Field (BARU - Sesuai request View)
+// 2. Fungsi Update Single Field
 export const updateScanResiLogField = async (id: number, field: string, value: any): Promise<boolean> => {
     // 1. Update Field Target
     const { data, error } = await supabase
@@ -670,13 +677,11 @@ export const updateScanResiLogField = async (id: number, field: string, value: a
         return false;
     }
 
-    // 2. Auto-Update Status (Sinkronisasi dengan Logika UI)
-    // Jika Part Number, Nama Barang, dan Qty terisi, ubah status jadi "Siap Kirim"
+    // 2. Auto-Update Status
     if (data) {
         const isComplete = data.part_number && data.nama_barang && data.quantity;
         const newStatus = isComplete ? 'Siap Kirim' : 'Pending';
 
-        // Hanya update jika status berubah dan belum "Terjual"
         if (data.status !== newStatus && data.status !== 'Terjual') {
             await supabase
                 .from('scan_resi')
@@ -688,7 +693,7 @@ export const updateScanResiLogField = async (id: number, field: string, value: a
     return true;
 };
 
-// 3. Proses Kirim (Pindah ke Orders + Update Status + UPDATE INVENTORY)
+// 3. Proses Kirim (Pindah ke Orders + Update Status + UPDATE INVENTORY DENGAN NAMA TOKO)
 export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Promise<{ success: boolean; message?: string }> => {
     try {
         // --- 1. VALIDASI: Cek Apakah Part Number Ada di Base ---
@@ -696,11 +701,9 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
             .map(log => log.part_number)
             .filter(pn => pn !== null && pn !== '') as string[];
         
-        // Hapus duplikat agar query lebih efisien
         const uniquePartNumbers = [...new Set(partNumbersToCheck)];
 
         if (uniquePartNumbers.length > 0) {
-            // Ambil daftar part_number yang valid dari database
             const { data: existingItems, error } = await supabase
                 .from(TABLE_NAME) // Tabel 'base'
                 .select('part_number')
@@ -711,11 +714,9 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                 return { success: false, message: "Gagal memvalidasi Part Number di database." };
             }
 
-            // Bandingkan part number yang di-scan dengan yang ada di database
             const existingSet = new Set(existingItems?.map(item => item.part_number));
             const missingParts = uniquePartNumbers.filter(pn => !existingSet.has(pn));
 
-            // JIKA ADA YANG HILANG -> STOP PROSES & RETURN ERROR
             if (missingParts.length > 0) {
                 return { 
                     success: false, 
@@ -735,22 +736,22 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                 if (item) {
                     realItemName = item.name;
 
-                    // TAMBAHAN: Update Inventory (Kurangi Stok & Catat Barang Keluar)
-                    // Ini akan otomatis memasukkan data ke tabel 'barang_keluar'
+                    // TAMBAHAN: Update Inventory dengan STORE (log.toko)
                     await updateInventory(item, {
                         type: 'out',
                         qty: log.quantity,
                         ecommerce: log.ecommerce,
-                        resiTempo: log.resi, // Resi dimasukkan ke kolom Resi/Tempo di history
+                        resiTempo: log.resi, 
                         customer: log.customer,
-                        price: log.harga_satuan
+                        price: log.harga_satuan,
+                        store: log.toko // <--- PENTING: Kirim Nama Toko agar masuk ke kolom tempo
                     });
                 }
             }
 
             // B. Masukkan ke tabel 'orders' (Manajemen Pesanan)
             const { error: insertError } = await supabase.from('orders').insert([{
-                tanggal: getWIBISOString(), // PERBAIKAN: Gunakan WIB untuk insert order
+                tanggal: getWIBISOString(), 
                 resi: log.resi,
                 toko: log.toko,
                 ecommerce: log.ecommerce,
@@ -765,11 +766,10 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
 
             if (insertError) {
                 console.error(`Gagal insert order ${log.resi}:`, insertError);
-                // Lanjutkan loop agar resi lain yang valid tetap terproses
                 continue; 
             }
 
-            // C. Update status di tabel 'scan_resi' menjadi 'Terjual' (Ini hanya log scan)
+            // C. Update status di tabel 'scan_resi' menjadi 'Terjual'
             await supabase
                 .from('scan_resi')
                 .update({ status: 'Terjual' })
