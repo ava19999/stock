@@ -73,15 +73,19 @@ export interface StockHistory {
   tempo?: string;
 }
 
-// UPDATE: Tambahkan 'terjual' sebagai status yang valid
+// --- BAGIAN INI YANG MEMPERBAIKI BLANK SCREEN ---
+// Kita export OrderStatus secara terpisah agar App.tsx bisa membacanya
+export type OrderStatus = 'pending' | 'terjual' | 'processing' | 'completed' | 'cancelled';
+
 export interface Order {
   id: string;
   customerName: string;
   items: CartItem[];
   totalAmount: number;
-  status: 'pending' | 'terjual' | 'processing' | 'completed' | 'cancelled';
+  status: OrderStatus; // Menggunakan tipe OrderStatus yang sudah di-export di atas
   timestamp: number;
 }
+// ------------------------------------------------
 
 export interface CartItem extends InventoryItem {
   cartQuantity: number;
