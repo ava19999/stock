@@ -247,8 +247,10 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
     };
+    reader.readAsBinaryString(file);
+  };
 
-    const handleProcessKirim = async () => {
+  const handleProcessKirim = async () => {
       if (selectedResis.length === 0) return;
       const confirmMsg = `Proses ${selectedResis.length} resi menjadi Terjual?`;
       if (!window.confirm(confirmMsg)) return;
@@ -256,7 +258,6 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
       setIsProcessingShipment(true);
       const logsToProcess = scanLogs.filter(log => selectedResis.includes(log.resi));
       
-      // PANGGIL SERVICE (Sekarang mengembalikan object {success, message})
       const result = await processShipmentToOrders(logsToProcess);
       
       if (result.success) {
@@ -264,7 +265,6 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
           await loadScanLogs();
           setSelectedResis([]);
       } else {
-          // TAMPILKAN PESAN ERROR DARI VALIDASI
           alert(result.message || "Terjadi kesalahan saat memproses.");
       }
       setIsProcessingShipment(false);
