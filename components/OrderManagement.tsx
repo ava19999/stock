@@ -30,6 +30,17 @@ import {
 const STORE_LIST = ['MJM', 'LARIS', 'BJW'];
 const MARKETPLACES = ['Shopee', 'Tiktok', 'Tokopedia', 'Lazada', 'Offline'];
 
+// --- KOMPONEN TOAST LOCAL ---
+const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
+  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
+  return (
+    <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-full shadow-xl flex items-center text-white text-sm font-medium animate-in fade-in slide-in-from-top-2 duration-300 border ${type === 'success' ? 'bg-gray-900 border-gray-700' : 'bg-red-600 border-red-700'}`}>
+      {type === 'success' ? <CheckCircle size={18} className="mr-2 text-green-400" /> : <XCircle size={18} className="mr-2" />}
+      {message}
+    </div>
+  );
+};
+
 interface OrderManagementProps {
   orders: Order[];
   onUpdateStatus: (orderId: string, status: OrderStatus) => void;
@@ -42,6 +53,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [activeTab, setActiveTab] = useState<'pending' | 'scan' | 'processing' | 'history'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
   
+  // --- STATE TOAST ---
+  const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+  const showToast = (msg: string, type: 'success'|'error' = 'success') => setToast({msg, type});
+
   // --- STATE PAGINATION ---
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 100; 
@@ -104,8 +119,12 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       if (!scannedCode) return;
       setIsSavingLog(true);
       if (await addScanResiLog(scannedCode, selectedMarketplace, selectedStore)) {
-          await loadScanLogs(); setBarcodeInput('');
-      } else { alert("Gagal menyimpan data."); }
+          await loadScanLogs(); 
+          setBarcodeInput('');
+          // Opsional: showToast('Scan Berhasil'); // Tidak perlu toast jika sukses agar cepat
+      } else { 
+          showToast("Gagal menyimpan data.", 'error'); 
+      }
       setIsSavingLog(false);
     }
   };
@@ -119,9 +138,12 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       const analysis = await analyzeResiImage(compressed);
       if (analysis && analysis.resi) {
          if(await addScanResiLog(analysis.resi, selectedMarketplace, selectedStore)) {
-             await loadScanLogs(); alert(`Resi ${analysis.resi} tersimpan.`);
+             await loadScanLogs(); 
+             showToast(`Resi ${analysis.resi} tersimpan.`);
          }
-      } else { alert("Resi tidak terbaca."); }
+      } else { 
+          showToast("Resi tidak terbaca.", 'error'); 
+      }
     } catch (error) { console.error(error); } 
     finally { setAnalyzing(false); if (cameraInputRef.current) cameraInputRef.current.value = ''; }
   };
@@ -130,8 +152,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       setScanLogs(prev => prev.map(log => {
           if (log.id === id) {
               const updated = { ...log, part_number: value };
-              // Logic status lokal hanya untuk feedback UI cepat
-              // Status sebenarnya akan diupdate via addScanResiLog saat scan
+              updated.status = (updated.part_number && updated.nama_barang && updated.quantity) ? 'Siap Kirim' : 'Pending';
               return updated;
           }
           return log;
@@ -229,20 +250,20 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 const result = await importScanResiFromExcel(updates);
                 if (result.success) {
                     const msg = result.skippedCount > 0 
-                        ? `Berhasil memproses ${updates.length - result.skippedCount} data. (${result.skippedCount} duplikat dilewati)` 
-                        : `Berhasil memproses ${updates.length} data baru (Status Pending). Silakan scan untuk verifikasi.`;
-                    alert(msg);
+                        ? `Berhasil: ${updates.length - result.skippedCount} data. (${result.skippedCount} skip)` 
+                        : `Berhasil: ${updates.length} data.`;
+                    showToast(msg, 'success');
                     await loadScanLogs();
                 } else {
-                    alert("Gagal mengupdate database.");
+                    showToast("Gagal mengupdate database.", 'error');
                 }
             } else {
-                alert("Tidak ditemukan data valid di file Excel.");
+                showToast("Tidak ditemukan data valid.", 'error');
             }
 
         } catch (error) {
             console.error("Parse Error:", error);
-            alert("Gagal membaca file Excel.");
+            showToast("Gagal membaca file Excel.", 'error');
         } finally {
             setIsUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
@@ -253,19 +274,21 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   const handleProcessKirim = async () => {
       if (selectedResis.length === 0) return;
-      if (!window.confirm(`Proses ${selectedResis.length} resi menjadi Terjual?`)) return;
+      
+      // CONFIRMATION DIHAPUS (Langsung Proses)
+      // if (!window.confirm(`Proses ${selectedResis.length} resi menjadi Terjual?`)) return;
 
       setIsProcessingShipment(true);
       const logsToProcess = scanLogs.filter(log => selectedResis.includes(log.resi));
       const result = await processShipmentToOrders(logsToProcess);
       
       if (result.success) {
-          alert("Berhasil diproses kirim! Stok otomatis terupdate.");
+          showToast("Berhasil diproses! Stok terupdate.", 'success');
           await loadScanLogs();
           setSelectedResis([]);
           if (onRefresh) onRefresh();
       } else {
-          alert(result.message || "Terjadi kesalahan saat memproses.");
+          showToast(result.message || "Terjadi kesalahan.", 'error');
       }
       setIsProcessingShipment(false);
   };
@@ -304,7 +327,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           if (await updateReturKeterangan(editingNoteData.resi, noteText)) {
               setReturDbRecords(prev => prev.map(item => (item.id && item.id.toString() === editingNoteData.id) || item.resi === editingNoteData.resi ? { ...item, keterangan: noteText } : item));
               setIsNoteModalOpen(false);
-          } else { alert("Gagal menyimpan keterangan."); }
+          } else { showToast("Gagal menyimpan keterangan.", 'error'); }
       } catch (error) { console.error("Error saving note:", error); } finally { setIsSavingNote(false); }
   };
 
@@ -411,6 +434,9 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 min-h-[80vh] flex flex-col overflow-hidden relative">
+      {/* TOAST LOCAL */}
+      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+
       {/* MODALS */}
       {isNoteModalOpen && editingNoteData && ( <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col"><div className="bg-purple-50 px-4 py-3 border-b border-purple-100 flex justify-between items-center"><h3 className="text-base font-bold text-purple-800 flex items-center gap-2"><FileText size={18}/> Edit Keterangan</h3><button onClick={() => setIsNoteModalOpen(false)}><X size={18} className="text-gray-400 hover:text-gray-600"/></button></div><div className="p-4"><textarea className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-200 outline-none text-sm min-h-[100px]" placeholder="Masukkan alasan atau catatan..." value={noteText} onChange={(e) => setNoteText(e.target.value)} /></div><div className="p-3 border-t bg-gray-50 flex justify-end gap-2"><button onClick={() => setIsNoteModalOpen(false)} className="px-3 py-1.5 text-xs font-bold text-gray-600 hover:bg-gray-200 rounded-lg">Batal</button><button onClick={handleSaveNote} disabled={isSavingNote} className="px-4 py-1.5 text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 rounded-lg shadow flex items-center gap-2">{isSavingNote ? <Loader size={14} className="animate-spin"/> : <Save size={14}/>} Simpan</button></div></div></div> )}
       {isReturnModalOpen && selectedOrderForReturn && ( <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90%]"><div className="bg-orange-50 px-4 py-3 border-b border-orange-100 flex justify-between items-center"><h3 className="text-base font-bold text-orange-800 flex items-center gap-2"><RotateCcw size={18}/> Retur Barang</h3><button onClick={() => setIsReturnModalOpen(false)}><X size={18} className="text-orange-400 hover:text-orange-600"/></button></div><div className="p-4 overflow-y-auto text-sm"><div className="space-y-2">{selectedOrderForReturn.items.map((item) => (<div key={item.id} className="flex items-center justify-between p-2 border border-gray-200 rounded-lg hover:border-orange-200"><div className="flex-1"><div className="font-bold text-gray-800 text-xs">{item.name}</div><div className="text-[10px] text-gray-500 font-mono">{item.partNumber}</div></div><div className="flex items-center gap-2 bg-gray-50 p-1 rounded-lg border border-gray-200"><button onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.max(0, (prev[item.id] || 0) - 1)}))} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm hover:bg-red-50 text-gray-600 font-bold">-</button><div className="w-6 text-center font-bold text-sm text-gray-800">{returnQuantities[item.id] || 0}</div><button onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.min(item.cartQuantity || 0, (prev[item.id] || 0) + 1)}))} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm hover:bg-green-50 text-gray-600 font-bold">+</button></div></div>))}</div></div><div className="p-3 border-t bg-gray-50 flex justify-end gap-2"><button onClick={() => setIsReturnModalOpen(false)} className="px-3 py-1.5 text-xs font-bold text-gray-600 hover:bg-gray-200 rounded-lg">Batal</button><button onClick={handleProcessReturn} disabled={isLoading} className="px-4 py-1.5 text-xs font-bold bg-orange-600 text-white hover:bg-orange-700 rounded-lg shadow flex items-center gap-2">{isLoading ? <Loader size={14} className="animate-spin"/> : <Save size={14}/>} Proses</button></div></div></div> )}
