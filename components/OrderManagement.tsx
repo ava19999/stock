@@ -3,7 +3,15 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Order, OrderStatus, ReturRecord } from '../types';
 import { Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store, Save, Loader, Calendar } from 'lucide-react';
 import { formatRupiah } from '../utils';
-import { updateInventory, updateOrderData, saveOrder, addReturTransaction, updateReturKeterangan, fetchReturRecords } from '../services/supabaseService';
+import { 
+  updateInventory, 
+  updateOrderData, 
+  saveOrder, 
+  addReturTransaction, 
+  updateReturKeterangan, 
+  fetchReturRecords, 
+  getItemByPartNumber // Tambahkan import ini
+} from '../services/supabaseService';
 
 interface OrderManagementProps {
   orders: Order[];
@@ -109,7 +117,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
         .filter(Boolean) as any[];
 
       if (itemsToReturnData.length === 0) {
-          alert("Pilih minimal 1 barang untuk diretur.");
+          // Alert validasi ini boleh tetap ada atau dihapus jika mau
+          // alert("Pilih minimal 1 barang untuk diretur."); 
           return;
       }
 
@@ -123,18 +132,25 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             const hargaSatuan = item.customPrice ?? item.price ?? 0;
             const totalRetur = hargaSatuan * item.cartQuantity;
 
-            await updateInventory({
-                ...item,
-                quantity: item.quantity 
-            }, {
-                type: 'in',
-                qty: item.cartQuantity,
-                ecommerce: ecommerce, 
-                resiTempo: combinedResiShop, 
-                customer: cleanName, 
-                price: hargaSatuan, 
-                isReturn: true 
-            });
+            // FIX: Cari item asli di inventory berdasarkan Part Number agar dapat ID/UUID yang benar
+            const realItem = await getItemByPartNumber(item.partNumber);
+
+            if (realItem) {
+                await updateInventory({
+                    ...realItem,
+                    quantity: realItem.quantity 
+                }, {
+                    type: 'in',
+                    qty: item.cartQuantity,
+                    ecommerce: ecommerce, 
+                    resiTempo: combinedResiShop, 
+                    customer: cleanName, 
+                    price: hargaSatuan, 
+                    isReturn: true 
+                });
+            } else {
+                console.warn(`Barang dengan part number ${item.partNumber} tidak ditemukan di gudang.`);
+            }
 
             const returData: ReturRecord = {
                 tanggal_pemesanan: new Date(selectedOrderForReturn.timestamp).toISOString(), 
@@ -171,7 +187,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 selectedOrderForReturn.totalAmount,
                 'cancelled'
             );
-            alert('Retur Berhasil! Stok fisik dikembalikan dan riwayat tercatat.');
+            // alert DIHAPUS
         } else {
             const returnTotal = itemsToReturnData.reduce((sum, item) => sum + ((item.customPrice ?? item.price ?? 0) * item.cartQuantity), 0);
             
@@ -192,7 +208,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 remainingTotal,
                 'processing'
             );
-            alert('Retur Sebagian Berhasil! Stok fisik dikembalikan.');
+            // alert DIHAPUS
         }
 
         setIsReturnModalOpen(false);
@@ -202,7 +218,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
       } catch (error) {
           console.error("Error processing return:", error);
-          alert("Terjadi kesalahan saat memproses retur.");
+          // alert("Terjadi kesalahan saat memproses retur."); // Opsional dihapus juga
       } finally {
           setIsLoading(false);
       }
