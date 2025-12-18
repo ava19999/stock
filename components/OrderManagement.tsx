@@ -5,7 +5,7 @@ import {
   Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, 
   ShoppingBag, Tag, Search, X, Store, Save, Loader, FileText, 
   AlertCircle, ChevronLeft, ChevronRight, ScanBarcode, CheckSquare, 
-  FileSpreadsheet, Upload, Send, Square, ChevronDown, Check, Loader2, Edit2
+  FileSpreadsheet, Upload, Send, Square, ChevronDown, Check, Loader2, Edit2, XCircle
 } from 'lucide-react';
 import { formatRupiah, compressImage } from '../utils';
 import { analyzeResiImage } from '../services/geminiService';
@@ -20,13 +20,14 @@ import {
   getItemByPartNumber,
   addScanResiLog, 
   fetchScanResiLogs, 
-  importScanResiFromExcel, // GANTI IMPORT KE FUNGSI BARU
+  importScanResiFromExcel, // Gunakan fungsi import baru
   processShipmentToOrders, 
   fetchInventory, 
   updateScanResiLogField
 } from '../services/supabaseService';
 
-// --- KONSTANTA SCAN RESI ---
+// ... (Bagian import dan konstanta sama seperti sebelumnya) ...
+// Daftar Toko Internal
 const STORE_LIST = ['MJM', 'LARIS', 'BJW'];
 const MARKETPLACES = ['Shopee', 'Tiktok', 'Tokopedia', 'Lazada', 'Offline'];
 
@@ -147,7 +148,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       return parseFloat(strVal) || 0;
   };
 
-  // --- LOGIKA UPLOAD EXCEL (DIPERBARUI) ---
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -212,8 +212,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 if (resi) {
                     return {
                         resi: String(resi).trim(),
-                        toko: selectedStore, // TAMBAHAN: Masukkan nama toko dari dropdown
-                        ecommerce: selectedMarketplace, // TAMBAHAN: Masukkan marketplace
+                        toko: selectedStore,
+                        ecommerce: selectedMarketplace,
                         customer: username || '-', 
                         part_number: partNo || null,
                         nama_barang: produk || '-',
@@ -226,12 +226,11 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             }).filter(item => item !== null);
 
             if (updates.length > 0) {
-                // GANTI CALL: Gunakan importScanResiFromExcel
                 const result = await importScanResiFromExcel(updates);
                 if (result.success) {
                     const msg = result.skippedCount > 0 
                         ? `Berhasil memproses ${updates.length - result.skippedCount} data. (${result.skippedCount} duplikat dilewati)` 
-                        : `Berhasil memproses ${updates.length} data baru.`;
+                        : `Berhasil memproses ${updates.length} data baru (Status Pending). Silakan scan untuk verifikasi.`;
                     alert(msg);
                     await loadScanLogs();
                 } else {
@@ -293,7 +292,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     });
   };
 
-  // --- LOGIKA ORDER MANAGEMENT & RETUR (SAMA SEPERTI SEBELUMNYA) ---
+  // --- LOGIKA ORDER MANAGEMENT & RETUR ---
   const openNoteModal = (retur: ReturRecord) => {
       setEditingNoteData({ id: retur.id ? retur.id.toString() : '', resi: retur.resi || '', currentText: retur.keterangan || '' });
       setNoteText(retur.keterangan || ''); setIsNoteModalOpen(true);
@@ -444,7 +443,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     <div className="flex gap-2"><button onClick={() => cameraInputRef.current?.click()} disabled={analyzing} className="text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 font-bold rounded-lg text-sm px-4 py-2.5 flex items-center justify-center gap-2">{analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanBarcode className="w-4 h-4" />}<span className="hidden md:inline">Kamera</span></button><input type="file" ref={cameraInputRef} accept="image/*" capture="environment" className="hidden" onChange={handleCameraCapture} />{readyToSendCount > 0 && (<button onClick={handleProcessKirim} disabled={isProcessingShipment} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition-all animate-in fade-in slide-in-from-right-5">{isProcessingShipment ? <Loader2 size={14} className="animate-spin"/> : <Send size={14} />}Proses ({readyToSendCount})</button>)}</div>
                 </div>
             </div>
-            <div className="flex-1 overflow-auto p-2"><div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden min-w-[1000px]"><table className="w-full text-left border-collapse"><thead className="bg-white sticky top-0 z-10 shadow-sm text-[10px] font-bold text-gray-500 uppercase tracking-wider"><tr><th className="px-4 py-3 border-b border-gray-100 w-10 text-center"><CheckSquare size={16} className="text-gray-300 mx-auto"/></th><th className="px-4 py-3 border-b border-gray-100">Tanggal</th><th className="px-4 py-3 border-b border-gray-100">Resi</th><th className="px-4 py-3 border-b border-gray-100">Toko</th><th className="px-4 py-3 border-b border-gray-100">Via</th><th className="px-4 py-3 border-b border-gray-100">Pelanggan</th><th className="px-4 py-3 border-b border-gray-100">Part.No (Edit)</th><th className="px-4 py-3 border-b border-gray-100">Barang</th><th className="px-4 py-3 border-b border-gray-100 text-center">Qty</th><th className="px-4 py-3 border-b border-gray-100 text-right">Total</th><th className="px-4 py-3 border-b border-gray-100 text-center">Status</th></tr></thead><tbody className="divide-y divide-gray-50 text-xs">{scanCurrentItems.length === 0 ? (<tr><td colSpan={11} className="p-8 text-center text-gray-400"><div className="flex flex-col items-center gap-2"><ScanBarcode size={32} className="opacity-20"/><p>Belum ada resi yang di-scan hari ini</p></div></td></tr>) : (scanCurrentItems.map((log, idx) => { const dateObj = new Date(log.tanggal); const displayDate = dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' }); const isReady = log.status === 'Siap Kirim'; const isSold = log.status === 'Terjual'; const isSelected = selectedResis.includes(log.resi); return ( <tr key={log.id || idx} className={`transition-colors ${isSold ? 'bg-gray-50 opacity-60' : (isSelected ? 'bg-blue-50' : 'hover:bg-gray-50')}`}><td className="px-4 py-3 text-center">{!isSold && (<button onClick={() => toggleSelect(log.resi)} disabled={!isReady} className="focus:outline-none">{isSelected ? <CheckSquare size={16} className="text-blue-600"/> : <Square size={16} className={isReady ? "text-gray-400 hover:text-blue-500" : "text-gray-200 cursor-not-allowed"}/>}</button>)}{isSold && <Check size={16} className="text-green-500 mx-auto"/>}</td><td className="px-4 py-3 text-gray-500 font-mono whitespace-nowrap">{displayDate}</td><td className="px-4 py-3 font-bold text-gray-900 font-mono select-all">{log.resi}</td><td className="px-4 py-3 text-gray-600 font-semibold">{log.toko || '-'}</td><td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-gray-100 text-gray-600 border-gray-200">{log.ecommerce}</span></td><td className="px-4 py-3 text-gray-800 font-medium">{log.customer || '-'}</td><td className="px-4 py-3"><div className="flex items-center gap-1">{!isSold ? (<input className="bg-transparent border-b border-transparent focus:border-blue-500 outline-none w-full font-mono text-gray-700 placeholder-red-200" placeholder="Part Number" value={log.part_number || ''} onChange={(e) => handlePartNumberChange(log.id!, e.target.value)} />) : (<span className="font-mono text-gray-700">{log.part_number}</span>)}{!!log.part_number && <Search size={10} className="text-blue-300 flex-shrink-0" title="Terdeteksi Otomatis"/>}</div></td><td className="px-4 py-3 text-gray-500 truncate max-w-[150px]" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td><td className="px-4 py-3 text-gray-500 text-center">{log.quantity || '-'}</td><td className="px-4 py-3 text-gray-800 font-bold text-right">{log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}</td><td className="px-4 py-3 text-center whitespace-nowrap">{isSold ? (<span className="inline-flex items-center gap-1 text-gray-500 font-bold bg-gray-200 px-2 py-0.5 rounded-full text-[10px]">Terjual</span>) : isReady ? (<span className="inline-flex items-center gap-1 text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded-full border border-green-100 text-[10px]"><Check size={10}/> Siap Kirim</span>) : (<span className="inline-flex items-center gap-1 text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100 text-[10px]"><Edit2 size={10}/> Data Kosong</span>)}</td></tr>); }))}</tbody></table></div></div>
+            <div className="flex-1 overflow-auto p-2"><div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden min-w-[1000px]"><table className="w-full text-left border-collapse"><thead className="bg-white sticky top-0 z-10 shadow-sm text-[10px] font-bold text-gray-500 uppercase tracking-wider"><tr><th className="px-4 py-3 border-b border-gray-100 w-10 text-center"><CheckSquare size={16} className="text-gray-300 mx-auto"/></th><th className="px-4 py-3 border-b border-gray-100">Tanggal</th><th className="px-4 py-3 border-b border-gray-100">Resi</th><th className="px-4 py-3 border-b border-gray-100">Toko</th><th className="px-4 py-3 border-b border-gray-100">Via</th><th className="px-4 py-3 border-b border-gray-100">Pelanggan</th><th className="px-4 py-3 border-b border-gray-100">Part.No (Edit)</th><th className="px-4 py-3 border-b border-gray-100">Barang</th><th className="px-4 py-3 border-b border-gray-100 text-center">Qty</th><th className="px-4 py-3 border-b border-gray-100 text-right">Total</th><th className="px-4 py-3 border-b border-gray-100 text-center">Status</th></tr></thead><tbody className="divide-y divide-gray-50 text-xs">{scanCurrentItems.length === 0 ? (<tr><td colSpan={11} className="p-8 text-center text-gray-400"><div className="flex flex-col items-center gap-2"><ScanBarcode size={32} className="opacity-20"/><p>Belum ada resi yang di-scan hari ini</p></div></td></tr>) : (scanCurrentItems.map((log, idx) => { const dateObj = new Date(log.tanggal); const displayDate = dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' }); const isReady = log.status === 'Siap Kirim'; const isSold = log.status === 'Terjual'; const isSelected = selectedResis.includes(log.resi); return ( <tr key={log.id || idx} className={`transition-colors ${isSold ? 'bg-gray-50 opacity-60' : (isSelected ? 'bg-blue-50' : 'hover:bg-gray-50')}`}><td className="px-4 py-3 text-center">{!isSold && (<button onClick={() => toggleSelect(log.resi)} disabled={!isReady} className="focus:outline-none">{isSelected ? <CheckSquare size={16} className="text-blue-600"/> : <Square size={16} className={isReady ? "text-gray-400 hover:text-blue-500" : "text-gray-200 cursor-not-allowed"}/>}</button>)}{isSold && <Check size={16} className="text-green-500 mx-auto"/>}</td><td className="px-4 py-3 text-gray-500 font-mono whitespace-nowrap">{displayDate}</td><td className="px-4 py-3 font-bold text-gray-900 font-mono select-all">{log.resi}</td><td className="px-4 py-3 text-gray-600 font-semibold">{log.toko || '-'}</td><td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-gray-100 text-gray-600 border-gray-200">{log.ecommerce}</span></td><td className="px-4 py-3 text-gray-800 font-medium">{log.customer || '-'}</td><td className="px-4 py-3"><div className="flex items-center gap-1">{!isSold ? (<input className="bg-transparent border-b border-transparent focus:border-blue-500 outline-none w-full font-mono text-gray-700 placeholder-red-200" placeholder="Part Number" value={log.part_number || ''} onChange={(e) => handlePartNumberChange(log.id!, e.target.value)} />) : (<span className="font-mono text-gray-700">{log.part_number}</span>)}{!!log.part_number && <Search size={10} className="text-blue-300 flex-shrink-0" title="Terdeteksi Otomatis"/>}</div></td><td className="px-4 py-3 text-gray-500 truncate max-w-[150px]" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td><td className="px-4 py-3 text-gray-500 text-center">{log.quantity || '-'}</td><td className="px-4 py-3 text-gray-800 font-bold text-right">{log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}</td><td className="px-4 py-3 text-center whitespace-nowrap">{isSold ? (<span className="inline-flex items-center gap-1 text-gray-500 font-bold bg-gray-200 px-2 py-0.5 rounded-full text-[10px]">Terjual</span>) : isReady ? (<span className="inline-flex items-center gap-1 text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded-full border border-green-100 text-[10px]"><Check size={10}/> Siap Kirim</span>) : (<span className="inline-flex items-center gap-1 text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded-full border border-red-100 text-[10px]"><XCircle size={10}/> Belum Scan</span>)}</td></tr>); }))}</tbody></table></div></div>
             <div className="px-4 py-3 bg-white border-t border-gray-200 flex items-center justify-between text-xs text-gray-500"><div>Menampilkan {scanStartIndex + 1}-{Math.min(scanStartIndex + itemsPerPage, scanTotalItems)} dari {scanTotalItems} data</div><div className="flex items-center gap-2"><button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16}/></button><span className="font-bold text-gray-900">Halaman {currentPage}</span><button onClick={() => setCurrentPage(p => Math.min(scanTotalPages, p + 1))} disabled={currentPage >= scanTotalPages} className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16}/></button></div></div>
         </>
       ) : (

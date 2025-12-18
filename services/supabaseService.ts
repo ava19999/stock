@@ -21,6 +21,7 @@ const handleDbError = (op: string, err: any) => { console.error(`${op} Error:`, 
 // Generate ISO String tapi Waktu WIB (UTC+7)
 const getWIBISOString = (): string => {
     const now = new Date();
+    // Geser waktu ke WIB (UTC+7)
     const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
     const wibTime = new Date(utc + (7 * 3600000));
     
@@ -30,7 +31,9 @@ const getWIBISOString = (): string => {
     return `${wibTime.getFullYear()}-${pad(wibTime.getMonth() + 1)}-${pad(wibTime.getDate())}T${pad(wibTime.getHours())}:${pad(wibTime.getMinutes())}:${pad(wibTime.getSeconds())}.${pad3(wibTime.getMilliseconds())}`;
 };
 
+// Helper khusus untuk format tanggal YYYY-MM-DD sesuai WIB dari timestamp angka
 const getWIBDateString = (timestamp: number): string => {
+    // Geser timestamp ke WIB
     const wibTime = new Date(timestamp + (7 * 3600000));
     return wibTime.toISOString().split('T')[0];
 };
@@ -608,23 +611,50 @@ export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
     return data || [];
 };
 
+// --- UPDATE LOGIC SCAN ---
+// Fungsi ini dipanggil saat Scan Barcode/Kamera
 export const addScanResiLog = async (resi: string, ecommerce: string, toko: string): Promise<boolean> => {
-    const { error } = await supabase.from('scan_resi').insert([{
-        tanggal: getWIBISOString(), // WIB
-        resi: resi,
-        ecommerce: ecommerce,
-        toko: toko,
-        status: 'Pending', // Status Awal
-    }]);
+    try {
+        // 1. Cek apakah resi sudah ada (dari Excel)
+        const { data: existing } = await supabase.from('scan_resi').select('*').eq('resi', resi).maybeSingle();
 
-    if (error) {
-        console.error("Gagal simpan log resi:", error);
+        if (existing) {
+            // Jika resi SUDAH ADA (misal dari import Excel yang statusnya 'Pending'),
+            // Kita ubah statusnya menjadi 'Siap Kirim' JIKA datanya lengkap.
+            // Ini memenuhi request "Harus scan dulu baru checklist otomatis"
+            
+            const isComplete = existing.part_number && existing.nama_barang && existing.quantity;
+            const newStatus = isComplete ? 'Siap Kirim' : 'Pending';
+            
+            // Update status dan tanggal scan ke waktu sekarang
+            const { error } = await supabase.from('scan_resi').update({
+                status: newStatus,
+                tanggal: getWIBISOString(), // Update waktu scan
+                // Optional: Update toko/ecommerce jika ingin override data excel dengan data scanner
+                // toko: toko,
+                // ecommerce: ecommerce
+            }).eq('id', existing.id);
+            
+            return !error;
+        } else {
+            // Jika resi BELUM ADA (Scan baru yang tidak ada di Excel),
+            // Insert baru dengan status Pending (Default)
+            const { error } = await supabase.from('scan_resi').insert([{
+                tanggal: getWIBISOString(),
+                resi: resi,
+                ecommerce: ecommerce,
+                toko: toko,
+                status: 'Pending', 
+            }]);
+            return !error;
+        }
+    } catch (err) {
+        console.error("Error scanning:", err);
         return false;
     }
-    return true;
 };
 
-// --- FUNGSI BARU: IMPORT DARI EXCEL (DENGAN CEK DUPLIKASI) ---
+// --- FUNGSI BARU: IMPORT DARI EXCEL (DENGAN CEK DUPLIKASI & FORCE PENDING) ---
 
 // Ubah nama dari updateScanResiFromExcel menjadi importScanResiFromExcel untuk kejelasan
 export const importScanResiFromExcel = async (updates: any[]): Promise<{ success: boolean, skippedCount: number }> => {
@@ -659,24 +689,21 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
         // 4. Siapkan payload untuk insert
         const now = getWIBISOString();
         const insertPayload = newItems.map(item => {
-            // Cek status awal: Jika data lengkap -> Siap Kirim
-            let initialStatus = 'Pending';
-            if (item.part_number && item.nama_barang && item.quantity) {
-                initialStatus = 'Siap Kirim';
-            }
-
+            // REQUEST USER: Upload Excel statusnya HARUS 'Pending' (X Merah)
+            // Walaupun data lengkap, tetap 'Pending' sampai di-scan.
+            
             return {
                 tanggal: now,
                 resi: item.resi,
-                toko: item.toko || '-', // Default jika kosong
-                ecommerce: item.ecommerce || '-', // Default jika kosong
+                toko: item.toko || '-', 
+                ecommerce: item.ecommerce || '-', 
                 customer: item.customer || '-',
                 part_number: item.part_number || null,
                 nama_barang: item.nama_barang || '-',
                 quantity: item.quantity || 0,
                 harga_satuan: item.harga_satuan || 0,
                 harga_total: item.harga_total || 0,
-                status: initialStatus
+                status: 'Pending' // FORCE PENDING
             };
         });
 
@@ -711,7 +738,7 @@ export const updateScanResiLogField = async (id: number, field: string, value: a
         return false;
     }
 
-    // 2. Auto-Update Status
+    // 2. Auto-Update Status (Edit manual juga dianggap verifikasi/scan)
     if (data) {
         const isComplete = data.part_number && data.nama_barang && data.quantity;
         const newStatus = isComplete ? 'Siap Kirim' : 'Pending';
