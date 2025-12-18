@@ -1,7 +1,7 @@
 // FILE: src/components/OrderManagement.tsx
 import React, { useState, useMemo, useEffect } from 'react';
 import { Order, OrderStatus, ReturRecord } from '../types';
-import { Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store, Save, Loader, Calendar } from 'lucide-react';
+import { Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store, Save, Loader, Calendar, TrendingDown } from 'lucide-react';
 import { formatRupiah } from '../utils';
 import { 
   updateInventory, 
@@ -10,7 +10,7 @@ import {
   addReturTransaction, 
   updateReturKeterangan, 
   fetchReturRecords, 
-  getItemByPartNumber // Tambahkan import ini
+  getItemByPartNumber 
 } from '../services/supabaseService';
 
 interface OrderManagementProps {
@@ -32,36 +32,33 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(false);
 
-  // FETCH DATA RETUR UNTUK DITAMPILKAN (KETERANGAN & TANGGAL RETUR)
+  // FETCH DATA RETUR
   useEffect(() => {
-      if (activeTab === 'history') {
-          fetchReturRecords().then(records => {
-              setReturDbRecords(records);
-              
-              const dbNotes: Record<string, string> = {};
-              orders.forEach(order => {
-                  const { resiText } = getOrderDetails(order);
-                  const foundRetur = records.find(r => r.resi === resiText);
-                  if (foundRetur && foundRetur.keterangan) {
-                      dbNotes[order.id] = foundRetur.keterangan;
-                  }
-              });
-              setLocalNotes(prev => ({...prev, ...dbNotes}));
+      // Selalu fetch data retur untuk memastikan sinkronisasi note/keterangan, 
+      // terutama saat tab history dibuka
+      fetchReturRecords().then(records => {
+          setReturDbRecords(records);
+          
+          // Sinkronisasi notes ke state lokal untuk editing
+          const dbNotes: Record<string, string> = {};
+          records.forEach(r => {
+              // Kita gunakan ID record retur atau resi sebagai key
+              if (r.id) dbNotes[r.id.toString()] = r.keterangan || '';
           });
-      }
+          setLocalNotes(prev => ({...prev, ...dbNotes}));
+      });
   }, [activeTab, orders]);
 
   useEffect(() => { setSearchTerm(''); }, [activeTab]);
 
-  const handleNoteChange = (orderId: string, text: string) => {
-      setLocalNotes(prev => ({ ...prev, [orderId]: text }));
+  const handleNoteChange = (id: string, text: string) => {
+      setLocalNotes(prev => ({ ...prev, [id]: text }));
   };
 
-  const handleNoteSave = async (order: Order) => {
-      const newNote = localNotes[order.id];
+  const handleNoteSave = async (id: string, resi: string) => {
+      const newNote = localNotes[id];
       if (newNote !== undefined) {
-          const { resiText } = getOrderDetails(order);
-          await updateReturKeterangan(resiText, newNote);
+          await updateReturKeterangan(resi, newNote);
       }
   };
 
@@ -116,11 +113,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
         })
         .filter(Boolean) as any[];
 
-      if (itemsToReturnData.length === 0) {
-          // Alert validasi ini boleh tetap ada atau dihapus jika mau
-          // alert("Pilih minimal 1 barang untuk diretur."); 
-          return;
-      }
+      if (itemsToReturnData.length === 0) return;
 
       setIsLoading(true);
 
@@ -132,7 +125,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             const hargaSatuan = item.customPrice ?? item.price ?? 0;
             const totalRetur = hargaSatuan * item.cartQuantity;
 
-            // FIX: Cari item asli di inventory berdasarkan Part Number agar dapat ID/UUID yang benar
+            // Cari item asli di inventory
             const realItem = await getItemByPartNumber(item.partNumber);
 
             if (realItem) {
@@ -148,8 +141,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     price: hargaSatuan, 
                     isReturn: true 
                 });
-            } else {
-                console.warn(`Barang dengan part number ${item.partNumber} tidak ditemukan di gudang.`);
             }
 
             const returData: ReturRecord = {
@@ -171,6 +162,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             await addReturTransaction(returData);
         }
 
+        // Logic update/split order (sama seperti sebelumnya)
         const remainingItems = selectedOrderForReturn.items.map(item => {
             const returItem = itemsToReturnData.find(r => r.id === item.id);
             if (returItem) {
@@ -187,10 +179,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 selectedOrderForReturn.totalAmount,
                 'cancelled'
             );
-            // alert DIHAPUS
         } else {
             const returnTotal = itemsToReturnData.reduce((sum, item) => sum + ((item.customPrice ?? item.price ?? 0) * item.cartQuantity), 0);
-            
             const newReturnOrder: Order = {
                 id: `${selectedOrderForReturn.id}-RET`,
                 customerName: `${selectedOrderForReturn.customerName} (RETUR)`,
@@ -208,7 +198,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 remainingTotal,
                 'processing'
             );
-            // alert DIHAPUS
         }
 
         setIsReturnModalOpen(false);
@@ -218,7 +207,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
       } catch (error) {
           console.error("Error processing return:", error);
-          // alert("Terjadi kesalahan saat memproses retur."); // Opsional dihapus juga
       } finally {
           setIsLoading(false);
       }
@@ -226,15 +214,17 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   const safeOrders = Array.isArray(orders) ? orders : [];
 
+  // 1. FILTER ORDERS (Untuk tab Pending & Processing)
   const filteredOrders = useMemo(() => {
+    if (activeTab === 'history') return []; // Jangan pakai ini untuk history
+    
     return safeOrders.filter(o => {
       if (!o) return false;
       if (activeTab === 'pending') return o.status === 'pending';
       if (activeTab === 'processing') return o.status === 'processing';
-      if (activeTab === 'history') return o.status === 'completed' || o.status === 'cancelled';
       return false;
     }).filter(o => {
-      if ((activeTab === 'processing' || activeTab === 'history') && searchTerm.trim() !== '') {
+      if (activeTab === 'processing' && searchTerm.trim() !== '') {
           const lowerSearch = searchTerm.toLowerCase();
           return (
               o.id.toLowerCase().includes(lowerSearch) ||
@@ -243,13 +233,25 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           );
       }
       return true;
-    }).sort((a, b) => {
-        const timeA = a.timestamp || 0;
-        const timeB = b.timestamp || 0;
-        if (activeTab !== 'history') return timeA - timeB; 
-        return timeB - timeA; 
-    });
+    }).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
   }, [safeOrders, activeTab, searchTerm]);
+
+  // 2. FILTER RETUR RECORDS (Khusus tab History/Retur dari Tabel Retur)
+  const filteredReturRecords = useMemo(() => {
+      if (activeTab !== 'history') return [];
+
+      return returDbRecords.filter(r => {
+          if (!searchTerm) return true;
+          const lower = searchTerm.toLowerCase();
+          return (
+              (r.resi && r.resi.toLowerCase().includes(lower)) ||
+              (r.customer && r.customer.toLowerCase().includes(lower)) ||
+              (r.nama_barang && r.nama_barang.toLowerCase().includes(lower)) ||
+              (r.ecommerce && r.ecommerce.toLowerCase().includes(lower)) ||
+              (r.part_number && r.part_number.toLowerCase().includes(lower))
+          );
+      }).sort((a, b) => new Date(b.tanggal_retur).getTime() - new Date(a.tanggal_retur).getTime());
+  }, [returDbRecords, activeTab, searchTerm]);
 
   const getStatusColor = (status: OrderStatus) => {
     switch (status) {
@@ -269,7 +271,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       return status;
   };
 
-  const formatDate = (ts: number) => {
+  const formatDate = (ts: number | string) => {
       try {
           const date = new Date(ts || Date.now());
           return {
@@ -345,10 +347,11 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           {[
               { id: 'pending', label: 'Pesanan Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' },
               { id: 'processing', label: 'Terjual', icon: Package, count: 0, color: 'text-blue-600' }, 
-              { id: 'history', label: 'Retur', icon: CheckCircle, count: 0, color: 'text-gray-600' }
+              { id: 'history', label: 'Retur', icon: CheckCircle, count: returDbRecords.length, color: 'text-red-600' }
           ].map((tab: any) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-4 text-sm font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-white relative ${activeTab === tab.id ? `border-purple-600 text-purple-700 bg-white` : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
-                  <tab.icon size={18} className={activeTab === tab.id ? tab.color : ''} /><span>{tab.label}</span>{tab.count > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{tab.count}</span>}
+                  <tab.icon size={18} className={activeTab === tab.id ? tab.color : ''} /><span>{tab.label}</span>
+                  {tab.id === 'pending' && tab.count > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center">{tab.count}</span>}
               </button>
           ))}
       </div>
@@ -367,7 +370,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             <table className="w-full text-left border-collapse">
                 <thead className="bg-gray-50 text-xs font-bold text-gray-600 uppercase tracking-wider border-b border-gray-200">
                     <tr>
-                        <th className="p-4 w-32">Tanggal</th>
+                        <th className="p-4 w-32">{activeTab === 'history' ? 'Tgl Retur' : 'Tanggal'}</th>
                         <th className="p-4 w-40">Resi / Tempo</th>
                         <th className="p-4 w-32">E-Commerce</th> 
                         <th className="p-4 w-40">Pelanggan</th>
@@ -376,112 +379,122 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                         <th className="p-4 text-right w-20">Qty</th>
                         <th className="p-4 text-right w-32">Harga Satuan</th>
                         <th className="p-4 text-right w-32">Total</th>
-                        {/* KOLOM BARU: TANGGAL RETUR */}
-                        {activeTab === 'history' && <th className="p-4 w-32 text-center text-red-600">Tanggal Retur</th>}
-                        <th className="p-4 text-center w-32">Status</th>
+                        {/* Kolom Tanggal Retur tidak perlu double di history */}
+                        {activeTab !== 'history' && <th className="p-4 text-center w-32">Status</th>}
                         <th className="p-4 text-center w-48">{activeTab === 'history' ? 'Keterangan' : 'Aksi'}</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm">
-                    {filteredOrders.length === 0 ? (
-                        <tr><td colSpan={12} className="p-12 text-center text-gray-400"><ClipboardList size={48} className="opacity-20 mx-auto mb-3" /><p className="font-medium">{searchTerm ? 'Tidak ditemukan pesanan yang cocok' : 'Tidak ada data pesanan'}</p></td></tr>
-                    ) : (
-                        filteredOrders.map(order => {
-                            if (!order) return null;
-                            const { cleanName, resiText, ecommerce, shopName } = getOrderDetails(order);
-                            const isResi = resiText.startsWith('#') === false;
-                            const dt = formatDate(order.timestamp);
-                            const items = Array.isArray(order.items) ? order.items : [];
-                            if (items.length === 0) return null;
-
-                            // LOGIC AMBIL TANGGAL RETUR
-                            let returnDateDisplay = '-';
-                            if (activeTab === 'history') {
-                                const returRecord = returDbRecords.find(r => r.resi === resiText);
-                                if (returRecord && returRecord.tanggal_retur) {
-                                    const d = new Date(returRecord.tanggal_retur);
-                                    returnDateDisplay = d.toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: '2-digit'});
-                                }
-                            }
-
-                            return items.map((item, index) => {
-                                const dealPrice = item.customPrice ?? item.price ?? 0;
-                                const dealTotal = dealPrice * (item.cartQuantity || 0);
-                                const hasCustomPrice = item.customPrice !== undefined && item.customPrice !== item.price;
+                    {/* --- TAMPILAN TAB HISTORY (DATA RETUR) --- */}
+                    {activeTab === 'history' ? (
+                        filteredReturRecords.length === 0 ? (
+                            <tr><td colSpan={11} className="p-12 text-center text-gray-400"><ClipboardList size={48} className="opacity-20 mx-auto mb-3" /><p className="font-medium">Belum ada data retur</p></td></tr>
+                        ) : (
+                            filteredReturRecords.map((retur) => {
+                                const dt = formatDate(retur.tanggal_retur);
+                                const idStr = retur.id ? retur.id.toString() : '';
 
                                 return (
-                                <tr key={`${order.id}-${index}`} className="hover:bg-blue-50/30 transition-colors group">
-                                    {index === 0 && (
-                                        <>
-                                            <td rowSpan={items.length} className="p-4 align-top border-r border-gray-100 bg-white group-hover:bg-blue-50/30">
-                                                <div className="font-bold text-gray-900">{dt.date}</div><div className="text-xs text-gray-500 font-mono mt-0.5">{dt.time}</div>
-                                            </td>
-                                            
-                                            <td rowSpan={items.length} className="p-4 align-top border-r border-gray-100 font-mono text-xs bg-white group-hover:bg-blue-50/30">
-                                                <div className="flex flex-col gap-2">
-                                                    <span className={`block px-2 py-1 rounded w-fit font-bold ${isResi ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-500 bg-gray-50'}`}>
-                                                        {resiText}
-                                                    </span>
-                                                    {shopName !== '-' && (
-                                                        <div className="flex items-center gap-1.5 text-gray-600 bg-gray-100 px-2 py-1 rounded w-fit border border-gray-200 shadow-sm">
-                                                            <Store size={10} className="text-gray-500" />
-                                                            <span className="font-bold text-[10px] uppercase truncate max-w-[120px]" title={shopName}>{shopName}</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </td>
+                                    <tr key={`retur-${retur.id}`} className="hover:bg-red-50/30 transition-colors">
+                                        <td className="p-4 align-top border-r border-gray-100 bg-white group-hover:bg-red-50/30">
+                                            <div className="font-bold text-gray-900">{dt.date}</div><div className="text-xs text-gray-500 font-mono mt-0.5">{dt.time}</div>
+                                        </td>
+                                        <td className="p-4 align-top font-mono text-xs text-gray-600 bg-white">
+                                            <div className="flex flex-col gap-1">
+                                                <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 w-fit">{retur.resi || '-'}</span>
+                                                {retur.toko && <span className="text-[10px] uppercase text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded w-fit"><Store size={8} className="inline mr-1"/>{retur.toko}</span>}
+                                            </div>
+                                        </td>
+                                        <td className="p-4 align-top">
+                                            {retur.ecommerce ? <span className="px-2 py-1 bg-orange-50 text-orange-700 text-xs font-bold rounded border border-orange-100">{retur.ecommerce}</span> : '-'}
+                                        </td>
+                                        <td className="p-4 align-top font-medium text-gray-900">{retur.customer || 'Guest'}</td>
+                                        <td className="p-4 align-top font-mono text-xs text-gray-500">{retur.part_number || '-'}</td>
+                                        <td className="p-4 align-top text-gray-700 font-medium">{retur.nama_barang}</td>
+                                        <td className="p-4 align-top text-right font-bold text-red-600">-{retur.quantity}</td>
+                                        <td className="p-4 align-top text-right font-mono text-xs text-gray-500">{formatRupiah(retur.harga_satuan)}</td>
+                                        <td className="p-4 align-top text-right font-mono text-xs font-bold text-gray-800">{formatRupiah(retur.harga_total)}</td>
+                                        
+                                        <td className="p-4 align-top">
+                                            <div className="relative group/note">
+                                                <textarea 
+                                                    className="w-full text-xs p-2 border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none resize-none min-h-[50px] transition-all" 
+                                                    placeholder="Alasan retur..." 
+                                                    value={localNotes[idStr] || ''} 
+                                                    onChange={(e) => handleNoteChange(idStr, e.target.value)}
+                                                    onBlur={() => retur.resi && handleNoteSave(idStr, retur.resi)} 
+                                                />
+                                                <div className="absolute top-2 right-2 text-gray-300 pointer-events-none"><Edit3 size={10} /></div>
+                                            </div>
+                                            <div className="flex items-center gap-1 mt-1 text-[10px] text-green-600 font-bold bg-green-50 px-2 py-1 rounded w-fit border border-green-100">
+                                                <RotateCcw size={10}/> Stok Kembali
+                                            </div>
+                                        </td>
+                                    </tr>
+                                )
+                            })
+                        )
+                    ) : (
+                        /* --- TAMPILAN TAB PENDING & PROCESSING (DATA ORDERS) --- */
+                        filteredOrders.length === 0 ? (
+                            <tr><td colSpan={11} className="p-12 text-center text-gray-400"><ClipboardList size={48} className="opacity-20 mx-auto mb-3" /><p className="font-medium">{searchTerm ? 'Tidak ditemukan pesanan yang cocok' : 'Tidak ada data pesanan'}</p></td></tr>
+                        ) : (
+                            filteredOrders.map(order => {
+                                if (!order) return null;
+                                const { cleanName, resiText, ecommerce, shopName } = getOrderDetails(order);
+                                const isResi = resiText.startsWith('#') === false;
+                                const dt = formatDate(order.timestamp);
+                                const items = Array.isArray(order.items) ? order.items : [];
+                                if (items.length === 0) return null;
 
-                                            <td rowSpan={items.length} className="p-4 align-top border-r border-gray-100 font-medium bg-white group-hover:bg-blue-50/30 text-gray-600">
-                                                {ecommerce !== '-' ? (<div className="flex items-center gap-1.5 px-2 py-1 rounded bg-orange-50 text-orange-700 border border-orange-100 w-fit"><ShoppingBag size={12} /><span className="text-xs font-bold">{ecommerce}</span></div>) : (<span className="text-gray-300">-</span>)}
-                                            </td>
-                                            <td rowSpan={items.length} className="p-4 align-top border-r border-gray-100 font-medium text-gray-900 bg-white group-hover:bg-blue-50/30">{cleanName}</td>
-                                        </>
-                                    )}
-                                    <td className="p-4 align-top font-mono text-xs text-gray-500">{item.partNumber || '-'}</td>
-                                    <td className="p-4 align-top text-gray-700 font-medium max-w-[250px]">{item.name || 'Item Tanpa Nama'}</td>
-                                    <td className="p-4 align-top text-right font-bold text-gray-800">{item.cartQuantity || 0}</td>
-                                    <td className="p-4 align-top text-right text-gray-500 font-mono text-xs"><div className={hasCustomPrice ? "text-orange-600 font-bold" : ""}>{formatRupiah(dealPrice)}</div>{hasCustomPrice && (<div className="flex items-center justify-end gap-1 text-[9px] text-orange-500 mt-0.5"><Tag size={8}/> Khusus</div>)}</td>
-                                    <td className="p-4 align-top text-right font-bold text-gray-900 font-mono text-xs">{formatRupiah(dealTotal)}</td>
-                                    
-                                    {index === 0 && (
-                                        <>
-                                            {/* KOLOM TANGGAL RETUR */}
-                                            {activeTab === 'history' && (
-                                                <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
-                                                    {returnDateDisplay !== '-' ? (
-                                                        <div className="flex flex-col items-center gap-1">
-                                                            <div className="bg-red-50 text-red-700 px-2 py-1 rounded-lg border border-red-100 flex items-center gap-1 w-fit">
-                                                                <Calendar size={10}/> <span className="text-[10px] font-bold">{returnDateDisplay}</span>
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <span className="text-gray-300">-</span>
-                                                    )}
+                                return items.map((item, index) => {
+                                    const dealPrice = item.customPrice ?? item.price ?? 0;
+                                    const dealTotal = dealPrice * (item.cartQuantity || 0);
+                                    const hasCustomPrice = item.customPrice !== undefined && item.customPrice !== item.price;
+
+                                    return (
+                                    <tr key={`${order.id}-${index}`} className="hover:bg-blue-50/30 transition-colors group">
+                                        {index === 0 && (
+                                            <>
+                                                <td rowSpan={items.length} className="p-4 align-top border-r border-gray-100 bg-white group-hover:bg-blue-50/30">
+                                                    <div className="font-bold text-gray-900">{dt.date}</div><div className="text-xs text-gray-500 font-mono mt-0.5">{dt.time}</div>
                                                 </td>
-                                            )}
-
-                                            <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
-                                                <div className={`inline-block px-3 py-1.5 rounded-lg text-[10px] font-extrabold border uppercase tracking-wider mb-2 shadow-sm ${getStatusColor(order.status)}`}>
-                                                    {order.status === 'cancelled' 
-                                                        ? (order.id.endsWith('-RET') ? 'RETUR SEBAGIAN' : 'FULL RETUR')
-                                                        : getStatusLabel(order.status)
-                                                    }
-                                                </div>
-                                                <div className="text-[10px] text-gray-400 font-medium">Total Order:</div><div className="text-sm font-extrabold text-purple-700">{formatRupiah(order.totalAmount || 0)}</div>
-                                            </td>
-                                            <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
-                                                {activeTab === 'history' ? (
-                                                    <div className="relative group/note">
-                                                        <textarea 
-                                                            className="w-full text-xs p-2 border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none resize-none min-h-[60px] transition-all" 
-                                                            placeholder="Tambah keterangan..." 
-                                                            value={localNotes[order.id] || ''} 
-                                                            onChange={(e) => handleNoteChange(order.id, e.target.value)}
-                                                            onBlur={() => handleNoteSave(order)} 
-                                                        />
-                                                        <div className="absolute top-2 right-2 text-gray-300 pointer-events-none group-focus-within/note:text-blue-300"><Edit3 size={10} /></div>
+                                                
+                                                <td rowSpan={items.length} className="p-4 align-top border-r border-gray-100 font-mono text-xs bg-white group-hover:bg-blue-50/30">
+                                                    <div className="flex flex-col gap-2">
+                                                        <span className={`block px-2 py-1 rounded w-fit font-bold ${isResi ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'text-gray-500 bg-gray-50'}`}>
+                                                            {resiText}
+                                                        </span>
+                                                        {shopName !== '-' && (
+                                                            <div className="flex items-center gap-1.5 text-gray-600 bg-gray-100 px-2 py-1 rounded w-fit border border-gray-200 shadow-sm">
+                                                                <Store size={10} className="text-gray-500" />
+                                                                <span className="font-bold text-[10px] uppercase truncate max-w-[120px]" title={shopName}>{shopName}</span>
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                ) : (
+                                                </td>
+
+                                                <td rowSpan={items.length} className="p-4 align-top border-r border-gray-100 font-medium bg-white group-hover:bg-blue-50/30 text-gray-600">
+                                                    {ecommerce !== '-' ? (<div className="flex items-center gap-1.5 px-2 py-1 rounded bg-orange-50 text-orange-700 border border-orange-100 w-fit"><ShoppingBag size={12} /><span className="text-xs font-bold">{ecommerce}</span></div>) : (<span className="text-gray-300">-</span>)}
+                                                </td>
+                                                <td rowSpan={items.length} className="p-4 align-top border-r border-gray-100 font-medium text-gray-900 bg-white group-hover:bg-blue-50/30">{cleanName}</td>
+                                            </>
+                                        )}
+                                        <td className="p-4 align-top font-mono text-xs text-gray-500">{item.partNumber || '-'}</td>
+                                        <td className="p-4 align-top text-gray-700 font-medium max-w-[250px]">{item.name || 'Item Tanpa Nama'}</td>
+                                        <td className="p-4 align-top text-right font-bold text-gray-800">{item.cartQuantity || 0}</td>
+                                        <td className="p-4 align-top text-right text-gray-500 font-mono text-xs"><div className={hasCustomPrice ? "text-orange-600 font-bold" : ""}>{formatRupiah(dealPrice)}</div>{hasCustomPrice && (<div className="flex items-center justify-end gap-1 text-[9px] text-orange-500 mt-0.5"><Tag size={8}/> Khusus</div>)}</td>
+                                        <td className="p-4 align-top text-right font-bold text-gray-900 font-mono text-xs">{formatRupiah(dealTotal)}</td>
+                                        
+                                        {index === 0 && (
+                                            <>
+                                                <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
+                                                    <div className={`inline-block px-3 py-1.5 rounded-lg text-[10px] font-extrabold border uppercase tracking-wider mb-2 shadow-sm ${getStatusColor(order.status)}`}>
+                                                        {getStatusLabel(order.status)}
+                                                    </div>
+                                                    <div className="text-[10px] text-gray-400 font-medium">Total Order:</div><div className="text-sm font-extrabold text-purple-700">{formatRupiah(order.totalAmount || 0)}</div>
+                                                </td>
+                                                <td rowSpan={items.length} className="p-4 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/30">
                                                     <div className="flex flex-col gap-2 items-center">
                                                         {order.status === 'pending' && (<><button onClick={() => onUpdateStatus(order.id, 'processing')} className="w-full py-1.5 bg-purple-600 text-white text-[10px] font-bold rounded hover:bg-purple-700 shadow-sm transition-all flex items-center justify-center gap-1"><Package size={12} /> Proses</button><button onClick={() => onUpdateStatus(order.id, 'cancelled')} className="w-full py-1.5 bg-white border border-gray-300 text-gray-600 text-[10px] font-bold rounded hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors">Tolak</button></>)}
                                                         
@@ -494,14 +507,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                             </button>
                                                         )}
                                                     </div>
-                                                )}
-                                            </td>
-                                        </>
-                                    )}
-                                </tr>
-                                );
-                            });
-                        })
+                                                </td>
+                                            </>
+                                        )}
+                                    </tr>
+                                    );
+                                });
+                            })
+                        )
                     )}
                 </tbody>
             </table>
