@@ -21,7 +21,6 @@ const handleDbError = (op: string, err: any) => { console.error(`${op} Error:`, 
 // Generate ISO String tapi Waktu WIB (UTC+7)
 const getWIBISOString = (): string => {
     const now = new Date();
-    // Geser waktu ke WIB (UTC+7)
     const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
     const wibTime = new Date(utc + (7 * 3600000));
     
@@ -31,9 +30,7 @@ const getWIBISOString = (): string => {
     return `${wibTime.getFullYear()}-${pad(wibTime.getMonth() + 1)}-${pad(wibTime.getDate())}T${pad(wibTime.getHours())}:${pad(wibTime.getMinutes())}:${pad(wibTime.getSeconds())}.${pad3(wibTime.getMilliseconds())}`;
 };
 
-// Helper khusus untuk format tanggal YYYY-MM-DD sesuai WIB dari timestamp angka
 const getWIBDateString = (timestamp: number): string => {
-    // Geser timestamp ke WIB
     const wibTime = new Date(timestamp + (7 * 3600000));
     return wibTime.toISOString().split('T')[0];
 };
@@ -204,7 +201,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   return data ? data.id : null;
 };
 
-// --- UPDATE INVENTORY (DIPERBARUI: Support parameter store/toko) ---
+// --- UPDATE INVENTORY ---
 export const updateInventory = async (
     item: InventoryItem, 
     transaction?: { 
@@ -215,7 +212,7 @@ export const updateInventory = async (
         customer?: string, 
         price?: number, 
         isReturn?: boolean,
-        store?: string // PARAMETER BARU: Untuk menyimpan nama toko ke kolom tempo
+        store?: string 
     }
 ): Promise<InventoryItem | null> => {
   
@@ -277,11 +274,10 @@ export const updateInventory = async (
               hargaSatuan: txPrice, hargaTotal: txTotal
           });
       } else {
-          // UPDATE: Gunakan transaction.store untuk mengisi kolom tempo jika ada
           await addBarangKeluar({
               created_at: wibNow,
               kodeToko: 'MANUAL', 
-              tempo: transaction.store || '', // <-- ISI KOLOM TEMPO DENGAN NAMA TOKO
+              tempo: transaction.store || '', 
               ecommerce: sourceName,
               customer: transaction.customer || '', 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
@@ -628,37 +624,75 @@ export const addScanResiLog = async (resi: string, ecommerce: string, toko: stri
     return true;
 };
 
-// --- FUNGSI BARU: UPDATE DARI EXCEL & PROSES KIRIM ---
+// --- FUNGSI BARU: IMPORT DARI EXCEL (DENGAN CEK DUPLIKASI) ---
 
-// 1. Update Massal dari Excel (Matching by Resi)
-export const updateScanResiFromExcel = async (updates: any[]): Promise<boolean> => {
+// Ubah nama dari updateScanResiFromExcel menjadi importScanResiFromExcel untuk kejelasan
+export const importScanResiFromExcel = async (updates: any[]): Promise<{ success: boolean, skippedCount: number }> => {
     try {
-        const promises = updates.map(async (item) => {
-            // Logic Status: Jika data lengkap -> Siap Kirim
-            let newStatus = 'Pending';
-            if (item.customer && item.part_number && item.nama_barang && item.quantity && item.harga_total) {
-                newStatus = 'Siap Kirim';
+        // 1. Ambil daftar Resi yang akan di-import
+        const resiList = updates.map(u => u.resi).filter(Boolean);
+        
+        if (resiList.length === 0) return { success: false, skippedCount: 0 };
+
+        // 2. Cek Resi yang sudah ada di database
+        const { data: existingData, error: checkError } = await supabase
+            .from('scan_resi')
+            .select('resi')
+            .in('resi', resiList);
+
+        if (checkError) {
+            console.error("Gagal cek duplikasi:", checkError);
+            return { success: false, skippedCount: 0 };
+        }
+
+        const existingResis = new Set(existingData?.map(item => item.resi));
+
+        // 3. Filter data baru (yang belum ada di DB)
+        const newItems = updates.filter(item => !existingResis.has(item.resi));
+        const skippedCount = updates.length - newItems.length;
+
+        if (newItems.length === 0) {
+            // Semua data duplikat
+            return { success: true, skippedCount }; 
+        }
+
+        // 4. Siapkan payload untuk insert
+        const now = getWIBISOString();
+        const insertPayload = newItems.map(item => {
+            // Cek status awal: Jika data lengkap -> Siap Kirim
+            let initialStatus = 'Pending';
+            if (item.part_number && item.nama_barang && item.quantity) {
+                initialStatus = 'Siap Kirim';
             }
 
-            return supabase
-                .from('scan_resi')
-                .update({
-                    customer: item.customer,
-                    part_number: item.part_number,
-                    nama_barang: item.nama_barang,
-                    quantity: item.quantity,
-                    harga_satuan: item.harga_satuan,
-                    harga_total: item.harga_total,
-                    status: newStatus // Update status otomatis
-                })
-                .eq('resi', item.resi);
+            return {
+                tanggal: now,
+                resi: item.resi,
+                toko: item.toko || '-', // Default jika kosong
+                ecommerce: item.ecommerce || '-', // Default jika kosong
+                customer: item.customer || '-',
+                part_number: item.part_number || null,
+                nama_barang: item.nama_barang || '-',
+                quantity: item.quantity || 0,
+                harga_satuan: item.harga_satuan || 0,
+                harga_total: item.harga_total || 0,
+                status: initialStatus
+            };
         });
 
-        await Promise.all(promises);
-        return true;
+        // 5. Lakukan Bulk Insert
+        const { error: insertError } = await supabase.from('scan_resi').insert(insertPayload);
+
+        if (insertError) {
+            console.error("Gagal insert batch excel:", insertError);
+            return { success: false, skippedCount: 0 };
+        }
+
+        return { success: true, skippedCount };
+
     } catch (error) {
-        console.error("Gagal update batch excel:", error);
-        return false;
+        console.error("Error import excel:", error);
+        return { success: false, skippedCount: 0 };
     }
 };
 
