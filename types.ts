@@ -73,18 +73,14 @@ export interface StockHistory {
   tempo?: string;
 }
 
-// --- WAJIB ADA: Export OrderStatus ---
-export type OrderStatus = 'pending' | 'terjual' | 'processing' | 'completed' | 'cancelled';
-
 export interface Order {
   id: string;
   customerName: string;
   items: CartItem[];
   totalAmount: number;
-  status: OrderStatus; // Menggunakan tipe yang sudah di-export
+  status: 'pending' | 'processing' | 'completed' | 'cancelled';
   timestamp: number;
 }
-// -------------------------------------
 
 export interface CartItem extends InventoryItem {
   cartQuantity: number;
@@ -107,9 +103,10 @@ export interface AIAnalysisResult {
   suggestedShelfCategory?: string;
 }
 
+// INTERFACE BARU UNTUK TABEL RETUR (SUDAH DIPERBAIKI)
 export interface ReturRecord {
   id?: number;
-  tanggal_pemesanan: string | null;
+  tanggal_pemesanan: string | null; // TYPO FIXED
   resi: string | null;
   toko: string | null;
   ecommerce: string | null;
