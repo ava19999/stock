@@ -9,7 +9,6 @@ import {
   Order, 
   ChatSession, 
   ReturRecord, 
-  CartItem,
   ScanResiLog 
 } from '../types';
 
@@ -18,8 +17,11 @@ const TABLE_NAME = 'base';
 const handleDbError = (op: string, err: any) => { console.error(`${op} Error:`, err); };
 
 // --- HELPER FUNCTIONS ---
+
+// Generate ISO String tapi Waktu WIB (UTC+7)
 const getWIBISOString = (): string => {
     const now = new Date();
+    // Geser waktu ke WIB (UTC+7)
     const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
     const wibTime = new Date(utc + (7 * 3600000));
     
@@ -27,6 +29,14 @@ const getWIBISOString = (): string => {
     const pad3 = (n: number) => n < 10 ? '00' + n : (n < 100 ? '0' + n : n);
     
     return `${wibTime.getFullYear()}-${pad(wibTime.getMonth() + 1)}-${pad(wibTime.getDate())}T${pad(wibTime.getHours())}:${pad(wibTime.getMinutes())}:${pad(wibTime.getSeconds())}.${pad3(wibTime.getMilliseconds())}`;
+};
+
+// Helper khusus untuk format tanggal YYYY-MM-DD sesuai WIB dari timestamp angka
+const getWIBDateString = (timestamp: number): string => {
+    // Geser timestamp ke WIB
+    // (Kita tambahkan 7 jam ke timestamp aslinya agar saat diambil komponen UTC-nya, nilainya sama dengan WIB)
+    const wibTime = new Date(timestamp + (7 * 3600000));
+    return wibTime.toISOString().split('T')[0];
 };
 
 const parseTimestamp = (dateString: string | null | undefined): number | null => {
@@ -514,7 +524,9 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
     };
 
     const details = parseDetails(order.customerName);
-    const orderDate = new Date(order.timestamp).toISOString().split('T')[0];
+    
+    // PERBAIKAN: Gunakan Helper WIB untuk tanggal
+    const orderDate = getWIBDateString(order.timestamp); 
 
     const rows = order.items.map(item => ({
         tanggal: orderDate, 
@@ -537,7 +549,10 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
 
 export const updateOrderStatusService = async (id: string, status: string, timestamp?: number): Promise<boolean> => { 
     const updateData: any = { status }; 
-    if (timestamp) { updateData.tanggal = new Date(timestamp).toISOString().split('T')[0]; } 
+    if (timestamp) { 
+        // PERBAIKAN: Gunakan Helper WIB untuk update tanggal
+        updateData.tanggal = getWIBDateString(timestamp);
+    } 
     const { error } = await supabase.from('orders').update(updateData).eq('resi', id); 
     return !error; 
 };
@@ -590,7 +605,7 @@ export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
 
 export const addScanResiLog = async (resi: string, ecommerce: string, toko: string): Promise<boolean> => {
     const { error } = await supabase.from('scan_resi').insert([{
-        tanggal: new Date().toISOString(),
+        tanggal: getWIBISOString(), // PERBAIKAN: Gunakan WIB
         resi: resi,
         ecommerce: ecommerce,
         toko: toko,
@@ -730,7 +745,7 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
 
             // B. Masukkan ke tabel 'orders' (Manajemen Pesanan)
             const { error: insertError } = await supabase.from('orders').insert([{
-                tanggal: new Date().toISOString(),
+                tanggal: getWIBISOString(), // PERBAIKAN: Gunakan WIB untuk insert order
                 resi: log.resi,
                 toko: log.toko,
                 ecommerce: log.ecommerce,

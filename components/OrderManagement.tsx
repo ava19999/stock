@@ -26,7 +26,7 @@ interface OrderManagementProps {
 
 export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], onUpdateStatus, onProcessReturn, onRefresh }) => {
   // Tab 'processing' kita mapping sebagai 'Terjual' di UI
-  const [activeTab, setActiveTab] = useState<'pending' | 'processing' | 'history'>('processing'); // Default ke Terjual jika diinginkan, atau ubah ke 'pending'
+  const [activeTab, setActiveTab] = useState<'pending' | 'processing' | 'history'>('processing'); 
   const [searchTerm, setSearchTerm] = useState('');
   
   // PAGINATION STATE
@@ -153,7 +153,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       try {
         const { resiText, shopName, ecommerce, cleanName } = getOrderDetails(selectedOrderForReturn);
         const combinedResiShop = `${resiText} / ${shopName}`;
-        const orderDate = new Date(selectedOrderForReturn.timestamp).toISOString();
+        const orderDate = selectedOrderForReturn.items[0]?.timestamp ? new Date(selectedOrderForReturn.timestamp).toISOString() : new Date().toISOString();
 
         for (const item of itemsToReturnData) {
             const hargaSatuan = item.customPrice ?? item.price ?? 0;
@@ -388,9 +388,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-3 text-xs font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-white relative ${activeTab === tab.id ? `border-purple-600 text-purple-700 bg-white` : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                   <tab.icon size={16} className={activeTab === tab.id ? tab.color : ''} /><span>{tab.label}</span>
                   {tab.id === 'pending' && tab.count > 0 && <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full min-w-[16px] text-center">{tab.count}</span>}
-                  
-                  {/* Tampilkan count juga untuk tab processing / terjual */}
-                  {tab.id === 'processing' && tab.count > 0 && <span className="bg-blue-500 text-white text-[9px] px-1.5 py-0.5 rounded-full min-w-[16px] text-center">{tab.count}</span>}
+                  {/* Count untuk tab processing / terjual DIHAPUS sesuai permintaan */}
               </button>
           ))}
       </div>
