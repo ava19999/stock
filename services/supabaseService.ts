@@ -1,6 +1,17 @@
 // FILE: src/services/supabaseService.ts
 import { supabase } from '../lib/supabase';
-import { InventoryItem, InventoryFormData, StockHistory, BarangMasuk, BarangKeluar, Order, ChatSession, ReturRecord, CartItem } from '../types';
+import { 
+  InventoryItem, 
+  InventoryFormData, 
+  StockHistory, 
+  BarangMasuk, 
+  BarangKeluar, 
+  Order, 
+  ChatSession, 
+  ReturRecord, 
+  CartItem,
+  ScanResiLog // Import Interface Baru
+} from '../types';
 
 const TABLE_NAME = 'base';
 
@@ -560,3 +571,38 @@ export const updateReturKeterangan = async (resi: string, keterangan: string): P
 
 export const fetchPriceHistoryBySource = async (partNumber: string) => { const { data, error } = await supabase.from('barang_masuk').select('ecommerce, harga_satuan, created_at').eq('part_number', partNumber).order('created_at', { ascending: false }); if (error || !data) return []; const uniqueSources: Record<string, any> = {}; data.forEach((item: any) => { const sourceName = item.ecommerce || 'Unknown'; if (!uniqueSources[sourceName]) { uniqueSources[sourceName] = { source: sourceName, price: Number(item.harga_satuan), date: item.created_at ? new Date(item.created_at).toLocaleDateString('id-ID') : '-' }; } }); return Object.values(uniqueSources); };
 export const clearBarangKeluar = async (): Promise<boolean> => { const { error } = await supabase.from('barang_keluar').delete().neq('id', 0); if (error) { console.error("Gagal hapus barang keluar:", error); return false; } return true; };
+
+// --- FUNGSI BARU: SCAN RESI LOG ---
+
+export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
+    // Ambil data hari ini atau 50 data terakhir
+    const { data, error } = await supabase
+        .from('scan_resi')
+        .select('*')
+        .order('tanggal', { ascending: false })
+        .limit(50);
+
+    if (error) {
+        console.error("Gagal ambil log scan resi:", error);
+        return [];
+    }
+    return data || [];
+};
+
+export const addScanResiLog = async (resi: string, ecommerce: string, toko: string): Promise<boolean> => {
+    // Insert data scan sederhana (tanpa detail barang dulu)
+    const { error } = await supabase.from('scan_resi').insert([{
+        tanggal: new Date().toISOString(),
+        resi: resi,
+        ecommerce: ecommerce,
+        toko: toko,
+        status: 'Menunggu Upload Excel', // Default
+        // Field customer, part_number, dll dibiarkan null
+    }]);
+
+    if (error) {
+        console.error("Gagal simpan log resi:", error);
+        return false;
+    }
+    return true;
+};

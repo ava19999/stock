@@ -1,15 +1,16 @@
 // FILE: src/components/ScanResiView.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { ScanBarcode, Loader2, Save, ChevronDown, Check, Upload } from 'lucide-react';
+import { ScanBarcode, Loader2, ChevronDown, Check, Upload, FileSpreadsheet, Clock, AlertCircle } from 'lucide-react';
 import { compressImage } from '../utils';
 import { ResiAnalysisResult, analyzeResiImage } from '../services/geminiService';
-import { addBarangKeluar, fetchInventory } from '../services/supabaseService';
+import { addScanResiLog, fetchScanResiLogs } from '../services/supabaseService'; 
+import { ScanResiLog } from '../types';
 
 // Daftar Toko Internal
 const STORE_LIST = ['MJM', 'LARIS', 'BJW'];
 
 // Daftar Marketplace
-const MARKETPLACES = ['Shopee', 'Tiktok', 'Tokopedia'];
+const MARKETPLACES = ['Shopee', 'Tiktok', 'Tokopedia', 'Lazada', 'Offline'];
 
 interface ScanResiProps {
   onSave: (data: ResiAnalysisResult) => void;
@@ -18,35 +19,60 @@ interface ScanResiProps {
 }
 
 export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) => {
-  const [result, setResult] = useState<ResiAnalysisResult | null>(null);
+  // State Input
   const [barcodeInput, setBarcodeInput] = useState('');
   const [selectedStore, setSelectedStore] = useState(STORE_LIST[0]);
-  
-  // State untuk Marketplace
   const [selectedMarketplace, setSelectedMarketplace] = useState('Shopee');
+  
+  // State UI
   const [showMarketplacePopup, setShowMarketplacePopup] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [isSavingLog, setIsSavingLog] = useState(false);
 
+  // State Data Tabel
+  const [scanLogs, setScanLogs] = useState<ScanResiLog[]>([]);
+
+  // Refs
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null); // Ref untuk upload file excel
-  const [analyzing, setAnalyzing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Load data tabel saat pertama kali buka
   useEffect(() => {
-    if (!result) {
-      setTimeout(() => { barcodeInputRef.current?.focus(); }, 100);
-    }
-  }, [result]);
+    loadScanLogs();
+    // Auto focus ke input
+    setTimeout(() => { barcodeInputRef.current?.focus(); }, 100);
+  }, []);
 
-  const handleBarcodeInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const loadScanLogs = async () => {
+    const logs = await fetchScanResiLogs();
+    setScanLogs(logs);
+  };
+
+  // --- HANDLER SAAT SCAN (ENTER) ---
+  const handleBarcodeInput = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       const scannedCode = barcodeInput.trim();
       if (!scannedCode) return;
-      processScannedCode(scannedCode);
-      setBarcodeInput('');
+
+      setIsSavingLog(true);
+      
+      // Simpan ke Tabel scan_resi (Hanya Resi, Toko, Ecommerce)
+      const success = await addScanResiLog(scannedCode, selectedMarketplace, selectedStore);
+      
+      if (success) {
+          await loadScanLogs(); // Refresh tabel data terbaru
+          setBarcodeInput(''); // Kosongkan input agar siap scan lagi
+      } else {
+          alert("Gagal menyimpan data ke database. Cek koneksi.");
+      }
+      
+      setIsSavingLog(false);
     }
   };
 
+  // --- HANDLER KAMERA ---
   const handleCameraCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -54,13 +80,16 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     try {
       const compressed = await compressImage(await readFileAsBase64(file));
       const analysis = await analyzeResiImage(compressed);
-      if (analysis && (analysis.resi || analysis.items)) {
-        setResult({
-            ...analysis,
-            ecommerce: selectedMarketplace
-        });
+      
+      if (analysis && analysis.resi) {
+         // Jika AI menemukan resi, langsung simpan ke tabel log
+         const success = await addScanResiLog(analysis.resi, selectedMarketplace, selectedStore);
+         if(success) {
+             await loadScanLogs();
+             alert(`Resi ${analysis.resi} tersimpan.`);
+         }
       } else {
-        alert("Barcode tidak terbaca.");
+        alert("Resi tidak terbaca oleh AI.");
       }
     } catch (error) {
       console.error("Error cam", error);
@@ -70,12 +99,12 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     }
   };
 
-  // Handler Upload Excel (Dipicu saat klik nama Marketplace)
+  // Handler Upload Excel (Placeholder logika upload masa depan)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      alert(`Mengupload data ${selectedMarketplace} dari file: ${file.name}`);
-      // Logika parsing Excel bisa dimasukkan di sini
+      alert(`Fitur Upload Excel untuk melengkapi data ${selectedMarketplace} akan diproses.`);
+      // Logic upload excel untuk update kolom null (part_number, dll) ditaruh disini nanti
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -89,194 +118,173 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     });
   };
 
-  const processScannedCode = (code: string) => {
-    setResult({
-      resi: code,
-      date: new Date().toLocaleDateString('id-ID'),
-      ecommerce: selectedMarketplace,
-      customerName: '',
-      items: []
-    });
-  };
-
-  const handleSaveScan = async () => {
-    if (!result) return;
-    onSave(result);
-
-    if (result.items && result.items.length > 0) {
-      const today = new Date().toISOString().split('T')[0];
-      const inventory = await fetchInventory();
-      for (const item of result.items) {
-        const matchedItem = inventory.find(inv => inv.name.toLowerCase().includes(item.name?.toLowerCase() || ''));
-        await addBarangKeluar({
-          tanggal: today,
-          kodeToko: selectedStore.substring(0, 3).toUpperCase(),
-          tempo: 'MJM',
-          ecommerce: selectedMarketplace,
-          customer: result.customerName || 'GUEST',
-          partNumber: matchedItem?.partNumber || '-',
-          name: item.name,
-          brand: matchedItem?.brand || '-',
-          application: matchedItem?.application || '-',
-          rak: matchedItem?.shelf || '-',
-          stockAwal: matchedItem?.quantity || 0,
-          qtyKeluar: item.qty,
-          hargaSatuan: matchedItem?.price || 0,
-          hargaTotal: (matchedItem?.price || 0) * (item.qty || 0),
-          resi: result.resi
-        });
-      }
-    }
-    setResult(null);
-    barcodeInputRef.current?.focus();
-  };
-
-  // Helper untuk warna badge marketplace
+  // Helper warna marketplace
   const getMarketplaceColor = (mp: string) => {
     switch(mp) {
         case 'Shopee': return 'bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200';
         case 'Tokopedia': return 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200';
-        case 'Tiktok': return 'bg-black text-white border-gray-800 hover:bg-gray-800';
+        case 'Tiktok': return 'bg-gray-900 text-white border-gray-700 hover:bg-black';
+        case 'Lazada': return 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200';
         default: return 'bg-gray-100 text-gray-700 border-gray-200';
     }
   };
 
   return (
-    <div className="w-full space-y-4">
-      {/* TOOLBAR SCANNER MINIMALIS */}
-      <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-200 flex flex-col md:flex-row gap-3 items-center">
-        
-        {/* GROUP 1: Selectors & Upload Trigger */}
-        <div className="flex items-center gap-2 w-full md:w-auto">
+    <div className="w-full space-y-4 h-full flex flex-col">
+      {/* --- AREA SCANNER --- */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-4 sticky top-0 z-20">
+        <div className="flex flex-col md:flex-row gap-3">
             
-            {/* Marketplace Split Button */}
-            <div className="relative flex shadow-sm rounded-md">
-                {/* Tombol KIRI: Klik untuk Upload Excel */}
-                <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    className={`flex items-center gap-2 px-3 py-2.5 text-sm font-bold border rounded-l-md transition-colors ${getMarketplaceColor(selectedMarketplace)}`}
-                    title={`Upload Excel ${selectedMarketplace}`}
-                >
-                    <Upload size={14} />
-                    {selectedMarketplace}
-                </button>
-                
-                {/* Tombol KANAN: Klik untuk Ganti Marketplace */}
-                <button 
-                    onClick={() => setShowMarketplacePopup(!showMarketplacePopup)}
-                    className="px-2 bg-white border-y border-r border-gray-300 rounded-r-md hover:bg-gray-50 flex items-center justify-center"
-                    title="Ganti Marketplace"
-                >
-                    <ChevronDown className="w-4 h-4 text-gray-500" />
-                </button>
+            {/* GROUP 1: Selectors */}
+            <div className="flex gap-2">
+                {/* Marketplace Split Button */}
+                <div className="relative flex shadow-sm rounded-lg flex-1 md:flex-none">
+                    <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className={`flex items-center gap-2 px-3 py-2.5 text-sm font-bold border rounded-l-lg transition-colors flex-1 md:w-32 justify-center ${getMarketplaceColor(selectedMarketplace)}`}
+                        title="Upload Excel Match"
+                    >
+                        <FileSpreadsheet size={16} />
+                        {selectedMarketplace}
+                    </button>
+                    <button 
+                        onClick={() => setShowMarketplacePopup(!showMarketplacePopup)}
+                        className="px-2 bg-white border-y border-r border-gray-200 rounded-r-lg hover:bg-gray-50 flex items-center justify-center"
+                    >
+                        <ChevronDown className="w-4 h-4 text-gray-500" />
+                    </button>
 
-                {/* Input File Tersembunyi */}
-                <input
-                    type="file"
-                    ref={fileInputRef}
-                    accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-                    className="hidden"
-                    onChange={handleFileUpload}
-                />
+                    <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
 
-                {/* Popup Marketplace */}
-                {showMarketplacePopup && (
-                    <div className="absolute top-full left-0 mt-1 w-48 bg-white rounded-lg shadow-xl border border-gray-100 z-50 animate-in fade-in zoom-in-95">
-                        <div className="py-1">
+                    {/* Popup Marketplace */}
+                    {showMarketplacePopup && (
+                        <div className="absolute top-full left-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-gray-100 z-50 animate-in fade-in zoom-in-95 overflow-hidden">
                             {MARKETPLACES.map((mp) => (
                                 <button
                                     key={mp}
-                                    onClick={() => { setSelectedMarketplace(mp); setShowMarketplacePopup(false); }}
-                                    className={`w-full text-left px-4 py-2 text-sm flex items-center justify-between hover:bg-gray-50 ${selectedMarketplace === mp ? 'text-blue-600 font-bold bg-blue-50' : 'text-gray-700'}`}
+                                    onClick={() => { setSelectedMarketplace(mp); setShowMarketplacePopup(false); barcodeInputRef.current?.focus(); }}
+                                    className={`w-full text-left px-4 py-3 text-sm flex items-center justify-between hover:bg-gray-50 border-b border-gray-50 last:border-0 ${selectedMarketplace === mp ? 'text-blue-600 font-bold bg-blue-50' : 'text-gray-700'}`}
                                 >
                                     {mp}
                                     {selectedMarketplace === mp && <Check className="w-3 h-3"/>}
                                 </button>
                             ))}
                         </div>
-                    </div>
-                )}
+                    )}
+                </div>
+
+                {/* Store Selector */}
+                <select
+                    value={selectedStore}
+                    onChange={(e) => { setSelectedStore(e.target.value); barcodeInputRef.current?.focus(); }}
+                    className="bg-gray-50 border border-gray-200 text-gray-700 text-sm font-bold rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5"
+                >
+                    {STORE_LIST.map(store => <option key={store} value={store}>{store}</option>)}
+                </select>
             </div>
 
-            {/* Store Selector (MJM/LARIS) */}
-            <select
-                value={selectedStore}
-                onChange={(e) => setSelectedStore(e.target.value)}
-                className="bg-gray-50 border border-gray-300 text-gray-700 text-sm font-semibold rounded-md focus:ring-purple-500 focus:border-purple-500 block p-2.5"
+            {/* GROUP 2: Input Barcode */}
+            <div className="relative flex-grow">
+              <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                {isSavingLog ? <Loader2 className="w-5 h-5 text-blue-500 animate-spin" /> : <ScanBarcode className="w-5 h-5 text-gray-400" />}
+              </div>
+              <input
+                ref={barcodeInputRef}
+                type="text"
+                value={barcodeInput}
+                onChange={(e) => setBarcodeInput(e.target.value)}
+                onKeyDown={handleBarcodeInput}
+                className="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 block w-full pl-10 p-2.5 font-mono font-medium shadow-sm"
+                placeholder={`Scan Resi ${selectedMarketplace} di sini...`}
+                autoComplete="off"
+                disabled={isSavingLog}
+              />
+            </div>
+
+            {/* GROUP 3: Kamera */}
+            <button
+                onClick={() => cameraInputRef.current?.click()}
+                disabled={analyzing}
+                className="text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 font-bold rounded-lg text-sm px-4 py-2.5 flex items-center justify-center gap-2"
             >
-                {STORE_LIST.map(store => (
-                <option key={store} value={store}>{store}</option>
-                ))}
-            </select>
+                {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanBarcode className="w-4 h-4" />}
+                <span className="hidden md:inline">Kamera</span>
+            </button>
+            <input type="file" ref={cameraInputRef} accept="image/*" capture="environment" className="hidden" onChange={handleCameraCapture} />
         </div>
-
-        {/* GROUP 2: Input Barcode (Scan Manual) */}
-        <div className="relative flex-grow w-full">
-          <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-            <ScanBarcode className="w-5 h-5 text-gray-400" />
-          </div>
-          <input
-            ref={barcodeInputRef}
-            type="text"
-            value={barcodeInput}
-            onChange={(e) => setBarcodeInput(e.target.value)}
-            onKeyDown={handleBarcodeInput}
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-md focus:ring-purple-500 focus:border-purple-500 block w-full pl-10 p-2.5 font-mono"
-            placeholder={`Scan Resi ${selectedMarketplace}...`}
-            autoComplete="off"
-          />
-        </div>
-
-        {/* GROUP 3: Tombol Kamera */}
-        <button
-            onClick={() => cameraInputRef.current?.click()}
-            disabled={analyzing}
-            className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium rounded-md text-sm px-4 py-2.5 w-full md:w-auto flex items-center justify-center gap-2"
-        >
-            {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanBarcode className="w-4 h-4" />}
-            <span className="hidden md:inline">Kamera</span>
-        </button>
-        <input
-            type="file"
-            ref={cameraInputRef}
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={handleCameraCapture}
-        />
       </div>
 
-      {/* HASIL SCAN */}
-      {result && (
-        <div className="bg-purple-50 border-l-4 border-purple-500 p-4 rounded-md shadow-sm animate-in fade-in slide-in-from-top-2 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex-grow">
-            <h4 className="font-bold text-gray-800 flex items-center gap-2">
-              <span className="text-purple-600">#{result.resi}</span>
-              <span className="text-xs bg-white border border-gray-200 px-2 py-0.5 rounded text-gray-600 font-medium">{result.ecommerce}</span>
-            </h4>
-            <p className="text-sm text-gray-600 mt-1">
-              Customer: {result.customerName || 'GUEST'} | Items: {result.items?.length || 0}
-            </p>
-          </div>
-          
-          <div className="flex gap-2 w-full md:w-auto">
-             <button
-              onClick={() => { setResult(null); barcodeInputRef.current?.focus(); }}
-              className="flex-1 md:flex-none px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-            >
-              Batal
-            </button>
-            <button
-              onClick={handleSaveScan}
-              disabled={isProcessing}
-              className="flex-1 md:flex-none px-4 py-2 text-sm font-bold text-white bg-green-600 rounded-md hover:bg-green-700 flex items-center justify-center gap-2"
-            >
-              {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4"/>}
-              Simpan
-            </button>
-          </div>
+      {/* --- TABEL DATA SCAN RESI --- */}
+      <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+        <div className="px-5 py-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+            <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2">
+                <Clock size={16} className="text-blue-600"/> Riwayat Scan (Menunggu Upload Excel)
+            </h3>
+            <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{scanLogs.length}</span>
         </div>
-      )}
+        
+        <div className="flex-1 overflow-auto">
+            <table className="w-full text-left border-collapse">
+                <thead className="bg-white sticky top-0 z-10 shadow-sm">
+                    <tr>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">Waktu Scan</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">No. Resi</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">Marketplace</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">Toko</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 text-center">Data Barang</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50 text-xs">
+                    {scanLogs.length === 0 ? (
+                        <tr>
+                            <td colSpan={5} className="p-8 text-center text-gray-400">
+                                <div className="flex flex-col items-center gap-2">
+                                    <ScanBarcode size={32} className="opacity-20"/>
+                                    <p>Belum ada resi yang di-scan hari ini</p>
+                                </div>
+                            </td>
+                        </tr>
+                    ) : (
+                        scanLogs.map((log, idx) => {
+                            // Formatting tanggal
+                            const dateObj = new Date(log.tanggal);
+                            const displayDate = dateObj.toLocaleDateString('id-ID');
+                            
+                            // Cek apakah data barang sudah terisi (setelah upload excel nanti)
+                            const isComplete = log.part_number && log.nama_barang;
+
+                            return (
+                                <tr key={log.id || idx} className="hover:bg-blue-50/30 transition-colors">
+                                    <td className="px-4 py-3 text-gray-500 font-mono">{displayDate}</td>
+                                    <td className="px-4 py-3 font-bold text-gray-900 font-mono select-all">{log.resi}</td>
+                                    <td className="px-4 py-3">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                            log.ecommerce === 'Shopee' ? 'bg-orange-50 text-orange-700 border-orange-100' :
+                                            log.ecommerce === 'Tokopedia' ? 'bg-green-50 text-green-700 border-green-100' :
+                                            log.ecommerce === 'Tiktok' ? 'bg-gray-800 text-white border-gray-700' :
+                                            'bg-gray-100 text-gray-600 border-gray-200'
+                                        }`}>{log.ecommerce}</span>
+                                    </td>
+                                    <td className="px-4 py-3 text-gray-600 font-semibold">{log.toko}</td>
+                                    <td className="px-4 py-3 text-center">
+                                        {isComplete ? (
+                                            <span className="inline-flex items-center gap-1 text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded-full border border-green-100">
+                                                <Check size={10}/> Lengkap
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1 text-gray-400 italic">
+                                                <AlertCircle size={10}/> Kosong
+                                            </span>
+                                        )}
+                                    </td>
+                                </tr>
+                            );
+                        })
+                    )}
+                </tbody>
+            </table>
+        </div>
+      </div>
     </div>
   );
 };

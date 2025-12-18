@@ -103,10 +103,9 @@ export interface AIAnalysisResult {
   suggestedShelfCategory?: string;
 }
 
-// INTERFACE BARU UNTUK TABEL RETUR (SUDAH DIPERBAIKI)
 export interface ReturRecord {
   id?: number;
-  tanggal_pemesanan: string | null; // TYPO FIXED
+  tanggal_pemesanan: string | null;
   resi: string | null;
   toko: string | null;
   ecommerce: string | null;
@@ -119,4 +118,20 @@ export interface ReturRecord {
   tanggal_retur: string;
   status: string;
   keterangan: string | null;
+}
+
+// --- INTERFACE BARU UNTUK SCAN RESI ---
+export interface ScanResiLog {
+  id?: number;
+  tanggal: string;      // date
+  resi: string;         // text
+  toko: string | null;  // text
+  ecommerce: string;    // text
+  customer: string | null;
+  part_number: string | null;
+  nama_barang: string | null;
+  quantity: number | null;
+  harga_satuan: number | null;
+  harga_total: number | null;
+  status: string | null;
 }
