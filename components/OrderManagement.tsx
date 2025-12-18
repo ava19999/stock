@@ -1,7 +1,7 @@
 // FILE: src/components/OrderManagement.tsx
 import React, { useState, useMemo, useEffect } from 'react';
 import { Order, OrderStatus, ReturRecord } from '../types';
-import { Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store, Save, Loader, Calendar, TrendingDown } from 'lucide-react';
+import { Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, ShoppingBag, Tag, Search, X, Store, Save, Loader, FileText, AlertCircle } from 'lucide-react';
 import { formatRupiah } from '../utils';
 import { 
   updateInventory, 
@@ -24,39 +24,69 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [activeTab, setActiveTab] = useState<'pending' | 'processing' | 'history'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
   
-  const [localNotes, setLocalNotes] = useState<Record<string, string>>({});
   const [returDbRecords, setReturDbRecords] = useState<ReturRecord[]>([]);
 
+  // State untuk Modal Retur Barang
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
   const [selectedOrderForReturn, setSelectedOrderForReturn] = useState<Order | null>(null);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(false);
 
+  // State untuk Modal Edit Keterangan
+  const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
+  const [editingNoteData, setEditingNoteData] = useState<{ id: string, resi: string, currentText: string } | null>(null);
+  const [noteText, setNoteText] = useState('');
+  const [isSavingNote, setIsSavingNote] = useState(false);
+
   // FETCH DATA RETUR
   useEffect(() => {
       fetchReturRecords().then(records => {
           setReturDbRecords(records);
-          const dbNotes: Record<string, string> = {};
-          records.forEach(r => {
-              if (r.id) dbNotes[r.id.toString()] = r.keterangan || '';
-          });
-          setLocalNotes(prev => ({...prev, ...dbNotes}));
       });
   }, [activeTab, orders]);
 
   useEffect(() => { setSearchTerm(''); }, [activeTab]);
 
-  const handleNoteChange = (id: string, text: string) => {
-      setLocalNotes(prev => ({ ...prev, [id]: text }));
+  // --- LOGIC EDIT KETERANGAN ---
+  const openNoteModal = (retur: ReturRecord) => {
+      setEditingNoteData({
+          id: retur.id ? retur.id.toString() : '',
+          resi: retur.resi || '',
+          currentText: retur.keterangan || ''
+      });
+      setNoteText(retur.keterangan || '');
+      setIsNoteModalOpen(true);
   };
 
-  const handleNoteSave = async (id: string, resi: string) => {
-      const newNote = localNotes[id];
-      if (newNote !== undefined) {
-          await updateReturKeterangan(resi, newNote);
+  const handleSaveNote = async () => {
+      if (!editingNoteData) return;
+
+      setIsSavingNote(true);
+      try {
+          // Update ke Supabase
+          const success = await updateReturKeterangan(editingNoteData.resi, noteText);
+          
+          if (success) {
+              // Update state lokal agar UI berubah tanpa reload
+              setReturDbRecords(prev => prev.map(item => {
+                  // Kita update item yang ID-nya cocok ATAU resinya cocok (tergantung kebutuhan, di sini pakai ID jika ada)
+                  if ((item.id && item.id.toString() === editingNoteData.id) || item.resi === editingNoteData.resi) {
+                      return { ...item, keterangan: noteText };
+                  }
+                  return item;
+              }));
+              setIsNoteModalOpen(false);
+          } else {
+              alert("Gagal menyimpan keterangan.");
+          }
+      } catch (error) {
+          console.error("Error saving note:", error);
+      } finally {
+          setIsSavingNote(false);
       }
   };
 
+  // --- LOGIC RETUR BARANG ---
   const openReturnModal = (order: Order) => {
       setSelectedOrderForReturn(order);
       const initialQty: Record<string, number> = {};
@@ -115,15 +145,12 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       try {
         const { resiText, shopName, ecommerce, cleanName } = getOrderDetails(selectedOrderForReturn);
         const combinedResiShop = `${resiText} / ${shopName}`;
-        
-        // Tanggal Pesanan dibuat
         const orderDate = new Date(selectedOrderForReturn.timestamp).toISOString();
 
         for (const item of itemsToReturnData) {
             const hargaSatuan = item.customPrice ?? item.price ?? 0;
             const totalRetur = hargaSatuan * item.cartQuantity;
 
-            // Update Inventory (Stok Masuk Kembali)
             const realItem = await getItemByPartNumber(item.partNumber);
             if (realItem) {
                 await updateInventory({
@@ -140,14 +167,12 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 });
             }
 
-            // LOGIKA MENENTUKAN STATUS (FULL RETUR / SEBAGIAN)
-            // Cari item asli di pesanan awal untuk melihat jumlah belinya
             const originalItem = selectedOrderForReturn.items.find(i => i.id === item.id);
             const originalQty = originalItem ? originalItem.cartQuantity : 0;
             const statusRetur = item.cartQuantity === originalQty ? 'Full Retur' : 'Retur Sebagian';
 
             const returData: ReturRecord = {
-                tanggal_pemesanan: orderDate, // Tanggal pesanan dibuat
+                tanggal_pemesanan: orderDate,
                 resi: resiText,
                 toko: shopName,
                 ecommerce: ecommerce,
@@ -157,15 +182,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 quantity: item.cartQuantity,
                 harga_satuan: hargaSatuan,
                 harga_total: totalRetur,
-                tanggal_retur: new Date().toISOString(), // Tanggal SAAT INI (Klik Simpan)
-                status: statusRetur, // Status Dinamis
+                tanggal_retur: new Date().toISOString(),
+                status: statusRetur,
                 keterangan: 'Retur Barang'
             };
 
             await addReturTransaction(returData);
         }
 
-        // --- Logic update order yang tersisa (Split Order) ---
         const remainingItems = selectedOrderForReturn.items.map(item => {
             const returItem = itemsToReturnData.find(r => r.id === item.id);
             if (returItem) {
@@ -282,7 +306,43 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 min-h-[80vh] flex flex-col overflow-hidden relative">
-      {/* MODAL RETUR */}
+      
+      {/* MODAL EDIT KETERANGAN */}
+      {isNoteModalOpen && editingNoteData && (
+          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+                  <div className="bg-purple-50 px-6 py-4 border-b border-purple-100 flex justify-between items-center">
+                      <h3 className="text-lg font-bold text-purple-800 flex items-center gap-2"><FileText size={20}/> Edit Keterangan</h3>
+                      <button onClick={() => setIsNoteModalOpen(false)}><X size={20} className="text-gray-400 hover:text-gray-600"/></button>
+                  </div>
+                  <div className="p-6">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Keterangan Retur:</label>
+                      <textarea 
+                          className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-200 focus:border-purple-400 outline-none text-sm min-h-[120px]"
+                          placeholder="Masukkan alasan atau catatan retur..."
+                          value={noteText}
+                          onChange={(e) => setNoteText(e.target.value)}
+                      />
+                      <div className="text-xs text-gray-400 mt-2 flex items-center gap-1">
+                          <AlertCircle size={12}/>
+                          <span>Keterangan ini akan disimpan untuk Resi: <b>{editingNoteData.resi}</b></span>
+                      </div>
+                  </div>
+                  <div className="p-4 border-t bg-gray-50 flex justify-end gap-3">
+                      <button onClick={() => setIsNoteModalOpen(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">Batal</button>
+                      <button 
+                        onClick={handleSaveNote} 
+                        disabled={isSavingNote}
+                        className="px-6 py-2 text-sm font-bold bg-purple-600 text-white hover:bg-purple-700 rounded-lg shadow-md transition-colors flex items-center gap-2 disabled:opacity-50"
+                      >
+                        {isSavingNote ? <Loader size={16} className="animate-spin"/> : <Save size={16}/>} Simpan
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* MODAL RETUR BARANG */}
       {isReturnModalOpen && selectedOrderForReturn && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90%]">
@@ -368,7 +428,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             <table className="w-full text-left border-collapse">
                 <thead className="bg-gray-50 text-xs font-bold text-gray-600 uppercase tracking-wider border-b border-gray-200">
                     <tr>
-                        {/* Kolom Pertama: Tanggal Pesanan (Bukan tanggal retur) */}
                         <th className="p-4 w-32">Tgl Pesanan</th>
                         <th className="p-4 w-40">Resi / Tempo</th>
                         <th className="p-4 w-32">E-Commerce</th> 
@@ -379,7 +438,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                         <th className="p-4 text-right w-32">Harga Satuan</th>
                         <th className="p-4 text-right w-32">Total</th>
                         
-                        {/* Jika Tab History (Retur), Tampilkan Kolom Tambahan */}
                         {activeTab === 'history' ? (
                             <>
                                 <th className="p-4 w-32 bg-red-50/50 text-red-600 border-l border-red-100">Tgl Retur</th>
@@ -399,15 +457,12 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                             <tr><td colSpan={13} className="p-12 text-center text-gray-400"><ClipboardList size={48} className="opacity-20 mx-auto mb-3" /><p className="font-medium">Belum ada data retur</p></td></tr>
                         ) : (
                             filteredReturRecords.map((retur) => {
-                                // Tanggal Pesanan (Awal)
                                 const dtOrder = formatDate(retur.tanggal_pemesanan || '');
-                                // Tanggal Retur (Saat tombol simpan diklik)
                                 const dtRetur = formatDate(retur.tanggal_retur);
                                 const idStr = retur.id ? retur.id.toString() : '';
 
                                 return (
                                     <tr key={`retur-${retur.id}`} className="hover:bg-red-50/30 transition-colors">
-                                        {/* Tanggal Pesanan */}
                                         <td className="p-4 align-top border-r border-gray-100 bg-white group-hover:bg-red-50/30">
                                             <div className="font-bold text-gray-900">{dtOrder.date}</div>
                                         </td>
@@ -427,7 +482,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                         <td className="p-4 align-top text-right font-mono text-xs text-gray-500">{formatRupiah(retur.harga_satuan)}</td>
                                         <td className="p-4 align-top text-right font-mono text-xs font-bold text-gray-800">{formatRupiah(retur.harga_total)}</td>
                                         
-                                        {/* KOLOM BARU: TANGGAL RETUR & STATUS */}
                                         <td className="p-4 align-top border-l border-red-100 bg-red-50/20">
                                             <div className="font-bold text-red-700 text-xs">{dtRetur.date}</div>
                                             <div className="text-[10px] text-red-400 font-mono">{dtRetur.time}</div>
@@ -442,16 +496,19 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                             </span>
                                         </td>
 
+                                        {/* KOLOM KETERANGAN DENGAN TOMBOL EDIT */}
                                         <td className="p-4 align-top">
-                                            <div className="relative group/note">
-                                                <textarea 
-                                                    className="w-full text-xs p-2 border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none resize-none min-h-[50px] transition-all" 
-                                                    placeholder="Alasan retur..." 
-                                                    value={localNotes[idStr] || ''} 
-                                                    onChange={(e) => handleNoteChange(idStr, e.target.value)}
-                                                    onBlur={() => retur.resi && handleNoteSave(idStr, retur.resi)} 
-                                                />
-                                                <div className="absolute top-2 right-2 text-gray-300 pointer-events-none"><Edit3 size={10} /></div>
+                                            <div className="flex items-start justify-between gap-2 group/edit">
+                                                <div className="text-xs text-gray-600 italic leading-relaxed break-words max-w-[150px]">
+                                                    {retur.keterangan || <span className="text-gray-300">Tidak ada keterangan</span>}
+                                                </div>
+                                                <button 
+                                                    onClick={() => openNoteModal(retur)}
+                                                    className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors opacity-0 group-hover/edit:opacity-100 shadow-sm border border-transparent hover:border-blue-100"
+                                                    title="Edit Keterangan"
+                                                >
+                                                    <Edit3 size={14} />
+                                                </button>
                                             </div>
                                         </td>
                                     </tr>
