@@ -13,7 +13,7 @@ import { ResiAnalysisResult } from './services/geminiService';
 
 // --- IMPORT LOGIKA BARU ---
 import { 
-  fetchInventory, addInventory, updateInventory, deleteInventory, getItemById,
+  fetchInventory, addInventory, updateInventory, deleteInventory, getItemById, getItemByPartNumber, // Import getItemByPartNumber
   fetchOrders, saveOrder, updateOrderStatusService,
   fetchHistory, addHistoryLog,
   fetchChatSessions, saveChatSession,
@@ -174,7 +174,7 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- LOGIC BARU: PROCESS PARTIAL RETURN ---
+  // --- LOGIC BARU: PROCESS PARTIAL RETURN (FIXED: Get Item By Part Number) ---
   const handleProcessReturn = async (orderId: string, returnedItems: { itemId: string, qty: number }[]) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -182,7 +182,6 @@ const AppContent: React.FC = () => {
       setLoading(true);
       const today = new Date().toISOString().split('T')[0];
 
-      // Parse info pelanggan
       let pureName = order.customerName;
       let resiVal = '-';
       let shopVal = '';
@@ -196,26 +195,24 @@ const AppContent: React.FC = () => {
       if (viaMatch) { ecommerceVal = viaMatch[1]; pureName = pureName.replace(/\(Via:.*?\)/, ''); }
       pureName = pureName.trim() || "Pelanggan";
 
-      // Loop barang yang diretur
       for (const retur of returnedItems) {
           const itemInOrder = order.items.find(i => i.id === retur.itemId);
           if (!itemInOrder) continue;
 
-          // 1. Kembalikan Stok (Update Base)
-          const currentItem = await getItemById(retur.itemId);
+          // FIX: Gunakan partNumber dari orderItem untuk mencari barang di inventory
+          const currentItem = await getItemByPartNumber(itemInOrder.partNumber);
+          
           if (currentItem) {
               const restoreQty = retur.qty;
               const newQuantity = currentItem.quantity + restoreQty;
-              // Qty Out dikurangi (netralisir penjualan)
               const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
               await updateInventory(itemToUpdate);
 
-              // 2. CATAT DI BARANG MASUK (SEBAGAI LOG RETUR)
               await addBarangMasuk({
                   tanggal: today,
-                  tempo: `${resiVal} / ${shopVal}`, // Info asal penjualan
+                  tempo: `${resiVal} / ${shopVal}`,
                   ecommerce: ecommerceVal,          
-                  keterangan: `${pureName} (RETUR)`, // Label jelas
+                  keterangan: `${pureName} (RETUR)`,
                   partNumber: itemToUpdate.partNumber,
                   name: itemToUpdate.name,
                   brand: itemToUpdate.brand,
@@ -229,7 +226,6 @@ const AppContent: React.FC = () => {
           }
       }
 
-      // 3. Update Order di DB (Kurangi jumlah item di pesanan)
       const newItems = order.items.map(item => {
           const returInfo = returnedItems.find(r => r.itemId === item.id);
           if (returInfo) {
@@ -239,11 +235,7 @@ const AppContent: React.FC = () => {
           return item;
       }).filter(item => item.cartQuantity > 0); 
 
-      // Hitung total baru
       const newTotal = newItems.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
-      
-      // LOGIKA STATUS: 
-      // Agar pindah ke Tab "Retur" (Riwayat), status harus 'cancelled' atau 'completed'.
       const newStatus = newItems.length === 0 ? 'cancelled' : 'completed';
 
       if (await updateOrderData(orderId, newItems, newTotal, newStatus)) {
@@ -255,7 +247,7 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- UPDATE STATUS BIASA (FULL PROCESS / CANCEL) ---
+  // --- UPDATE STATUS BIASA (FULL PROCESS / CANCEL) (FIXED: Get Item By Part Number) ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -279,7 +271,9 @@ const AppContent: React.FC = () => {
       if (order.status === 'pending' && newStatus === 'processing') {
           if (await updateOrderStatusService(orderId, newStatus)) { 
               for (const orderItem of order.items) {
-                  const currentItem = await getItemById(orderItem.id);
+                  // FIX: Cari item berdasarkan Part Number (karena ID order item mungkin bukan UUID inventory)
+                  const currentItem = await getItemByPartNumber(orderItem.partNumber);
+                  
                   if (currentItem) {
                       const qtySold = orderItem.cartQuantity;
                       const newQuantity = Math.max(0, currentItem.quantity - qtySold);
@@ -314,7 +308,7 @@ const AppContent: React.FC = () => {
           if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
               if (order.status !== 'pending') {
                   for (const orderItem of order.items) {
-                      const currentItem = await getItemById(orderItem.id);
+                      const currentItem = await getItemByPartNumber(orderItem.partNumber);
                       if (currentItem) {
                           const restoreQty = orderItem.cartQuantity;
                           const newQuantity = currentItem.quantity + restoreQty;
