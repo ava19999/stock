@@ -390,7 +390,7 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
-// --- INSERT FUNCTIONS (PASTIKAN SEMUA DIEKSPOR DENGAN BENAR) ---
+// --- INSERT FUNCTIONS ---
 
 export const addBarangMasuk = async (data: any) => { 
     const ecommerceVal = data.ecommerce || 'Lainnya';
@@ -435,7 +435,10 @@ export const addHistoryLog = async (h: StockHistory) => {
     const now = getWIBISOString(); 
     if (h.type === 'in') {
         return addBarangMasuk({ 
-            created_at: now, tempo: '', keterangan: 'System Log', ecommerce: 'SYSTEM', 
+            created_at: now, 
+            tempo: '', 
+            keterangan: 'System Log', 
+            ecommerce: 'SYSTEM', 
             partNumber: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-', 
             stockAhir: h.previousStock + h.quantity, qtyMasuk: h.quantity, 
             hargaSatuan: h.price, hargaTotal: h.totalPrice 
@@ -453,8 +456,7 @@ export const addHistoryLog = async (h: StockHistory) => {
     }
 };
 
-// --- FUNGSI UPDATE ORDER ---
-
+// --- FUNGSI UPDATE ORDER (PENTING UNTUK PARTIAL RETUR) ---
 export const updateOrderData = async (orderId: string, newItems: any[], newTotal: number, newStatus: string): Promise<boolean> => {
     // 1. Ambil data order lama untuk mendapatkan detail customer (toko, via, dll)
     const { data: oldData } = await supabase.from('orders').select('*').eq('resi', orderId).limit(1).single();
