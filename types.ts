@@ -73,12 +73,13 @@ export interface StockHistory {
   tempo?: string;
 }
 
+// UPDATE: Tambahkan 'terjual' sebagai status yang valid
 export interface Order {
   id: string;
   customerName: string;
   items: CartItem[];
   totalAmount: number;
-  status: 'pending' | 'processing' | 'completed' | 'cancelled';
+  status: 'pending' | 'terjual' | 'processing' | 'completed' | 'cancelled';
   timestamp: number;
 }
 
@@ -103,10 +104,9 @@ export interface AIAnalysisResult {
   suggestedShelfCategory?: string;
 }
 
-// INTERFACE BARU UNTUK TABEL RETUR (SUDAH DIPERBAIKI)
 export interface ReturRecord {
   id?: number;
-  tanggal_pemesanan: string | null; // TYPO FIXED
+  tanggal_pemesanan: string | null;
   resi: string | null;
   toko: string | null;
   ecommerce: string | null;
