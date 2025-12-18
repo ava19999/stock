@@ -69,7 +69,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           if (success) {
               // Update state lokal agar UI berubah tanpa reload
               setReturDbRecords(prev => prev.map(item => {
-                  // Kita update item yang ID-nya cocok ATAU resinya cocok (tergantung kebutuhan, di sini pakai ID jika ada)
                   if ((item.id && item.id.toString() === editingNoteData.id) || item.resi === editingNoteData.resi) {
                       return { ...item, keterangan: noteText };
                   }
@@ -227,10 +226,17 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             );
         }
 
+        // --- UPDATE UI SETELAH SUKSES ---
         setIsReturnModalOpen(false);
         setSelectedOrderForReturn(null);
-        if (onRefresh) onRefresh();
-        else window.location.reload();
+        
+        // Pindah otomatis ke Tab Retur (History)
+        setActiveTab('history');
+        
+        // Soft Refresh (Panggil fungsi refresh dari App.tsx jika ada)
+        if (onRefresh) {
+            onRefresh();
+        }
 
       } catch (error) {
           console.error("Error processing return:", error);
