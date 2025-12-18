@@ -185,17 +185,27 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                 const produkNameClean = String(produk || '').trim();
                 const produkLower = produkNameClean.toLowerCase();
 
-                // Jika Part No kosong, cari di database berdasarkan Nama Produk
+                // Jika Part No kosong, cari di database atau ekstrak dari teks
                 if ((!partNo || partNo === '-' || partNo === '') && produkNameClean) {
-                    // 1. Cek Nama Produk Sama Persis
+                    
+                    // 1. Cek Database: Nama Produk Sama Persis
                     const foundByExactName = inventoryMap.get(produkLower);
                     if (foundByExactName) {
                         partNo = foundByExactName;
                     } else {
-                        // 2. Cek apakah Nama Produk MENGANDUNG Part Number
+                        // 2. Cek Database: Nama Produk MENGANDUNG Part Number yang ada di DB
                         const foundInText = allPartNumbers.find(pn => produkLower.includes(pn.toLowerCase()));
                         if (foundInText) {
                             partNo = foundInText;
+                        } else {
+                            // 3. (BARU) FALLBACK REGEX: Ekstrak Pola Part Number dari String
+                            // Menangkap pola seperti: 85241-0D080, 12345-67890, 12345-ABCDE
+                            // Pola: Minimal 5 karakter Alfanumerik + Strip + Minimal 4 karakter Alfanumerik
+                            const regexPartNo = /\b[A-Z0-9]{5,}-[A-Z0-9]{4,}\b/i;
+                            const match = produkNameClean.match(regexPartNo);
+                            if (match) {
+                                partNo = match[0].toUpperCase();
+                            }
                         }
                     }
                 }
@@ -237,24 +247,25 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
     };
-    reader.readAsBinaryString(file);
-  };
 
-  const handleProcessKirim = async () => {
+    const handleProcessKirim = async () => {
       if (selectedResis.length === 0) return;
       const confirmMsg = `Proses ${selectedResis.length} resi menjadi Terjual?`;
       if (!window.confirm(confirmMsg)) return;
 
       setIsProcessingShipment(true);
       const logsToProcess = scanLogs.filter(log => selectedResis.includes(log.resi));
-      const success = await processShipmentToOrders(logsToProcess);
       
-      if (success) {
-          alert("Berhasil diproses kirim!");
+      // PANGGIL SERVICE (Sekarang mengembalikan object {success, message})
+      const result = await processShipmentToOrders(logsToProcess);
+      
+      if (result.success) {
+          alert("Berhasil diproses kirim! Stok otomatis terupdate.");
           await loadScanLogs();
           setSelectedResis([]);
       } else {
-          alert("Terjadi kesalahan saat memproses.");
+          // TAMPILKAN PESAN ERROR DARI VALIDASI
+          alert(result.message || "Terjadi kesalahan saat memproses.");
       }
       setIsProcessingShipment(false);
   };

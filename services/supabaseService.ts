@@ -674,21 +674,57 @@ export const updateScanResiLogField = async (id: number, field: string, value: a
 };
 
 // 3. Proses Kirim (Pindah ke Orders + Update Status)
-export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Promise<boolean> => {
+// UPDATE: Return type diubah menjadi object { success, message } untuk handle validasi
+export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Promise<{ success: boolean; message?: string }> => {
     try {
+        // --- 1. VALIDASI: Cek Apakah Part Number Ada di Base ---
+        const partNumbersToCheck = selectedLogs
+            .map(log => log.part_number)
+            .filter(pn => pn !== null && pn !== '') as string[];
+        
+        // Hapus duplikat agar query lebih efisien
+        const uniquePartNumbers = [...new Set(partNumbersToCheck)];
+
+        if (uniquePartNumbers.length > 0) {
+            // Ambil daftar part_number yang valid dari database
+            const { data: existingItems, error } = await supabase
+                .from(TABLE_NAME) // Tabel 'base'
+                .select('part_number')
+                .in('part_number', uniquePartNumbers);
+            
+            if (error) {
+                console.error("Error validating parts:", error);
+                return { success: false, message: "Gagal memvalidasi Part Number di database." };
+            }
+
+            // Bandingkan part number yang di-scan dengan yang ada di database
+            const existingSet = new Set(existingItems?.map(item => item.part_number));
+            const missingParts = uniquePartNumbers.filter(pn => !existingSet.has(pn));
+
+            // JIKA ADA YANG HILANG -> STOP PROSES & RETURN ERROR
+            if (missingParts.length > 0) {
+                return { 
+                    success: false, 
+                    message: `GAGAL PROSES KIRIM!\n\nPart Number berikut tidak ditemukan di database Base Inventory:\n\n${missingParts.join(', ')}\n\nSilakan daftarkan barang tersebut terlebih dahulu di menu Inventory/Shop sebelum diproses.` 
+                };
+            }
+        }
+
+        // --- 2. PROSES UPDATE (Jika Validasi Lolos) ---
         for (const log of selectedLogs) {
             // A. Cari Nama Barang Asli di Base Inventory berdasarkan Part Number
-            let realItemName = log.nama_barang; // Default nama dari excel
+            // (Agar nama di laporan konsisten dengan nama di database, bukan nama dari label resi)
+            let realItemName = log.nama_barang;
             
             if (log.part_number) {
                 const { data: baseItem } = await supabase
-                    .from(TABLE_NAME) // Tabel 'base'
+                    .from(TABLE_NAME)
                     .select('name')
                     .eq('part_number', log.part_number)
                     .single();
                 
                 if (baseItem) {
-                    realItemName = baseItem.name; // Pakai nama asli database
+                    realItemName = baseItem.name;
                 }
             }
 
@@ -700,7 +736,7 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                 ecommerce: log.ecommerce,
                 customer: log.customer,
                 part_number: log.part_number,
-                nama_barang: realItemName, // PENTING: Nama disesuaikan dengan Base
+                nama_barang: realItemName, 
                 quantity: log.quantity,
                 harga_satuan: log.harga_satuan,
                 harga_total: log.harga_total,
@@ -709,6 +745,7 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
 
             if (insertError) {
                 console.error(`Gagal insert order ${log.resi}:`, insertError);
+                // Lanjutkan loop agar resi lain yang valid tetap terproses
                 continue; 
             }
 
@@ -718,9 +755,11 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                 .update({ status: 'Terjual' })
                 .eq('id', log.id);
         }
-        return true;
+
+        return { success: true };
+
     } catch (error) {
         console.error("Error processing shipment:", error);
-        return false;
+        return { success: false, message: "Terjadi kesalahan sistem saat memproses data." };
     }
 };
