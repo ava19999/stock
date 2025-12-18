@@ -4,7 +4,7 @@ import { ScanBarcode, Loader2, ChevronDown, Check, Upload, FileSpreadsheet, Cale
 import { compressImage } from '../utils';
 import { ResiAnalysisResult, analyzeResiImage } from '../services/geminiService';
 import { addScanResiLog, fetchScanResiLogs, updateScanResiFromExcel, processShipmentToOrders, fetchInventory } from '../services/supabaseService'; 
-import { ScanResiLog, InventoryItem } from '../types';
+import { ScanResiLog } from '../types';
 import * as XLSX from 'xlsx';
 
 // Daftar Toko Internal
@@ -98,17 +98,28 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     }
   };
 
-  // --- HELPER: PARSING ANGKA INDONESIA ---
-  // Mengubah "105.000" menjadi 105000 (bukan 105)
+  // --- HELPER: PARSING ANGKA INDONESIA (FIXED) ---
   const parseIndonesianNumber = (val: any): number => {
-      if (typeof val === 'number') return val;
-      if (typeof val === 'string') {
-          // Hapus "Rp", spasi, dan TITIK (pemisah ribuan Indonesia)
-          // Ganti KOMA dengan TITIK (desimal)
-          const clean = val.replace(/[Rp\s.]/g, '').replace(',', '.');
-          return parseFloat(clean) || 0;
-      }
-      return 0;
+      if (val === null || val === undefined || val === '') return 0;
+
+      // Ubah ke string dulu untuk memastikan format
+      // Ini penting karena Excel mungkin mengirim angka 105 jika formatnya salah
+      let strVal = String(val);
+
+      // 1. Hapus "Rp", "IDR", dan spasi
+      strVal = strVal.replace(/[RpIDR\s]/gi, '');
+
+      // 2. Hapus TITIK (.) yang digunakan sebagai pemisah ribuan
+      // Contoh: "105.000" menjadi "105000"
+      // Contoh salah baca Excel: "105.000" (string) -> tetap string
+      strVal = strVal.split('.').join('');
+
+      // 3. Ganti KOMA (,) menjadi TITIK (.) jika ada desimal
+      // Contoh: "100,50" -> "100.50"
+      strVal = strVal.replace(',', '.');
+
+      const result = parseFloat(strVal);
+      return isNaN(result) ? 0 : result;
   };
 
   // --- LOGIKA PARSING EXCEL ---
@@ -119,7 +130,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     setIsUploading(true);
     
     // 1. Fetch Inventory untuk pencarian Part Number otomatis
-    let inventoryMap = new Map<string, string>(); // Key: Nama Lowercase, Value: PartNumber
+    let inventoryMap = new Map<string, string>(); 
     try {
         const inventoryData = await fetchInventory();
         inventoryData.forEach(item => {
@@ -136,10 +147,12 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
             const wb = XLSX.read(bstr, { type: 'binary' });
             const wsname = wb.SheetNames[0];
             const ws = wb.Sheets[wsname];
-            const data: any[] = XLSX.utils.sheet_to_json(ws);
+            
+            // PENTING: Gunakan { raw: false } agar membaca data SEBAGAI TEKS yang tertampil (formatted text)
+            // Ini mencegah "105.000" dibaca sebagai 105.
+            const data: any[] = XLSX.utils.sheet_to_json(ws, { raw: false });
 
             const updates = data.map((row: any) => {
-                // Fungsi Helper Pencari Kolom (Case Insensitive)
                 const getVal = (keys: string[]) => {
                     for (let k of keys) {
                         if (row[k] !== undefined) return row[k];
@@ -151,41 +164,34 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
 
                 // A. Mapping Kolom
                 const resi = getVal(['No. Resi', 'No. Pesanan', 'Resi', 'Order ID']);
-                
-                // Tambahkan variasi nama kolom username
                 const username = getVal(['Username (Pembeli)', 'Username Pembeli', 'Nama Pengguna', 'Username', 'Pembeli', 'Nama Penerima']);
-                
-                // Hapus 'SKU' agar tidak salah ambil. Prioritaskan 'No. Referensi' (biasanya Part No di Shopee)
                 let partNo = getVal(['No. Referensi', 'Part Number', 'Part No', 'Kode Barang']);
-                
                 const produk = getVal(['Nama Produk', 'Nama Barang', 'Product Name']);
                 const qty = getVal(['Jumlah', 'Qty', 'Quantity']);
-                const harga = getVal(['Harga Awal', 'Harga Satuan', 'Price', 'Harga']);
+                const harga = getVal(['Harga Awal', 'Harga Satuan', 'Price', 'Harga', 'Harga Variasi']);
 
-                // B. Logika Pencarian Part Number (Jika Excel kosong/salah)
+                // B. Logika Pencarian Part Number
                 const produkNameClean = String(produk || '').toLowerCase().trim();
-                
-                // Jika partNo kosong TAPI ada nama produk, coba cari di database
                 if ((!partNo || partNo === '-') && produkNameClean) {
                     const foundPartNo = inventoryMap.get(produkNameClean);
                     if (foundPartNo) {
-                        partNo = foundPartNo; // Ketemu di database!
+                        partNo = foundPartNo; 
                     }
                 }
 
-                // C. Parsing Angka (Harga & Qty)
+                // C. Parsing Angka (Harga & Qty) menggunakan fungsi yang sudah diperbaiki
                 const qtyNum = parseIndonesianNumber(qty);
                 const hargaNum = parseIndonesianNumber(harga);
 
                 if (resi) {
                     return {
                         resi: String(resi).trim(),
-                        customer: username || '-', // Username pembeli
-                        part_number: partNo || null, // Kosong jika tidak ketemu
+                        customer: username || '-', 
+                        part_number: partNo || null,
                         nama_barang: produk || '-',
                         quantity: qtyNum,
                         harga_satuan: hargaNum,
-                        harga_total: qtyNum * hargaNum
+                        harga_total: qtyNum * hargaNum // Total otomatis
                     };
                 }
                 return null;
@@ -407,7 +413,6 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                             const isSold = log.status === 'Terjual';
                             const isSelected = selectedResis.includes(log.resi);
                             
-                            // Highlight jika part number ketemu dari database (bukan input manual/excel murni)
                             const hasPartNumber = !!log.part_number;
 
                             return (
@@ -430,10 +435,8 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                                     <td className="px-4 py-3 text-gray-600 font-semibold">{log.toko || '-'}</td>
                                     <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-gray-100 text-gray-600 border-gray-200">{log.ecommerce}</span></td>
                                     
-                                    {/* Pelanggan / Username Pembeli */}
                                     <td className="px-4 py-3 text-gray-800 font-medium">{log.customer || '-'}</td>
                                     
-                                    {/* Part Number (Tampilkan icon search jika hasil lookup) */}
                                     <td className="px-4 py-3 font-mono text-gray-700 flex items-center gap-1">
                                         {log.part_number || <span className="text-red-300">-</span>}
                                         {hasPartNumber && <Search size={10} className="text-blue-300" title="Terdeteksi dari Database"/>}
