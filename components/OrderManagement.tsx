@@ -34,15 +34,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   // FETCH DATA RETUR
   useEffect(() => {
-      // Selalu fetch data retur untuk memastikan sinkronisasi note/keterangan, 
-      // terutama saat tab history dibuka
       fetchReturRecords().then(records => {
           setReturDbRecords(records);
-          
-          // Sinkronisasi notes ke state lokal untuk editing
           const dbNotes: Record<string, string> = {};
           records.forEach(r => {
-              // Kita gunakan ID record retur atau resi sebagai key
               if (r.id) dbNotes[r.id.toString()] = r.keterangan || '';
           });
           setLocalNotes(prev => ({...prev, ...dbNotes}));
@@ -120,14 +115,16 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       try {
         const { resiText, shopName, ecommerce, cleanName } = getOrderDetails(selectedOrderForReturn);
         const combinedResiShop = `${resiText} / ${shopName}`;
+        
+        // Tanggal Pesanan dibuat
+        const orderDate = new Date(selectedOrderForReturn.timestamp).toISOString();
 
         for (const item of itemsToReturnData) {
             const hargaSatuan = item.customPrice ?? item.price ?? 0;
             const totalRetur = hargaSatuan * item.cartQuantity;
 
-            // Cari item asli di inventory
+            // Update Inventory (Stok Masuk Kembali)
             const realItem = await getItemByPartNumber(item.partNumber);
-
             if (realItem) {
                 await updateInventory({
                     ...realItem,
@@ -143,8 +140,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 });
             }
 
+            // LOGIKA MENENTUKAN STATUS (FULL RETUR / SEBAGIAN)
+            // Cari item asli di pesanan awal untuk melihat jumlah belinya
+            const originalItem = selectedOrderForReturn.items.find(i => i.id === item.id);
+            const originalQty = originalItem ? originalItem.cartQuantity : 0;
+            const statusRetur = item.cartQuantity === originalQty ? 'Full Retur' : 'Retur Sebagian';
+
             const returData: ReturRecord = {
-                tanggal_pemesanan: new Date(selectedOrderForReturn.timestamp).toISOString(), 
+                tanggal_pemesanan: orderDate, // Tanggal pesanan dibuat
                 resi: resiText,
                 toko: shopName,
                 ecommerce: ecommerce,
@@ -154,15 +157,15 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 quantity: item.cartQuantity,
                 harga_satuan: hargaSatuan,
                 harga_total: totalRetur,
-                tanggal_retur: new Date().toISOString(),
-                status: 'Diterima',
+                tanggal_retur: new Date().toISOString(), // Tanggal SAAT INI (Klik Simpan)
+                status: statusRetur, // Status Dinamis
                 keterangan: 'Retur Barang'
             };
 
             await addReturTransaction(returData);
         }
 
-        // Logic update/split order (sama seperti sebelumnya)
+        // --- Logic update order yang tersisa (Split Order) ---
         const remainingItems = selectedOrderForReturn.items.map(item => {
             const returItem = itemsToReturnData.find(r => r.id === item.id);
             if (returItem) {
@@ -214,9 +217,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   const safeOrders = Array.isArray(orders) ? orders : [];
 
-  // 1. FILTER ORDERS (Untuk tab Pending & Processing)
   const filteredOrders = useMemo(() => {
-    if (activeTab === 'history') return []; // Jangan pakai ini untuk history
+    if (activeTab === 'history') return []; 
     
     return safeOrders.filter(o => {
       if (!o) return false;
@@ -236,7 +238,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     }).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
   }, [safeOrders, activeTab, searchTerm]);
 
-  // 2. FILTER RETUR RECORDS (Khusus tab History/Retur dari Tabel Retur)
   const filteredReturRecords = useMemo(() => {
       if (activeTab !== 'history') return [];
 
@@ -246,9 +247,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           return (
               (r.resi && r.resi.toLowerCase().includes(lower)) ||
               (r.customer && r.customer.toLowerCase().includes(lower)) ||
-              (r.nama_barang && r.nama_barang.toLowerCase().includes(lower)) ||
-              (r.ecommerce && r.ecommerce.toLowerCase().includes(lower)) ||
-              (r.part_number && r.part_number.toLowerCase().includes(lower))
+              (r.nama_barang && r.nama_barang.toLowerCase().includes(lower))
           );
       }).sort((a, b) => new Date(b.tanggal_retur).getTime() - new Date(a.tanggal_retur).getTime());
   }, [returDbRecords, activeTab, searchTerm]);
@@ -294,8 +293,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                   <div className="p-6 overflow-y-auto">
                       <div className="text-sm text-gray-500 mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
                           Pilih jumlah barang yang dikembalikan.<br/>
-                          <span className="text-orange-600 font-bold">• Data retur akan disimpan ke tabel khusus 'Retur'.</span><br/>
-                          <span className="text-blue-600 font-bold">• Stok fisik gudang akan bertambah otomatis.</span>
+                          <span className="text-orange-600 font-bold">• Status retur (Full/Sebagian) otomatis terdeteksi.</span>
                       </div>
                       <div className="space-y-3">
                           {selectedOrderForReturn.items.map((item) => (
@@ -370,7 +368,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             <table className="w-full text-left border-collapse">
                 <thead className="bg-gray-50 text-xs font-bold text-gray-600 uppercase tracking-wider border-b border-gray-200">
                     <tr>
-                        <th className="p-4 w-32">{activeTab === 'history' ? 'Tgl Retur' : 'Tanggal'}</th>
+                        {/* Kolom Pertama: Tanggal Pesanan (Bukan tanggal retur) */}
+                        <th className="p-4 w-32">Tgl Pesanan</th>
                         <th className="p-4 w-40">Resi / Tempo</th>
                         <th className="p-4 w-32">E-Commerce</th> 
                         <th className="p-4 w-40">Pelanggan</th>
@@ -379,8 +378,17 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                         <th className="p-4 text-right w-20">Qty</th>
                         <th className="p-4 text-right w-32">Harga Satuan</th>
                         <th className="p-4 text-right w-32">Total</th>
-                        {/* Kolom Tanggal Retur tidak perlu double di history */}
-                        {activeTab !== 'history' && <th className="p-4 text-center w-32">Status</th>}
+                        
+                        {/* Jika Tab History (Retur), Tampilkan Kolom Tambahan */}
+                        {activeTab === 'history' ? (
+                            <>
+                                <th className="p-4 w-32 bg-red-50/50 text-red-600 border-l border-red-100">Tgl Retur</th>
+                                <th className="p-4 w-32 text-center bg-red-50/50 text-red-600">Status</th>
+                            </>
+                        ) : (
+                            <th className="p-4 text-center w-32">Status</th>
+                        )}
+                        
                         <th className="p-4 text-center w-48">{activeTab === 'history' ? 'Keterangan' : 'Aksi'}</th>
                     </tr>
                 </thead>
@@ -388,16 +396,20 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     {/* --- TAMPILAN TAB HISTORY (DATA RETUR) --- */}
                     {activeTab === 'history' ? (
                         filteredReturRecords.length === 0 ? (
-                            <tr><td colSpan={11} className="p-12 text-center text-gray-400"><ClipboardList size={48} className="opacity-20 mx-auto mb-3" /><p className="font-medium">Belum ada data retur</p></td></tr>
+                            <tr><td colSpan={13} className="p-12 text-center text-gray-400"><ClipboardList size={48} className="opacity-20 mx-auto mb-3" /><p className="font-medium">Belum ada data retur</p></td></tr>
                         ) : (
                             filteredReturRecords.map((retur) => {
-                                const dt = formatDate(retur.tanggal_retur);
+                                // Tanggal Pesanan (Awal)
+                                const dtOrder = formatDate(retur.tanggal_pemesanan || '');
+                                // Tanggal Retur (Saat tombol simpan diklik)
+                                const dtRetur = formatDate(retur.tanggal_retur);
                                 const idStr = retur.id ? retur.id.toString() : '';
 
                                 return (
                                     <tr key={`retur-${retur.id}`} className="hover:bg-red-50/30 transition-colors">
+                                        {/* Tanggal Pesanan */}
                                         <td className="p-4 align-top border-r border-gray-100 bg-white group-hover:bg-red-50/30">
-                                            <div className="font-bold text-gray-900">{dt.date}</div><div className="text-xs text-gray-500 font-mono mt-0.5">{dt.time}</div>
+                                            <div className="font-bold text-gray-900">{dtOrder.date}</div>
                                         </td>
                                         <td className="p-4 align-top font-mono text-xs text-gray-600 bg-white">
                                             <div className="flex flex-col gap-1">
@@ -415,6 +427,21 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                         <td className="p-4 align-top text-right font-mono text-xs text-gray-500">{formatRupiah(retur.harga_satuan)}</td>
                                         <td className="p-4 align-top text-right font-mono text-xs font-bold text-gray-800">{formatRupiah(retur.harga_total)}</td>
                                         
+                                        {/* KOLOM BARU: TANGGAL RETUR & STATUS */}
+                                        <td className="p-4 align-top border-l border-red-100 bg-red-50/20">
+                                            <div className="font-bold text-red-700 text-xs">{dtRetur.date}</div>
+                                            <div className="text-[10px] text-red-400 font-mono">{dtRetur.time}</div>
+                                        </td>
+                                        <td className="p-4 align-top text-center bg-red-50/20">
+                                            <span className={`px-2 py-1 rounded-md text-[10px] font-bold border uppercase ${
+                                                retur.status === 'Full Retur' 
+                                                ? 'bg-red-100 text-red-700 border-red-200' 
+                                                : 'bg-orange-100 text-orange-700 border-orange-200'
+                                            }`}>
+                                                {retur.status || 'Retur'}
+                                            </span>
+                                        </td>
+
                                         <td className="p-4 align-top">
                                             <div className="relative group/note">
                                                 <textarea 
@@ -426,16 +453,13 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                 />
                                                 <div className="absolute top-2 right-2 text-gray-300 pointer-events-none"><Edit3 size={10} /></div>
                                             </div>
-                                            <div className="flex items-center gap-1 mt-1 text-[10px] text-green-600 font-bold bg-green-50 px-2 py-1 rounded w-fit border border-green-100">
-                                                <RotateCcw size={10}/> Stok Kembali
-                                            </div>
                                         </td>
                                     </tr>
                                 )
                             })
                         )
                     ) : (
-                        /* --- TAMPILAN TAB PENDING & PROCESSING (DATA ORDERS) --- */
+                        /* --- TAMPILAN TAB PENDING & PROCESSING --- */
                         filteredOrders.length === 0 ? (
                             <tr><td colSpan={11} className="p-12 text-center text-gray-400"><ClipboardList size={48} className="opacity-20 mx-auto mb-3" /><p className="font-medium">{searchTerm ? 'Tidak ditemukan pesanan yang cocok' : 'Tidak ada data pesanan'}</p></td></tr>
                         ) : (
