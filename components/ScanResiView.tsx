@@ -58,7 +58,8 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
 
       setIsSavingLog(true);
       
-      // Simpan ke Tabel scan_resi (Hanya Resi, Toko, Ecommerce)
+      // Simpan ke Tabel scan_resi (Hanya Resi, Toko, Ecommerce yang terisi)
+      // Kolom lain otomatis NULL di database
       const success = await addScanResiLog(scannedCode, selectedMarketplace, selectedStore);
       
       if (success) {
@@ -218,26 +219,34 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
       <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
         <div className="px-5 py-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
             <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2">
-                <Clock size={16} className="text-blue-600"/> Riwayat Scan (Menunggu Upload Excel)
+                <Clock size={16} className="text-blue-600"/> Data Scan Resi
             </h3>
             <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{scanLogs.length}</span>
         </div>
         
+        {/* Container Tabel dengan Scroll Horizontal jika layar kecil */}
         <div className="flex-1 overflow-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="w-full text-left border-collapse min-w-[800px]">
                 <thead className="bg-white sticky top-0 z-10 shadow-sm">
                     <tr>
-                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">Waktu Scan</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">Waktu</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">No. Resi</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">Marketplace</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">Toko</th>
-                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 text-center">Data Barang</th>
+                        
+                        {/* Kolom-kolom yang akan kosong di awal */}
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">Customer</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">Part Number</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">Nama Barang</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 text-center">Qty</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 text-right">Total</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 text-center">Status</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50 text-xs">
                     {scanLogs.length === 0 ? (
                         <tr>
-                            <td colSpan={5} className="p-8 text-center text-gray-400">
+                            <td colSpan={10} className="p-8 text-center text-gray-400">
                                 <div className="flex flex-col items-center gap-2">
                                     <ScanBarcode size={32} className="opacity-20"/>
                                     <p>Belum ada resi yang di-scan hari ini</p>
@@ -248,14 +257,14 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                         scanLogs.map((log, idx) => {
                             // Formatting tanggal
                             const dateObj = new Date(log.tanggal);
-                            const displayDate = dateObj.toLocaleDateString('id-ID');
+                            const displayDate = dateObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute:'2-digit' });
                             
-                            // Cek apakah data barang sudah terisi (setelah upload excel nanti)
+                            // Cek apakah data barang sudah terisi
                             const isComplete = log.part_number && log.nama_barang;
 
                             return (
                                 <tr key={log.id || idx} className="hover:bg-blue-50/30 transition-colors">
-                                    <td className="px-4 py-3 text-gray-500 font-mono">{displayDate}</td>
+                                    <td className="px-4 py-3 text-gray-500 font-mono whitespace-nowrap">{displayDate}</td>
                                     <td className="px-4 py-3 font-bold text-gray-900 font-mono select-all">{log.resi}</td>
                                     <td className="px-4 py-3">
                                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
@@ -265,15 +274,25 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                                             'bg-gray-100 text-gray-600 border-gray-200'
                                         }`}>{log.ecommerce}</span>
                                     </td>
-                                    <td className="px-4 py-3 text-gray-600 font-semibold">{log.toko}</td>
-                                    <td className="px-4 py-3 text-center">
+                                    <td className="px-4 py-3 text-gray-600 font-semibold">{log.toko || '-'}</td>
+                                    
+                                    {/* Kolom Detail Barang (Akan kosong/tanda strip jika belum upload excel) */}
+                                    <td className="px-4 py-3 text-gray-500">{log.customer || '-'}</td>
+                                    <td className="px-4 py-3 text-gray-500 font-mono">{log.part_number || '-'}</td>
+                                    <td className="px-4 py-3 text-gray-500 truncate max-w-[150px]" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td>
+                                    <td className="px-4 py-3 text-gray-500 text-center">{log.quantity || '-'}</td>
+                                    <td className="px-4 py-3 text-gray-500 text-right">
+                                        {log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}
+                                    </td>
+
+                                    <td className="px-4 py-3 text-center whitespace-nowrap">
                                         {isComplete ? (
                                             <span className="inline-flex items-center gap-1 text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded-full border border-green-100">
                                                 <Check size={10}/> Lengkap
                                             </span>
                                         ) : (
-                                            <span className="inline-flex items-center gap-1 text-gray-400 italic">
-                                                <AlertCircle size={10}/> Kosong
+                                            <span className="inline-flex items-center gap-1 text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100">
+                                                <AlertCircle size={10}/> Menunggu Upload
                                             </span>
                                         )}
                                     </td>

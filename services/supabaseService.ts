@@ -10,7 +10,7 @@ import {
   ChatSession, 
   ReturRecord, 
   CartItem,
-  ScanResiLog // Import Interface Baru
+  ScanResiLog 
 } from '../types';
 
 const TABLE_NAME = 'base';
@@ -580,7 +580,7 @@ export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
         .from('scan_resi')
         .select('*')
         .order('tanggal', { ascending: false })
-        .limit(50);
+        .limit(100);
 
     if (error) {
         console.error("Gagal ambil log scan resi:", error);
