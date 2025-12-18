@@ -1,6 +1,6 @@
 // FILE: src/services/supabaseService.ts
 import { supabase } from '../lib/supabase';
-import { InventoryItem, InventoryFormData, StockHistory, BarangMasuk, BarangKeluar, Order, ChatSession, ReturRecord } from '../types';
+import { InventoryItem, InventoryFormData, StockHistory, BarangMasuk, BarangKeluar, Order, ChatSession, ReturRecord, CartItem } from '../types';
 
 const TABLE_NAME = 'base';
 
@@ -292,7 +292,6 @@ export const addReturTransaction = async (data: ReturRecord): Promise<boolean> =
     return true;
 };
 
-// --- FUNGSI BARU: FETCH DATA RETUR UNTUK DITAMPILKAN ---
 export const fetchReturRecords = async (): Promise<ReturRecord[]> => {
     const { data, error } = await supabase.from('retur').select('*').order('tanggal_retur', { ascending: false });
     if (error) {
@@ -302,9 +301,7 @@ export const fetchReturRecords = async (): Promise<ReturRecord[]> => {
     return data || [];
 };
 
-// --- FUNGSI UPDATE KETERANGAN RETUR (HANYA TABEL RETUR) ---
 export const updateReturKeterangan = async (resi: string, keterangan: string): Promise<boolean> => {
-    // Hanya update tabel RETUR sesuai permintaan
     const { error: returError } = await supabase
         .from('retur')
         .update({ keterangan: keterangan })
@@ -412,6 +409,7 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
+// --- INSERT FUNCTIONS ---
 export const addBarangMasuk = async (data: any) => { 
     const ecommerceVal = data.ecommerce || 'Lainnya';
     const keteranganVal = data.keterangan || 'Restock'; 
@@ -457,15 +455,164 @@ export const addHistoryLog = async (h: StockHistory) => {
     }
 };
 
+// --- FUNGSI BARU UNTUK HANDLE ORDER DARI TABEL FLAT ---
+
+export const fetchOrders = async (): Promise<Order[]> => { 
+    // Ambil data flat dari tabel orders baru
+    const { data } = await supabase.from('orders').select('*').order('tanggal', { ascending: false }).limit(200); 
+    
+    if (!data) return [];
+
+    // Grouping berdasarkan RESI (karena data flat per item)
+    const groupedOrders: Record<string, Order> = {};
+
+    data.forEach((row: any) => {
+        const resi = row.resi || 'UNKNOWN';
+        
+        if (!groupedOrders[resi]) {
+            // Rekonstruksi string customerName agar UI tetap bisa parsing (Toko, Via, dll)
+            // Format yang diharapkan UI: "NamaCustomer (Toko: NamaToko) (Via: Ecommerce) (Resi: ...)"
+            const customerStr = row.customer || '-';
+            const tokoStr = row.toko ? ` (Toko: ${row.toko})` : '';
+            const viaStr = row.ecommerce ? ` (Via: ${row.ecommerce})` : '';
+            const resiStr = row.resi ? ` (Resi: ${row.resi})` : '';
+            
+            const constructedCustomerName = `${customerStr}${tokoStr}${viaStr}${resiStr}`;
+
+            groupedOrders[resi] = {
+                id: resi,
+                customerName: constructedCustomerName,
+                items: [],
+                totalAmount: 0,
+                status: row.status as any,
+                timestamp: row.tanggal ? new Date(row.tanggal).getTime() : Date.now(),
+                keterangan: '' // Keterangan ambil dari tabel retur jika perlu, tapi di order list biasanya kosong
+            };
+        }
+
+        // Tambahkan item ke list items
+        groupedOrders[resi].items.push({
+            id: row.part_number, // Gunakan part number sebagai ID sementara
+            partNumber: row.part_number,
+            name: row.nama_barang,
+            quantity: 0, // Ini stok gudang (tidak relevan di list order)
+            price: Number(row.harga_satuan),
+            cartQuantity: Number(row.quantity),
+            customPrice: Number(row.harga_satuan),
+            // Field lain dummy
+            brand: '', application: '', shelf: '', ecommerce: '', imageUrl: '', lastUpdated: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, costPrice: 0, kingFanoPrice: 0
+        });
+
+        // Akumulasi total
+        groupedOrders[resi].totalAmount += Number(row.harga_total);
+    });
+
+    return Object.values(groupedOrders);
+};
+
+export const saveOrder = async (order: Order): Promise<boolean> => { 
+    // Helper untuk ekstrak detail dari customerName string yang ada di UI
+    // Karena UI mengirim objek Order dengan format lama
+    const parseDetails = (name: string) => {
+        let cleanName = name;
+        let toko = '-';
+        let ecommerce = '-';
+        let resi = order.id; // Default resi
+
+        const resiMatch = name.match(/\(Resi: (.*?)\)/);
+        if (resiMatch) { resi = resiMatch[1]; cleanName = cleanName.replace(/\(Resi:.*?\)/, ''); }
+        
+        const tokoMatch = name.match(/\(Toko: (.*?)\)/);
+        if (tokoMatch) { toko = tokoMatch[1]; cleanName = cleanName.replace(/\(Toko:.*?\)/, ''); }
+        
+        const viaMatch = name.match(/\(Via: (.*?)\)/);
+        if (viaMatch) { ecommerce = viaMatch[1]; cleanName = cleanName.replace(/\(Via:.*?\)/, ''); }
+
+        return { 
+            customer: cleanName.replace(/\(RETUR\)/i, '').trim(), 
+            toko: toko !== '-' ? toko : null, 
+            ecommerce: ecommerce !== '-' ? ecommerce : null,
+            resi: resi
+        };
+    };
+
+    const details = parseDetails(order.customerName);
+    const orderDate = new Date(order.timestamp).toISOString();
+
+    // Map items ke baris-baris data untuk tabel flat
+    const rows = order.items.map(item => ({
+        tanggal: orderDate,
+        resi: details.resi,
+        toko: details.toko,
+        ecommerce: details.ecommerce,
+        customer: details.customer,
+        part_number: item.partNumber,
+        nama_barang: item.name,
+        quantity: item.cartQuantity,
+        harga_satuan: item.customPrice || item.price,
+        harga_total: (item.customPrice || item.price) * item.cartQuantity,
+        status: order.status
+    }));
+
+    const { error } = await supabase.from('orders').insert(rows);
+    
+    if (error) {
+        console.error("Gagal simpan order:", error);
+        return false;
+    }
+    return true; 
+};
+
+export const updateOrderStatusService = async (id: string, status: string, timestamp?: number): Promise<boolean> => { 
+    // Update status berdasarkan RESI (karena id di UI adalah resi)
+    const updateData: any = { status }; 
+    if (timestamp) { updateData.tanggal = new Date(timestamp).toISOString(); } 
+    
+    const { error } = await supabase.from('orders').update(updateData).eq('resi', id); 
+    return !error; 
+};
+
+// Fungsi ini dipakai untuk partial return: menghapus item lama dan insert item sisa
 export const updateOrderData = async (orderId: string, newItems: any[], newTotal: number, newStatus: string): Promise<boolean> => {
-    const { error } = await supabase.from('orders').update({ items: newItems, total_amount: newTotal, status: newStatus }).eq('id', orderId);
-    if (error) { console.error("Gagal update order items:", error); return false; }
+    // 1. Ambil data order lama untuk mendapatkan detail customer (toko, via, dll)
+    // Kita ambil salah satu row saja karena detail customer sama untuk satu resi
+    const { data: oldData } = await supabase.from('orders').select('*').eq('resi', orderId).limit(1).single();
+    
+    if (!oldData) return false;
+
+    // 2. Hapus semua baris dengan resi tersebut
+    const { error: delError } = await supabase.from('orders').delete().eq('resi', orderId);
+    if (delError) {
+        console.error("Gagal hapus order lama:", delError);
+        return false;
+    }
+
+    // 3. Insert baris baru dengan item yang tersisa
+    const rows = newItems.map((item: any) => ({
+        tanggal: oldData.tanggal, // Pertahankan tanggal asli
+        resi: orderId,
+        toko: oldData.toko,
+        ecommerce: oldData.ecommerce,
+        customer: oldData.customer,
+        part_number: item.partNumber,
+        nama_barang: item.name,
+        quantity: item.cartQuantity,
+        harga_satuan: item.customPrice || item.price,
+        harga_total: (item.customPrice || item.price) * item.cartQuantity,
+        status: newStatus
+    }));
+
+    if (rows.length > 0) {
+        const { error: insError } = await supabase.from('orders').insert(rows);
+        if (insError) {
+            console.error("Gagal insert order baru:", insError);
+            return false;
+        }
+    }
+
     return true;
 };
 
-export const fetchOrders = async (): Promise<Order[]> => { const { data } = await supabase.from('orders').select('*').order('timestamp', { ascending: false }).limit(100); return (data || []).map((o: any) => ({ id: o.id, customerName: o.customer_name, items: o.items, totalAmount: Number(o.total_amount), status: o.status, timestamp: Number(o.timestamp), keterangan: o.keterangan })); };
-export const saveOrder = async (order: Order): Promise<boolean> => { const { error } = await supabase.from('orders').insert([{ id: order.id, customer_name: order.customerName, items: order.items, total_amount: order.totalAmount, status: order.status, timestamp: order.timestamp, keterangan: order.keterangan }]); return !error; };
-export const updateOrderStatusService = async (id: string, status: string, timestamp?: number): Promise<boolean> => { const updateData: any = { status }; if (timestamp) { updateData.timestamp = timestamp; } const { error } = await supabase.from('orders').update(updateData).eq('id', id); return !error; };
 export const fetchChatSessions = async (): Promise<ChatSession[]> => { const { data } = await supabase.from('chat_sessions').select('*'); return (data || []).map((c: any) => ({ customerId: c.customer_id, customerName: c.customer_name, messages: c.messages, lastMessage: c.last_message, lastTimestamp: c.last_timestamp, unreadAdminCount: c.unread_admin_count, unreadUserCount: c.unread_user_count })); };
 export const saveChatSession = async (s: ChatSession): Promise<boolean> => { const { error } = await supabase.from('chat_sessions').upsert([{ customer_id: s.customerId, customer_name: s.customerName, messages: s.messages, last_message: s.lastMessage, last_timestamp: s.lastTimestamp, unread_admin_count: s.unreadAdminCount, unread_user_count: s.unreadUserCount }]); return !error; };
 export const fetchPriceHistoryBySource = async (partNumber: string) => { const { data, error } = await supabase.from('barang_masuk').select('ecommerce, harga_satuan, created_at').eq('part_number', partNumber).order('created_at', { ascending: false }); if (error || !data) return []; const uniqueSources: Record<string, any> = {}; data.forEach((item: any) => { const sourceName = item.ecommerce || 'Unknown'; if (!uniqueSources[sourceName]) { uniqueSources[sourceName] = { source: sourceName, price: Number(item.harga_satuan), date: item.created_at ? new Date(item.created_at).toLocaleDateString('id-ID') : '-' }; } }); return Object.values(uniqueSources); };
