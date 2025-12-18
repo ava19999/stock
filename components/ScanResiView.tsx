@@ -1,14 +1,14 @@
 // FILE: src/components/ScanResiView.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { ScanBarcode, Loader2, Save, Upload, FileSpreadsheet, ChevronDown, Check } from 'lucide-react';
+import { ScanBarcode, Loader2, Save, ChevronDown, Check, Upload } from 'lucide-react';
 import { compressImage } from '../utils';
 import { ResiAnalysisResult, analyzeResiImage } from '../services/geminiService';
 import { addBarangKeluar, fetchInventory } from '../services/supabaseService';
 
-// Daftar Toko Internal (Gudang/Cabang)
+// Daftar Toko Internal
 const STORE_LIST = ['MJM', 'LARIS', 'BJW'];
 
-// Daftar Marketplace Baru
+// Daftar Marketplace
 const MARKETPLACES = ['Shopee', 'Tiktok', 'Tokopedia'];
 
 interface ScanResiProps {
@@ -22,7 +22,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
   const [barcodeInput, setBarcodeInput] = useState('');
   const [selectedStore, setSelectedStore] = useState(STORE_LIST[0]);
   
-  // State untuk Marketplace Popup
+  // State untuk Marketplace
   const [selectedMarketplace, setSelectedMarketplace] = useState('Shopee');
   const [showMarketplacePopup, setShowMarketplacePopup] = useState(false);
 
@@ -57,7 +57,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
       if (analysis && (analysis.resi || analysis.items)) {
         setResult({
             ...analysis,
-            ecommerce: selectedMarketplace // Override dengan marketplace yang dipilih
+            ecommerce: selectedMarketplace
         });
       } else {
         alert("Barcode tidak terbaca.");
@@ -70,12 +70,12 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     }
   };
 
-  // Handler Placeholder untuk Upload Excel
+  // Handler Upload Excel (Dipicu saat klik nama Marketplace)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      alert(`Fitur upload ${file.name} (Excel/CSV) siap diintegrasikan.`);
-      // Di sini logika parsing Excel bisa dimasukkan kembali jika diperlukan
+      alert(`Mengupload data ${selectedMarketplace} dari file: ${file.name}`);
+      // Logika parsing Excel bisa dimasukkan di sini
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -93,7 +93,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     setResult({
       resi: code,
       date: new Date().toLocaleDateString('id-ID'),
-      ecommerce: selectedMarketplace, // Menggunakan Marketplace yang dipilih (Shopee/Tiktok/dll)
+      ecommerce: selectedMarketplace,
       customerName: '',
       items: []
     });
@@ -110,9 +110,9 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
         const matchedItem = inventory.find(inv => inv.name.toLowerCase().includes(item.name?.toLowerCase() || ''));
         await addBarangKeluar({
           tanggal: today,
-          kodeToko: selectedStore.substring(0, 3).toUpperCase(), // Tetap pakai MJM/LARIS untuk kode toko
+          kodeToko: selectedStore.substring(0, 3).toUpperCase(),
           tempo: 'MJM',
-          ecommerce: selectedMarketplace, // Simpan marketplace sebagai sumber order
+          ecommerce: selectedMarketplace,
           customer: result.customerName || 'GUEST',
           partNumber: matchedItem?.partNumber || '-',
           name: item.name,
@@ -131,28 +131,55 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     barcodeInputRef.current?.focus();
   };
 
+  // Helper untuk warna badge marketplace
+  const getMarketplaceColor = (mp: string) => {
+    switch(mp) {
+        case 'Shopee': return 'bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200';
+        case 'Tokopedia': return 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200';
+        case 'Tiktok': return 'bg-black text-white border-gray-800 hover:bg-gray-800';
+        default: return 'bg-gray-100 text-gray-700 border-gray-200';
+    }
+  };
+
   return (
     <div className="w-full space-y-4">
-      {/* TOOLBAR SCANNER (Marketplace + Store + Input + Upload + Camera) */}
+      {/* TOOLBAR SCANNER MINIMALIS */}
       <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-200 flex flex-col md:flex-row gap-3 items-center">
         
-        {/* GROUP 1: Selectors (Marketplace & Toko) */}
+        {/* GROUP 1: Selectors & Upload Trigger */}
         <div className="flex items-center gap-2 w-full md:w-auto">
-            {/* Marketplace Selector (Popup Style) */}
-            <div className="relative">
-                <div className="flex items-center bg-orange-50 border border-orange-200 rounded-md overflow-hidden">
-                    <div className="px-3 py-2.5 text-sm font-bold text-orange-700 bg-orange-100 min-w-[80px] text-center">
-                        {selectedMarketplace}
-                    </div>
-                    <button 
-                        onClick={() => setShowMarketplacePopup(!showMarketplacePopup)}
-                        className="px-2 py-3 bg-white hover:bg-gray-50 border-l border-orange-200 flex items-center justify-center transition-colors"
-                    >
-                        <ChevronDown className="w-4 h-4 text-gray-500" />
-                    </button>
-                </div>
+            
+            {/* Marketplace Split Button */}
+            <div className="relative flex shadow-sm rounded-md">
+                {/* Tombol KIRI: Klik untuk Upload Excel */}
+                <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`flex items-center gap-2 px-3 py-2.5 text-sm font-bold border rounded-l-md transition-colors ${getMarketplaceColor(selectedMarketplace)}`}
+                    title={`Upload Excel ${selectedMarketplace}`}
+                >
+                    <Upload size={14} />
+                    {selectedMarketplace}
+                </button>
+                
+                {/* Tombol KANAN: Klik untuk Ganti Marketplace */}
+                <button 
+                    onClick={() => setShowMarketplacePopup(!showMarketplacePopup)}
+                    className="px-2 bg-white border-y border-r border-gray-300 rounded-r-md hover:bg-gray-50 flex items-center justify-center"
+                    title="Ganti Marketplace"
+                >
+                    <ChevronDown className="w-4 h-4 text-gray-500" />
+                </button>
 
-                {/* Popup Content */}
+                {/* Input File Tersembunyi */}
+                <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                />
+
+                {/* Popup Marketplace */}
                 {showMarketplacePopup && (
                     <div className="absolute top-full left-0 mt-1 w-48 bg-white rounded-lg shadow-xl border border-gray-100 z-50 animate-in fade-in zoom-in-95">
                         <div className="py-1">
@@ -160,7 +187,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                                 <button
                                     key={mp}
                                     onClick={() => { setSelectedMarketplace(mp); setShowMarketplacePopup(false); }}
-                                    className={`w-full text-left px-4 py-2 text-sm flex items-center justify-between hover:bg-gray-50 ${selectedMarketplace === mp ? 'text-orange-600 font-bold bg-orange-50' : 'text-gray-700'}`}
+                                    className={`w-full text-left px-4 py-2 text-sm flex items-center justify-between hover:bg-gray-50 ${selectedMarketplace === mp ? 'text-blue-600 font-bold bg-blue-50' : 'text-gray-700'}`}
                                 >
                                     {mp}
                                     {selectedMarketplace === mp && <Check className="w-3 h-3"/>}
@@ -171,7 +198,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                 )}
             </div>
 
-            {/* Store Selector (MJM/LARIS) - Tetap ada tapi compact */}
+            {/* Store Selector (MJM/LARIS) */}
             <select
                 value={selectedStore}
                 onChange={(e) => setSelectedStore(e.target.value)}
@@ -183,7 +210,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
             </select>
         </div>
 
-        {/* GROUP 2: Input Barcode */}
+        {/* GROUP 2: Input Barcode (Scan Manual) */}
         <div className="relative flex-grow w-full">
           <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
             <ScanBarcode className="w-5 h-5 text-gray-400" />
@@ -195,51 +222,31 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
             onChange={(e) => setBarcodeInput(e.target.value)}
             onKeyDown={handleBarcodeInput}
             className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-md focus:ring-purple-500 focus:border-purple-500 block w-full pl-10 p-2.5 font-mono"
-            placeholder="Scan Resi..."
+            placeholder={`Scan Resi ${selectedMarketplace}...`}
             autoComplete="off"
           />
         </div>
 
-        {/* GROUP 3: Action Buttons (Upload & Camera) */}
-        <div className="flex gap-2 w-full md:w-auto shrink-0">
-            {/* Tombol Upload Excel/CSV (Di antara Resi & Kamera) */}
-            <button
-                onClick={() => fileInputRef.current?.click()}
-                className="text-gray-700 bg-gray-100 hover:bg-gray-200 border border-gray-300 focus:ring-4 focus:ring-gray-100 font-medium rounded-md text-sm px-3 py-2.5 flex items-center justify-center gap-2"
-                title="Upload Excel/CSV"
-            >
-                <FileSpreadsheet className="w-5 h-5" />
-                <span className="hidden lg:inline">Upload</span>
-            </button>
-            <input
-                type="file"
-                ref={fileInputRef}
-                accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-                className="hidden"
-                onChange={handleFileUpload}
-            />
-
-            {/* Tombol Kamera */}
-            <button
-                onClick={() => cameraInputRef.current?.click()}
-                disabled={analyzing}
-                className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium rounded-md text-sm px-4 py-2.5 flex-1 md:flex-none flex items-center justify-center gap-2 min-w-[100px]"
-            >
-                {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanBarcode className="w-4 h-4" />}
-                <span>Kamera</span>
-            </button>
-            <input
-                type="file"
-                ref={cameraInputRef}
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={handleCameraCapture}
-            />
-        </div>
+        {/* GROUP 3: Tombol Kamera */}
+        <button
+            onClick={() => cameraInputRef.current?.click()}
+            disabled={analyzing}
+            className="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium rounded-md text-sm px-4 py-2.5 w-full md:w-auto flex items-center justify-center gap-2"
+        >
+            {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanBarcode className="w-4 h-4" />}
+            <span className="hidden md:inline">Kamera</span>
+        </button>
+        <input
+            type="file"
+            ref={cameraInputRef}
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handleCameraCapture}
+        />
       </div>
 
-      {/* HASIL SCAN (NOTIFICATION STYLE) */}
+      {/* HASIL SCAN */}
       {result && (
         <div className="bg-purple-50 border-l-4 border-purple-500 p-4 rounded-md shadow-sm animate-in fade-in slide-in-from-top-2 flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="flex-grow">
