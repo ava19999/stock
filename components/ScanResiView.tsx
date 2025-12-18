@@ -1,11 +1,11 @@
 // FILE: src/components/ScanResiView.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { ScanBarcode, Loader2, ChevronDown, Check, Upload, FileSpreadsheet, Calendar, AlertCircle, Send, Square, CheckSquare } from 'lucide-react';
+import { ScanBarcode, Loader2, ChevronDown, Check, Upload, FileSpreadsheet, Calendar, AlertCircle, Send, Square, CheckSquare, Search } from 'lucide-react';
 import { compressImage } from '../utils';
 import { ResiAnalysisResult, analyzeResiImage } from '../services/geminiService';
-import { addScanResiLog, fetchScanResiLogs, updateScanResiFromExcel, processShipmentToOrders } from '../services/supabaseService'; 
-import { ScanResiLog } from '../types';
-import * as XLSX from 'xlsx'; // Pastikan install: npm install xlsx
+import { addScanResiLog, fetchScanResiLogs, updateScanResiFromExcel, processShipmentToOrders, fetchInventory } from '../services/supabaseService'; 
+import { ScanResiLog, InventoryItem } from '../types';
+import * as XLSX from 'xlsx';
 
 // Daftar Toko Internal
 const STORE_LIST = ['MJM', 'LARIS', 'BJW'];
@@ -30,9 +30,8 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
   const [isUploading, setIsUploading] = useState(false);
   const [isProcessingShipment, setIsProcessingShipment] = useState(false);
 
-  // State Data Tabel
+  // State Data
   const [scanLogs, setScanLogs] = useState<ScanResiLog[]>([]);
-  // State Checkbox (Resi yang dipilih/siap kirim)
   const [selectedResis, setSelectedResis] = useState<string[]>([]);
 
   // Refs
@@ -45,13 +44,11 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     setTimeout(() => { barcodeInputRef.current?.focus(); }, 100);
   }, []);
 
-  // Efek samping: Auto-Check jika status "Siap Kirim" saat data dimuat/berubah
+  // Auto-Check jika status "Siap Kirim"
   useEffect(() => {
     const autoChecked = scanLogs
         .filter(log => log.status === 'Siap Kirim')
         .map(log => log.resi);
-    
-    // Gabungkan dengan manual selection (opsional, disini kita overwrite agar sinkron status)
     setSelectedResis(autoChecked);
   }, [scanLogs]);
 
@@ -101,6 +98,19 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     }
   };
 
+  // --- HELPER: PARSING ANGKA INDONESIA ---
+  // Mengubah "105.000" menjadi 105000 (bukan 105)
+  const parseIndonesianNumber = (val: any): number => {
+      if (typeof val === 'number') return val;
+      if (typeof val === 'string') {
+          // Hapus "Rp", spasi, dan TITIK (pemisah ribuan Indonesia)
+          // Ganti KOMA dengan TITIK (desimal)
+          const clean = val.replace(/[Rp\s.]/g, '').replace(',', '.');
+          return parseFloat(clean) || 0;
+      }
+      return 0;
+  };
+
   // --- LOGIKA PARSING EXCEL ---
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -108,6 +118,17 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
 
     setIsUploading(true);
     
+    // 1. Fetch Inventory untuk pencarian Part Number otomatis
+    let inventoryMap = new Map<string, string>(); // Key: Nama Lowercase, Value: PartNumber
+    try {
+        const inventoryData = await fetchInventory();
+        inventoryData.forEach(item => {
+            if(item.name) inventoryMap.set(item.name.toLowerCase().trim(), item.partNumber);
+        });
+    } catch (err) {
+        console.error("Gagal ambil inventory untuk matching:", err);
+    }
+
     const reader = new FileReader();
     reader.onload = async (evt) => {
         try {
@@ -115,54 +136,66 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
             const wb = XLSX.read(bstr, { type: 'binary' });
             const wsname = wb.SheetNames[0];
             const ws = wb.Sheets[wsname];
-            // Konversi ke JSON
             const data: any[] = XLSX.utils.sheet_to_json(ws);
 
-            // Mapping Data Excel ke Struktur Database
-            // Sesuaikan "Key" di bawah ini dengan Header di Excel Anda
             const updates = data.map((row: any) => {
-                // Cari key yang mungkin (Case Insensitive mapping logic simple)
+                // Fungsi Helper Pencari Kolom (Case Insensitive)
                 const getVal = (keys: string[]) => {
                     for (let k of keys) {
                         if (row[k] !== undefined) return row[k];
-                        // Coba lowercase
                         const lowerKey = Object.keys(row).find(rk => rk.toLowerCase() === k.toLowerCase());
                         if (lowerKey) return row[lowerKey];
                     }
                     return null;
                 };
 
+                // A. Mapping Kolom
                 const resi = getVal(['No. Resi', 'No. Pesanan', 'Resi', 'Order ID']);
-                const username = getVal(['Username', 'Nama Pembeli', 'Pembeli', 'Customer']);
-                const partNo = getVal(['No. Referensi', 'SKU Induk', 'SKU', 'Part Number', 'Part No']);
+                
+                // Tambahkan variasi nama kolom username
+                const username = getVal(['Username (Pembeli)', 'Username Pembeli', 'Nama Pengguna', 'Username', 'Pembeli', 'Nama Penerima']);
+                
+                // Hapus 'SKU' agar tidak salah ambil. Prioritaskan 'No. Referensi' (biasanya Part No di Shopee)
+                let partNo = getVal(['No. Referensi', 'Part Number', 'Part No', 'Kode Barang']);
+                
                 const produk = getVal(['Nama Produk', 'Nama Barang', 'Product Name']);
                 const qty = getVal(['Jumlah', 'Qty', 'Quantity']);
-                const harga = getVal(['Harga Awal', 'Harga Satuan', 'Price']);
+                const harga = getVal(['Harga Awal', 'Harga Satuan', 'Price', 'Harga']);
+
+                // B. Logika Pencarian Part Number (Jika Excel kosong/salah)
+                const produkNameClean = String(produk || '').toLowerCase().trim();
                 
-                // Hitung total
-                const qtyNum = Number(qty) || 0;
-                const hargaNum = Number(harga) || 0;
+                // Jika partNo kosong TAPI ada nama produk, coba cari di database
+                if ((!partNo || partNo === '-') && produkNameClean) {
+                    const foundPartNo = inventoryMap.get(produkNameClean);
+                    if (foundPartNo) {
+                        partNo = foundPartNo; // Ketemu di database!
+                    }
+                }
+
+                // C. Parsing Angka (Harga & Qty)
+                const qtyNum = parseIndonesianNumber(qty);
+                const hargaNum = parseIndonesianNumber(harga);
 
                 if (resi) {
                     return {
                         resi: String(resi).trim(),
-                        customer: username || '-',
-                        part_number: partNo || null, // Kosongkan jika tidak ada
-                        nama_barang: produk || '-', // Nama dari Excel
+                        customer: username || '-', // Username pembeli
+                        part_number: partNo || null, // Kosong jika tidak ketemu
+                        nama_barang: produk || '-',
                         quantity: qtyNum,
                         harga_satuan: hargaNum,
                         harga_total: qtyNum * hargaNum
                     };
                 }
                 return null;
-            }).filter(item => item !== null); // Hapus baris yang tidak ada resinya
+            }).filter(item => item !== null);
 
-            // Kirim update ke Database
             if (updates.length > 0) {
                 const success = await updateScanResiFromExcel(updates);
                 if (success) {
-                    alert(`Berhasil memproses ${updates.length} data dari Excel.`);
-                    await loadScanLogs(); // Reload tabel untuk lihat hasil matching
+                    alert(`Berhasil memproses ${updates.length} data. Harga & Part Number telah disesuaikan.`);
+                    await loadScanLogs();
                 } else {
                     alert("Gagal mengupdate database.");
                 }
@@ -185,28 +218,23 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
   const handleProcessKirim = async () => {
       if (selectedResis.length === 0) return;
       
-      const confirmMsg = `Proses ${selectedResis.length} resi menjadi Terjual?\n\nItem akan masuk ke Manajemen Pesanan dengan nama sesuai Base Inventory.`;
+      const confirmMsg = `Proses ${selectedResis.length} resi menjadi Terjual?\n\nData akan masuk ke Manajemen Pesanan.`;
       if (!window.confirm(confirmMsg)) return;
 
       setIsProcessingShipment(true);
-      
-      // Filter log lengkap berdasarkan resi yang diceklis
       const logsToProcess = scanLogs.filter(log => selectedResis.includes(log.resi));
-      
       const success = await processShipmentToOrders(logsToProcess);
       
       if (success) {
           alert("Berhasil diproses kirim!");
-          await loadScanLogs(); // Reload (Status akan berubah jadi 'Terjual' & uncheck)
-          setSelectedResis([]); // Clear selection
+          await loadScanLogs();
+          setSelectedResis([]);
       } else {
           alert("Terjadi kesalahan saat memproses.");
       }
-      
       setIsProcessingShipment(false);
   };
 
-  // Toggle Checkbox Manual
   const toggleSelect = (resi: string) => {
       setSelectedResis(prev => 
         prev.includes(resi) ? prev.filter(r => r !== resi) : [...prev, resi]
@@ -231,7 +259,6 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     }
   };
 
-  // Hitung statistik
   const readyToSendCount = selectedResis.length;
 
   return (
@@ -246,7 +273,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                         onClick={() => fileInputRef.current?.click()}
                         disabled={isUploading}
                         className={`flex items-center gap-2 px-3 py-2.5 text-sm font-bold border rounded-l-lg transition-colors flex-1 md:w-32 justify-center ${getMarketplaceColor(selectedMarketplace)}`}
-                        title="Upload Excel untuk mencocokkan data"
+                        title="Upload Excel (Format: .xlsx, .xls, .csv)"
                     >
                         {isUploading ? <Loader2 size={16} className="animate-spin"/> : <FileSpreadsheet size={16} />}
                         {isUploading ? 'Loading...' : selectedMarketplace}
@@ -258,7 +285,6 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                         <ChevronDown className="w-4 h-4 text-gray-500" />
                     </button>
 
-                    {/* Popup Marketplace */}
                     {showMarketplacePopup && (
                         <div className="absolute top-full left-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-gray-100 z-50 animate-in fade-in zoom-in-95 overflow-hidden">
                             {MARKETPLACES.map((mp) => (
@@ -319,7 +345,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
 
       {/* --- AREA TOMBOL PROSES & TABEL --- */}
       <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
-        {/* Header Tabel dengan Tombol Proses */}
+        {/* Header Tabel */}
         <div className="px-5 py-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
             <div className="flex items-center gap-4">
                 <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2">
@@ -347,7 +373,6 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                 <thead className="bg-white sticky top-0 z-10 shadow-sm">
                     <tr>
                         <th className="px-4 py-3 border-b border-gray-100 w-10 text-center">
-                            {/* Check All (Optional implementation) */}
                             <CheckSquare size={16} className="text-gray-300 mx-auto"/>
                         </th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Tanggal</th>
@@ -378,14 +403,15 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                             const dateObj = new Date(log.tanggal);
                             const displayDate = dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
                             
-                            // Logika Status dan Checklist
                             const isReady = log.status === 'Siap Kirim';
                             const isSold = log.status === 'Terjual';
                             const isSelected = selectedResis.includes(log.resi);
+                            
+                            // Highlight jika part number ketemu dari database (bukan input manual/excel murni)
+                            const hasPartNumber = !!log.part_number;
 
                             return (
                                 <tr key={log.id || idx} className={`transition-colors ${isSold ? 'bg-gray-50 opacity-60' : (isSelected ? 'bg-blue-50' : 'hover:bg-gray-50')}`}>
-                                    {/* Checkbox */}
                                     <td className="px-4 py-3 text-center">
                                         {!isSold && (
                                             <button onClick={() => toggleSelect(log.resi)} disabled={!isReady} className="focus:outline-none">
@@ -403,14 +429,21 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                                     <td className="px-4 py-3 font-bold text-gray-900 font-mono select-all">{log.resi}</td>
                                     <td className="px-4 py-3 text-gray-600 font-semibold">{log.toko || '-'}</td>
                                     <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-gray-100 text-gray-600 border-gray-200">{log.ecommerce}</span></td>
-                                    <td className="px-4 py-3 text-gray-700 font-medium">{log.customer || '-'}</td>
-                                    <td className="px-4 py-3 text-gray-500 font-mono">{log.part_number || '-'}</td>
+                                    
+                                    {/* Pelanggan / Username Pembeli */}
+                                    <td className="px-4 py-3 text-gray-800 font-medium">{log.customer || '-'}</td>
+                                    
+                                    {/* Part Number (Tampilkan icon search jika hasil lookup) */}
+                                    <td className="px-4 py-3 font-mono text-gray-700 flex items-center gap-1">
+                                        {log.part_number || <span className="text-red-300">-</span>}
+                                        {hasPartNumber && <Search size={10} className="text-blue-300" title="Terdeteksi dari Database"/>}
+                                    </td>
+                                    
                                     <td className="px-4 py-3 text-gray-500 truncate max-w-[150px]" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td>
                                     <td className="px-4 py-3 text-gray-500 text-center">{log.quantity || '-'}</td>
                                     <td className="px-4 py-3 text-gray-500 text-right">{log.harga_satuan ? `Rp${log.harga_satuan.toLocaleString('id-ID')}` : '-'}</td>
                                     <td className="px-4 py-3 text-gray-800 font-bold text-right">{log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}</td>
                                     
-                                    {/* Status Column */}
                                     <td className="px-4 py-3 text-center whitespace-nowrap">
                                         {isSold ? (
                                             <span className="inline-flex items-center gap-1 text-gray-500 font-bold bg-gray-200 px-2 py-0.5 rounded-full text-[10px]">
