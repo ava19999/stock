@@ -1,9 +1,9 @@
 // FILE: src/components/ScanResiView.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { ScanBarcode, Loader2, ChevronDown, Check, Upload, FileSpreadsheet, Calendar, AlertCircle, Send, Square, CheckSquare, Search } from 'lucide-react';
+import { ScanBarcode, Loader2, ChevronDown, Check, Upload, FileSpreadsheet, Calendar, AlertCircle, Send, Square, CheckSquare, Search, Edit2 } from 'lucide-react';
 import { compressImage } from '../utils';
 import { ResiAnalysisResult, analyzeResiImage } from '../services/geminiService';
-import { addScanResiLog, fetchScanResiLogs, updateScanResiFromExcel, processShipmentToOrders, fetchInventory } from '../services/supabaseService'; 
+import { addScanResiLog, fetchScanResiLogs, updateScanResiFromExcel, processShipmentToOrders, fetchInventory, updateScanResiLogField } from '../services/supabaseService'; 
 import { ScanResiLog } from '../types';
 import * as XLSX from 'xlsx';
 
@@ -98,26 +98,33 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     }
   };
 
-  // --- HELPER: PARSING ANGKA INDONESIA (FIXED) ---
+  // --- HELPER: UPDATE FIELD MANUAL (HANYA PART NUMBER) ---
+  const handlePartNumberChange = async (id: number, value: string) => {
+      // 1. Update State Lokal (Agar UI responsif)
+      setScanLogs(prev => prev.map(log => {
+          if (log.id === id) {
+              const updated = { ...log, part_number: value };
+              // Cek status baru: Jika semua lengkap -> Siap Kirim
+              const isComplete = updated.part_number && updated.nama_barang && updated.quantity;
+              updated.status = isComplete ? 'Siap Kirim' : 'Pending';
+              return updated;
+          }
+          return log;
+      }));
+
+      // 2. Simpan ke Database (Background)
+      if (id) {
+        await updateScanResiLogField(id, 'part_number', value);
+      }
+  };
+
+  // --- HELPER: PARSING ANGKA INDONESIA ---
   const parseIndonesianNumber = (val: any): number => {
       if (val === null || val === undefined || val === '') return 0;
-
-      // Ubah ke string dulu untuk memastikan format
-      // Ini penting karena Excel mungkin mengirim angka 105 jika formatnya salah
       let strVal = String(val);
-
-      // 1. Hapus "Rp", "IDR", dan spasi
       strVal = strVal.replace(/[RpIDR\s]/gi, '');
-
-      // 2. Hapus TITIK (.) yang digunakan sebagai pemisah ribuan
-      // Contoh: "105.000" menjadi "105000"
-      // Contoh salah baca Excel: "105.000" (string) -> tetap string
-      strVal = strVal.split('.').join('');
-
-      // 3. Ganti KOMA (,) menjadi TITIK (.) jika ada desimal
-      // Contoh: "100,50" -> "100.50"
-      strVal = strVal.replace(',', '.');
-
+      strVal = strVal.split('.').join(''); // Hapus pemisah ribuan
+      strVal = strVal.replace(',', '.');   // Koma jadi desimal
       const result = parseFloat(strVal);
       return isNaN(result) ? 0 : result;
   };
@@ -129,15 +136,20 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
 
     setIsUploading(true);
     
-    // 1. Fetch Inventory untuk pencarian Part Number otomatis
+    // Fetch Inventory untuk pencarian Part Number otomatis
     let inventoryMap = new Map<string, string>(); 
+    let allPartNumbers: string[] = [];
+
     try {
         const inventoryData = await fetchInventory();
         inventoryData.forEach(item => {
             if(item.name) inventoryMap.set(item.name.toLowerCase().trim(), item.partNumber);
+            if(item.partNumber) allPartNumbers.push(item.partNumber);
         });
+        // Sort part number dari terpanjang untuk akurasi pencarian
+        allPartNumbers.sort((a, b) => b.length - a.length);
     } catch (err) {
-        console.error("Gagal ambil inventory untuk matching:", err);
+        console.error("Gagal ambil inventory:", err);
     }
 
     const reader = new FileReader();
@@ -148,8 +160,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
             const wsname = wb.SheetNames[0];
             const ws = wb.Sheets[wsname];
             
-            // PENTING: Gunakan { raw: false } agar membaca data SEBAGAI TEKS yang tertampil (formatted text)
-            // Ini mencegah "105.000" dibaca sebagai 105.
+            // Baca raw: false agar "105.000" dibaca string "105.000", bukan angka 105
             const data: any[] = XLSX.utils.sheet_to_json(ws, { raw: false });
 
             const updates = data.map((row: any) => {
@@ -164,22 +175,31 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
 
                 // A. Mapping Kolom
                 const resi = getVal(['No. Resi', 'No. Pesanan', 'Resi', 'Order ID']);
-                const username = getVal(['Username (Pembeli)', 'Username Pembeli', 'Nama Pengguna', 'Username', 'Pembeli', 'Nama Penerima']);
+                const username = getVal(['Username (Pembeli)', 'Username Pembeli', 'Username', 'Pembeli', 'Nama Penerima']);
                 let partNo = getVal(['No. Referensi', 'Part Number', 'Part No', 'Kode Barang']);
                 const produk = getVal(['Nama Produk', 'Nama Barang', 'Product Name']);
                 const qty = getVal(['Jumlah', 'Qty', 'Quantity']);
                 const harga = getVal(['Harga Awal', 'Harga Satuan', 'Price', 'Harga', 'Harga Variasi']);
 
-                // B. Logika Pencarian Part Number
-                const produkNameClean = String(produk || '').toLowerCase().trim();
-                if ((!partNo || partNo === '-') && produkNameClean) {
-                    const foundPartNo = inventoryMap.get(produkNameClean);
-                    if (foundPartNo) {
-                        partNo = foundPartNo; 
+                // B. Pencarian Part Number Cerdas
+                const produkNameClean = String(produk || '').trim();
+                const produkLower = produkNameClean.toLowerCase();
+
+                // Jika Part No kosong, cari di database berdasarkan Nama Produk
+                if ((!partNo || partNo === '-' || partNo === '') && produkNameClean) {
+                    // 1. Cek Nama Produk Sama Persis
+                    const foundByExactName = inventoryMap.get(produkLower);
+                    if (foundByExactName) {
+                        partNo = foundByExactName;
+                    } else {
+                        // 2. Cek apakah Nama Produk MENGANDUNG Part Number
+                        const foundInText = allPartNumbers.find(pn => produkLower.includes(pn.toLowerCase()));
+                        if (foundInText) {
+                            partNo = foundInText;
+                        }
                     }
                 }
 
-                // C. Parsing Angka (Harga & Qty) menggunakan fungsi yang sudah diperbaiki
                 const qtyNum = parseIndonesianNumber(qty);
                 const hargaNum = parseIndonesianNumber(harga);
 
@@ -191,7 +211,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                         nama_barang: produk || '-',
                         quantity: qtyNum,
                         harga_satuan: hargaNum,
-                        harga_total: qtyNum * hargaNum // Total otomatis
+                        harga_total: qtyNum * hargaNum 
                     };
                 }
                 return null;
@@ -200,7 +220,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
             if (updates.length > 0) {
                 const success = await updateScanResiFromExcel(updates);
                 if (success) {
-                    alert(`Berhasil memproses ${updates.length} data. Harga & Part Number telah disesuaikan.`);
+                    alert(`Berhasil memproses ${updates.length} data. Part Number otomatis terisi jika ditemukan.`);
                     await loadScanLogs();
                 } else {
                     alert("Gagal mengupdate database.");
@@ -220,11 +240,9 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
     reader.readAsBinaryString(file);
   };
 
-  // --- LOGIKA PROSES KIRIM ---
   const handleProcessKirim = async () => {
       if (selectedResis.length === 0) return;
-      
-      const confirmMsg = `Proses ${selectedResis.length} resi menjadi Terjual?\n\nData akan masuk ke Manajemen Pesanan.`;
+      const confirmMsg = `Proses ${selectedResis.length} resi menjadi Terjual?`;
       if (!window.confirm(confirmMsg)) return;
 
       setIsProcessingShipment(true);
@@ -360,7 +378,6 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                 <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{scanLogs.length} Item</span>
             </div>
 
-            {/* TOMBOL PROSES KIRIM */}
             {readyToSendCount > 0 && (
                 <button
                     onClick={handleProcessKirim}
@@ -375,7 +392,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
         
         {/* Container Tabel */}
         <div className="flex-1 overflow-auto">
-            <table className="w-full text-left border-collapse min-w-[1100px]">
+            <table className="w-full text-left border-collapse min-w-[1200px]">
                 <thead className="bg-white sticky top-0 z-10 shadow-sm">
                     <tr>
                         <th className="px-4 py-3 border-b border-gray-100 w-10 text-center">
@@ -386,8 +403,8 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Toko</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Via</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Pelanggan</th>
-                        <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Part.No</th>
-                        <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Barang (Excel)</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Part.No (Edit)</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">Barang</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 text-center">Qty</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 text-right">Satuan</th>
                         <th className="px-4 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 text-right">Total</th>
@@ -435,11 +452,24 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                                     <td className="px-4 py-3 text-gray-600 font-semibold">{log.toko || '-'}</td>
                                     <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-gray-100 text-gray-600 border-gray-200">{log.ecommerce}</span></td>
                                     
+                                    {/* Pelanggan (Text Only) */}
                                     <td className="px-4 py-3 text-gray-800 font-medium">{log.customer || '-'}</td>
                                     
-                                    <td className="px-4 py-3 font-mono text-gray-700 flex items-center gap-1">
-                                        {log.part_number || <span className="text-red-300">-</span>}
-                                        {hasPartNumber && <Search size={10} className="text-blue-300" title="Terdeteksi dari Database"/>}
+                                    {/* --- INPUT EDITABLE: PART NUMBER --- */}
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center gap-1">
+                                            {!isSold ? (
+                                                <input 
+                                                    className="bg-transparent border-b border-transparent focus:border-blue-500 outline-none w-full font-mono text-gray-700 placeholder-red-200"
+                                                    placeholder="Part Number"
+                                                    value={log.part_number || ''}
+                                                    onChange={(e) => handlePartNumberChange(log.id!, e.target.value)}
+                                                />
+                                            ) : (
+                                                <span className="font-mono text-gray-700">{log.part_number}</span>
+                                            )}
+                                            {hasPartNumber && <Search size={10} className="text-blue-300 flex-shrink-0" title="Terdeteksi Otomatis"/>}
+                                        </div>
                                     </td>
                                     
                                     <td className="px-4 py-3 text-gray-500 truncate max-w-[150px]" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td>
@@ -458,7 +488,7 @@ export const ScanResiView: React.FC<ScanResiProps> = ({ onSave, isProcessing }) 
                                             </span>
                                         ) : (
                                             <span className="inline-flex items-center gap-1 text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100 text-[10px]">
-                                                <AlertCircle size={10}/> Data Kosong
+                                                <Edit2 size={10}/> Data Kosong
                                             </span>
                                         )}
                                     </td>

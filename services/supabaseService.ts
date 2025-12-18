@@ -640,7 +640,40 @@ export const updateScanResiFromExcel = async (updates: any[]): Promise<boolean> 
     }
 };
 
-// 2. Proses Kirim (Pindah ke Orders + Update Status)
+// 2. Fungsi Update Single Field (BARU - Sesuai request View)
+export const updateScanResiLogField = async (id: number, field: string, value: any): Promise<boolean> => {
+    // 1. Update Field Target
+    const { data, error } = await supabase
+        .from('scan_resi')
+        .update({ [field]: value })
+        .eq('id', id)
+        .select()
+        .single();
+
+    if (error) {
+        console.error(`Gagal update field ${field}:`, error);
+        return false;
+    }
+
+    // 2. Auto-Update Status (Sinkronisasi dengan Logika UI)
+    // Jika Part Number, Nama Barang, dan Qty terisi, ubah status jadi "Siap Kirim"
+    if (data) {
+        const isComplete = data.part_number && data.nama_barang && data.quantity;
+        const newStatus = isComplete ? 'Siap Kirim' : 'Pending';
+
+        // Hanya update jika status berubah dan belum "Terjual"
+        if (data.status !== newStatus && data.status !== 'Terjual') {
+            await supabase
+                .from('scan_resi')
+                .update({ status: newStatus })
+                .eq('id', id);
+        }
+    }
+
+    return true;
+};
+
+// 3. Proses Kirim (Pindah ke Orders + Update Status)
 export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Promise<boolean> => {
     try {
         for (const log of selectedLogs) {
