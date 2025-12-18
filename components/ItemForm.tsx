@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
 import { fetchPriceHistoryBySource, updateInventory, addInventory } from '../services/supabaseService';
-import { X, Save, Upload, Loader2, Package, Tag, Layers, DollarSign, Globe, Hash, LayoutGrid, Info, Calendar, Truck, ShoppingBag, User, History, Check, AlertCircle } from 'lucide-react';
+import { X, Save, Upload, Loader2, Package, Tag, Layers, DollarSign, Info, Calendar, Truck, ShoppingBag, User, History, Check, AlertCircle, ArrowLeft, Camera } from 'lucide-react';
 import { compressImage } from '../utils';
 
 interface ItemFormProps {
@@ -17,19 +17,17 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
   // Base Form State
   const [formData, setFormData] = useState<InventoryFormData>({
     partNumber: '', name: '', brand: '', application: '',
-    quantity: 0, shelf: '', price: 0, costPrice: 0,
-    ecommerce: '', imageUrl: '', initialStock: 0,
+    quantity: 0, shelf: '',QX: '', price: 0, costPrice: 0,
+    ecommerce: '', imageUrl: '',YX: '', initialStock: 0,
     qtyIn: 0, qtyOut: 0, kingFanoPrice: 0
   });
 
-  // Stock Adjustment State (Transaction Logic)
   const [stockAdjustmentType, setStockAdjustmentType] = useState<'none' | 'in' | 'out'>('none');
   const [adjustmentQty, setAdjustmentQty] = useState<string>('');
   const [adjustmentEcommerce, setAdjustmentEcommerce] = useState<string>('');
   const [adjustmentResiTempo, setAdjustmentResiTempo] = useState<string>('');
   const [adjustmentCustomer, setAdjustmentCustomer] = useState<string>('');
 
-  // UI State
   const [loading, setLoading] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -69,7 +67,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         setFormData(prev => ({ ...prev, imageUrl: compressed }));
         setImagePreview(compressed);
       } catch (err) {
-        console.error("Gagal kompres gambar", err);
         alert("Gagal memproses gambar.");
       }
     }
@@ -82,7 +79,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     try {
         const history = await fetchPriceHistoryBySource(formData.partNumber);
         setPriceHistory(history);
-    } catch (error) { console.error("Gagal ambil harga", error); }
+    } catch (error) { console.error(error); }
     setLoadingPrice(false);
   };
 
@@ -98,15 +95,11 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
 
     try {
       if (isEditMode && initialData) {
-        // Validation for Stock Adjustment
         const qtyAdj = Number(adjustmentQty);
         if (stockAdjustmentType !== 'none' && qtyAdj <= 0) {
-            setError(`Mohon isi jumlah stok yang valid (lebih dari 0).`);
-            setLoading(false);
-            return;
+            setError(`Mohon isi jumlah stok valid.`); setLoading(false); return;
         }
 
-        // Build Transaction Object
         const transactionData = (stockAdjustmentType !== 'none' && qtyAdj > 0) ? {
             type: stockAdjustmentType === 'in' ? 'in' as const : 'out' as const,
             qty: qtyAdj,
@@ -116,25 +109,15 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         } : undefined;
 
         const updated = await updateInventory({ ...initialData, ...formData }, transactionData);
-        
-        if (updated) onSuccess(updated);
-        else setError("Gagal update barang ke database.");
+        if (updated) onSuccess(updated); else setError("Gagal update database.");
 
       } else {
-        // Add Mode
         const newId = await addInventory(formData);
-        if (newId) onSuccess();
-        else setError("Gagal menambah barang baru.");
+        if (newId) onSuccess(); else setError("Gagal tambah barang.");
       }
-    } catch (error) {
-      console.error(error);
-      setError("Terjadi kesalahan sistem.");
-    } finally {
-      setLoading(false);
-    }
+    } catch (error) { setError("Kesalahan Sistem."); } finally { setLoading(false); }
   };
 
-  // Calculate projected stock for display
   const projectedStock = isEditMode ? (
       stockAdjustmentType === 'in' ? (Number(formData.quantity) + (Number(adjustmentQty) || 0)) :
       stockAdjustmentType === 'out' ? (Number(formData.quantity) - (Number(adjustmentQty) || 0)) :
@@ -142,232 +125,163 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
   ) : formData.quantity;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden transform transition-all scale-100">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-gray-50 md:bg-black/60 md:backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white w-full h-full md:h-auto md:max-h-[90vh] md:max-w-4xl md:rounded-2xl shadow-none md:shadow-2xl flex flex-col overflow-hidden">
         
-        {/* HEADER */}
-        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-          <div>
-            <h2 className="text-lg font-extrabold text-gray-800 flex items-center gap-2">
-              {initialData ? <><Package className="text-blue-600" size={20}/> Edit Barang</> : <><Package className="text-green-600" size={20}/> Tambah Barang Baru</>}
+        {/* HEADER MOBILE & DESKTOP */}
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 bg-white sticky top-0 z-20">
+          <button onClick={onCancel} className="p-2 rounded-full hover:bg-gray-100 transition-colors md:hidden">
+            <ArrowLeft size={20} />
+          </button>
+          <div className="flex-1">
+            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+              {initialData ? 'Edit Barang' : 'Tambah Baru'}
             </h2>
-            <p className="text-xs text-gray-500 mt-0.5">{initialData ? 'Perbarui detail barang & catat mutasi stok.' : 'Masukkan detail barang untuk menambah stok baru.'}</p>
+            <p className="text-xs text-gray-500">{initialData ? formData.name : 'Isi detail barang'}</p>
           </div>
-          <button onClick={onCancel} className="p-2 hover:bg-gray-200 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
+          <button onClick={onCancel} className="p-2 hover:bg-gray-100 rounded-full hidden md:block text-gray-400">
             <X size={20} />
           </button>
         </div>
 
-        {/* FORM BODY */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-          {error && <div className="bg-red-50 text-red-600 p-3 rounded-xl flex items-center gap-2 text-sm border border-red-100 mb-6"><AlertCircle size={16} />{error}</div>}
+        {/* FORM SCROLLABLE AREA */}
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 custom-scrollbar bg-gray-50 md:bg-white pb-24">
+          {error && <div className="bg-red-50 text-red-600 p-3 rounded-xl flex items-center gap-2 text-xs border border-red-100 mb-4 font-bold"><AlertCircle size={16} />{error}</div>}
 
-          <div className="flex flex-col lg:flex-row gap-8">
+          <div className="flex flex-col md:flex-row gap-6">
             
-            {/* KOLOM KIRI: GAMBAR & STOCK */}
-            <div className="w-full lg:w-1/3 flex flex-col gap-5">
-              {/* Image Upload Area */}
+            {/* GAMBAR */}
+            <div className="w-full md:w-1/3">
               <div 
                 onClick={() => fileInputRef.current?.click()}
-                className={`aspect-square w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-all relative overflow-hidden group shadow-sm ${imagePreview ? 'border-blue-300 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'}`}
+                className={`aspect-video md:aspect-square w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-all relative overflow-hidden group shadow-sm bg-white ${imagePreview ? 'border-blue-300' : 'border-gray-300'}`}
               >
                 {imagePreview ? (
                   <>
                     <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <div className="bg-white/90 p-2 rounded-full shadow-lg">
-                        <Upload size={20} className="text-blue-600"/>
-                      </div>
+                      <Camera size={24} className="text-white"/>
                     </div>
                   </>
                 ) : (
                   <div className="text-center p-4">
-                    <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-2 text-blue-500">
-                      <Upload size={24} />
+                    <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-2 text-gray-400">
+                      <Upload size={20} />
                     </div>
-                    <span className="text-xs font-bold text-gray-600 block">Upload Foto</span>
-                    <span className="text-[10px] text-gray-400">Klik untuk memilih</span>
+                    <span className="text-xs font-bold text-gray-500">Upload Foto</span>
                   </div>
                 )}
                 <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" className="hidden" />
               </div>
               
-              {/* Stock Display / Initial Stock Input */}
-              {!isEditMode ? (
-                  <div className="bg-blue-50 rounded-xl p-4 border border-blue-100 shadow-sm">
-                    <label className="text-[10px] font-bold text-blue-800 uppercase tracking-wider mb-2 block flex items-center gap-1"><Layers size={12}/> Stok Awal</label>
-                    <input 
-                      type="number" 
-                      name="quantity" 
-                      required 
-                      min="0"
-                      className="w-full bg-white border border-blue-200 rounded-xl px-4 py-3 text-2xl font-bold text-blue-700 focus:ring-4 focus:ring-blue-100 outline-none text-center"
-                      value={formData.quantity} 
-                      onChange={handleChange} 
-                    />
-                  </div>
-              ) : (
-                  <div className="bg-gray-100 rounded-xl p-4 border border-gray-200 text-center">
-                      <span className="text-xs text-gray-500 uppercase font-bold">Total Stok Fisik</span>
-                      <div className="text-3xl font-extrabold text-gray-800 mt-1">{formData.quantity} <span className="text-sm font-medium text-gray-400">Unit</span></div>
+              {!isEditMode && (
+                  <div className="mt-4 bg-white p-3 rounded-xl border border-gray-200">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Stok Awal</label>
+                    <input type="number" name="quantity" required min="0" className="w-full bg-gray-50 border-none rounded-lg p-2 text-xl font-bold text-center focus:ring-2 focus:ring-blue-100" value={formData.quantity} onChange={handleChange} />
                   </div>
               )}
             </div>
 
-            {/* KOLOM KANAN: INPUT FIELDS */}
-            <div className="flex-1 space-y-6">
-              
-              {/* 1. INFORMASI PRODUK */}
-              <div className="space-y-4">
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 pb-2 mb-3">Informasi Produk</h3>
-                
-                <div className="relative">
-                  <span className="absolute left-3 top-3 text-gray-400"><Package size={16}/></span>
-                  <input type="text" name="name" required placeholder="Nama Barang" className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold text-gray-800 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all placeholder:font-normal" value={formData.name} onChange={handleChange} />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="relative">
-                    <span className="absolute left-3 top-3 text-gray-400"><Hash size={16}/></span>
-                    <input type="text" name="partNumber" required placeholder="No. Part" className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono font-medium focus:bg-white focus:border-blue-500 outline-none" value={formData.partNumber} onChange={handleChange} disabled={isEditMode} />
+            {/* DETAIL INPUT */}
+            <div className="flex-1 space-y-5">
+               {/* INFO UTAMA */}
+               <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1"><Package size={12}/> Info Produk</h3>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase">Nama Barang</label>
+                    <input type="text" name="name" required className="w-full mt-1 p-3 bg-gray-50 rounded-xl text-sm font-bold border-none focus:ring-2 focus:ring-blue-100" placeholder="Contoh: Kampas Rem Depan..." value={formData.name} onChange={handleChange} />
                   </div>
-                  <div className="relative">
-                    <span className="absolute left-3 top-3 text-gray-400"><Tag size={16}/></span>
-                    <input type="text" name="brand" placeholder="Brand / Merk" className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium focus:bg-white focus:border-blue-500 outline-none" value={formData.brand} onChange={handleChange} />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="relative">
-                    <span className="absolute left-3 top-3 text-gray-400"><LayoutGrid size={16}/></span>
-                    <input type="text" name="application" placeholder="Aplikasi Mobil" className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium focus:bg-white focus:border-blue-500 outline-none" value={formData.application} onChange={handleChange} />
-                  </div>
-                  <div className="relative">
-                    <span className="absolute left-3 top-3 text-gray-400"><Info size={16}/></span>
-                    <input type="text" name="shelf" placeholder="Rak / Lokasi" className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium focus:bg-white focus:border-blue-500 outline-none" value={formData.shelf} onChange={handleChange} />
-                  </div>
-                </div>
-              </div>
-
-              {/* 2. UPDATE STOK (HANYA MUNCUL SAAT EDIT) */}
-              {isEditMode && (
-                <div className="bg-blue-50/60 p-5 rounded-2xl border border-blue-100 space-y-4">
-                    <div className="flex justify-between items-center">
-                        <h3 className="text-sm font-bold text-blue-900 flex items-center gap-2"><History size={16}/> Mutasi Stok</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase">Part Number</label>
+                        <input type="text" name="partNumber" required disabled={isEditMode} className="w-full mt-1 p-2.5 bg-gray-50 rounded-xl text-xs font-mono border-none focus:ring-2 focus:ring-blue-100" value={formData.partNumber} onChange={handleChange} />
                     </div>
-                    
-                    {/* Toggle Buttons */}
-                    <div className="flex bg-white p-1 rounded-xl border border-blue-100 shadow-sm">
-                        <button type="button" onClick={() => setStockAdjustmentType('none')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${stockAdjustmentType === 'none' ? 'bg-gray-100 text-gray-700 shadow-sm' : 'text-gray-400 hover:bg-gray-50'}`}>Tetap</button>
-                        <button type="button" onClick={() => setStockAdjustmentType('in')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${stockAdjustmentType === 'in' ? 'bg-green-500 text-white shadow-md shadow-green-200' : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}>+ Masuk</button>
-                        <button type="button" onClick={() => setStockAdjustmentType('out')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${stockAdjustmentType === 'out' ? 'bg-red-500 text-white shadow-md shadow-red-200' : 'text-gray-400 hover:text-red-600 hover:bg-red-50'}`}>- Keluar</button>
+                    <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase">Brand</label>
+                        <input type="text" name="brand" className="w-full mt-1 p-2.5 bg-gray-50 rounded-xl text-xs font-medium border-none focus:ring-2 focus:ring-blue-100" value={formData.brand} onChange={handleChange} />
                     </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                     <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase">Aplikasi Mobil</label>
+                        <input type="text" name="application" className="w-full mt-1 p-2.5 bg-gray-50 rounded-xl text-xs border-none focus:ring-2 focus:ring-blue-100" value={formData.application} onChange={handleChange} />
+                     </div>
+                     <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase">Rak</label>
+                        <input type="text" name="shelf" className="w-full mt-1 p-2.5 bg-gray-50 rounded-xl text-xs border-none focus:ring-2 focus:ring-blue-100" value={formData.shelf} onChange={handleChange} />
+                     </div>
+                  </div>
+               </div>
 
-                    {/* Adjustment Inputs */}
-                    {stockAdjustmentType !== 'none' && (
-                        <div className="space-y-4 animate-in slide-in-from-top-2 duration-200 pt-2">
-                            <div className="flex gap-4 items-end">
-                                <div className="flex-1">
-                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Jumlah {stockAdjustmentType === 'in' ? 'Masuk' : 'Keluar'}</label>
-                                    <input autoFocus required type="number" min="1" value={adjustmentQty} onChange={(e) => setAdjustmentQty(e.target.value)} className="w-full px-4 py-2 border-2 border-blue-200 rounded-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 font-bold text-gray-800 text-lg" placeholder="0" />
-                                </div>
-                                <div className="pb-3 text-right">
-                                    <span className="text-[10px] text-gray-400 uppercase font-bold block">Estimasi Akhir</span>
-                                    <span className={`text-xl font-extrabold ${stockAdjustmentType === 'in' ? 'text-green-600' : 'text-red-600'}`}>{projectedStock}</span>
-                                </div>
-                            </div>
-                            
-                            {/* Input Customer (Khusus Keluar) */}
-                            {stockAdjustmentType === 'out' && (
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase flex items-center gap-1"><User size={10}/> Penerima / Customer</label>
-                                    <input type="text" value={adjustmentCustomer} onChange={(e) => setAdjustmentCustomer(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:border-blue-400 outline-none" placeholder="Nama Bengkel / Pembeli..." />
-                                </div>
-                            )}
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase flex items-center gap-1"><ShoppingBag size={10}/> Via / Sumber</label>
-                                    <input type="text" value={adjustmentEcommerce} onChange={(e) => setAdjustmentEcommerce(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:border-blue-400 outline-none" placeholder={stockAdjustmentType === 'in' ? "Tokopedia" : "Shopee"} />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase flex items-center gap-1">{stockAdjustmentType === 'in' ? <Calendar size={10}/> : <Truck size={10}/>} {stockAdjustmentType === 'in' ? ' Tempo' : ' Resi'}</label>
-                                    <input type="text" value={adjustmentResiTempo} onChange={(e) => setAdjustmentResiTempo(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:border-blue-400 outline-none" placeholder={stockAdjustmentType === 'in' ? "Lunas / 30 Hari" : "JP..."} />
-                                </div>
-                            </div>
+               {/* HARGA */}
+               <div className="bg-white p-4 rounded-2xlqh border border-gray-100 shadow-sm space-y-4">
+                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1"><DollarSign size={12}/> Harga</h3>
+                  <div className="relative">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase">Harga Modal (HPP)</label>
+                      <div className="flex gap-2 mt-1">
+                        <input type="number" name="costPrice" value={formData.costPrice} onChange={handleChange} className="flex-1 p-2.5 bg-orange-50 text-orange-700 font-mono font-bold text-sm rounded-xl border-none focus:ring-2 focus:ring-orange-200" />
+                        <button type="button" onClick={handleCheckPrices} className="p-2.5 bg-gray-100 rounded-xl text-gray-600"><History size={18}/></button>
+                      </div>
+                      {showPricePopup && (
+                        <div className="absolute top-full left-0 right-0 mt-2 bg-white shadow-xl border rounded-xl z-20 max-h-40 overflow-y-auto">
+                           {priceHistory.map((ph, idx) => (
+                               <div key={idx} onClick={() => selectPrice(ph.price)} className="p-2 border-b text-xs flex justify-between hover:bg-gray-50 cursor-pointer">
+                                   <span>{ph.source}</span><span className="font-bold">{ph.price.toLocaleString()}</span>
+                               </div>
+                           ))}
                         </div>
-                    )}
-                </div>
-              )}
+                      )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-500 uppercase">Harga Jual</label>
+                        <input type="number" name="price" value={formData.price} onChange={handleChange} className="w-full mt-1 p-2.5 bg-blue-50 text-blue-700 font-mono font-bold text-sm rounded-xlYW border-none focus:ring-2 focus:ring-blue-200" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-purple-500 uppercase">Hrg King Fano</label>
+                        <input type="number" name="kingFanoPrice" value={formData.kingFanoPrice} onChange={handleChange} className="w-full mt-1 p-2.5 bg-purple-50 text-purple-700 font-mono font-bold text-sm rounded-xl border-none focus:ring-2 focus:ring-purple-200" />
+                      </div>
+                  </div>
+               </div>
 
-              {/* 3. INFORMASI HARGA */}
-              <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1"><DollarSign size={14}/> Harga Modal & Jual</h3>
-                
-                {/* Cost Price with History */}
-                <div className="mb-4">
-                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Harga Modal (HPP)</label>
-                    <div className="relative flex gap-2">
-                        <input type="number" name="costPrice" value={formData.costPrice} onChange={handleChange} className="flex-1 px-4 py-2 rounded-xl border border-gray-200 text-sm font-mono font-medium text-orange-600 focus:bg-white focus:border-orange-400 outline-none" placeholder="0" />
-                        <button type="button" onClick={handleCheckPrices} className="px-3 py-2 bg-orange-100 text-orange-700 rounded-xl hover:bg-orange-200 border border-orange-200 transition-colors" title="Cek Riwayat Harga"><History size={18} /></button>
-                        
-                        {/* Price History Popup */}
-                        {showPricePopup && (
-                            <>
-                                <div className="fixed inset-0 z-10" onClick={() => setShowPricePopup(false)}></div>
-                                <div className="absolute top-full right-0 mt-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-100 z-20 overflow-hidden animate-in fade-in slide-in-from-top-2">
-                                    <div className="bg-gray-50 px-4 py-2 border-b border-gray-100 flex justify-between items-center"><span className="text-[10px] font-bold text-gray-500 uppercase">Riwayat Pembelian</span><button type="button" onClick={() => setShowPricePopup(false)}><X size={14} className="text-gray-400" /></button></div>
-                                    <div className="max-h-60 overflow-y-auto custom-scrollbar">
-                                        {loadingPrice ? <div className="p-4 text-center text-xs text-gray-400">Memuat data...</div> : priceHistory.length === 0 ? <div className="p-4 text-center text-xs text-red-400">Belum ada riwayat.</div> : (
-                                            priceHistory.map((ph, idx) => (
-                                                <button key={idx} type="button" onClick={() => selectPrice(ph.price)} className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b border-gray-50 last:border-0 transition-colors flex justify-between items-center group">
-                                                    <div><div className="font-bold text-gray-800 text-xs">{ph.source}</div><div className="text-[10px] text-gray-400">{ph.date}</div></div>
-                                                    <div className="flex items-center gap-2"><span className="font-mono text-xs font-semibold text-blue-600">Rp {ph.price.toLocaleString()}</span><Check size={14} className="text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"/></div>
-                                                </button>
-                                            ))
-                                        )}
+               {/* MUTASI STOK (HANYA EDIT) */}
+               {isEditMode && (
+                   <div className="bg-white p-4 rounded-2xl border border-blue-100 shadow-sm">
+                       <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Update Stok</h3>
+                       <div className="flex bg-gray-100 p-1 rounded-lg mb-3">
+                            <button type="button" onClick={() => setStockAdjustmentType('none')} className={`flex-1 py-1.5 text-xs font-bold rounded-md ${stockAdjustmentType === 'none' ? 'bg-white shadow-sm' : 'text-gray-500'}`}>Tetap</button>
+                            <button type="button" onClick={() => setStockAdjustmentType('in')} className={`flex-1 py-1.5 text-xs font-bold rounded-md ${stockAdjustmentType === 'in' ? 'bg-green-500 text-white' : 'text-gray-500'}`}>+ Masuk</button>
+                            <button type="button" onClick={() => setStockAdjustmentType('out')} className={`flex-1 py-1.5 text-xs font-bold rounded-md ${stockAdjustmentType === 'out' ? 'bg-red-500 text-white' : 'text-gray-500'}`}>- Keluar</button>
+                       </div>
+                       
+                       {stockAdjustmentType !== 'none' && (
+                           <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
+                                <div className="flex gap-3">
+                                    <div className="flex-1">
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Jumlah</label>
+                                        <input type="number" value={adjustmentQty} onChange={(e) => setAdjustmentQty(e.target.value)} className="w-full mt-1 p-2.5 border-2 border-blue-100 rounded-xl font-bold text-center" placeholder="0"/>
+                                    </div>
+                                    <div className="flex-1 text-center bg-gray-50 rounded-xl flex flex-col justify-center">
+                                        <span className="text-[9px] text-gray-400 font-bold uppercase">Estimasi Akhir</span>
+                                        <span className={`text-lg font-extrabold ${stockAdjustmentType==='in'?'text-green-600':'text-red-600'}`}>{projectedStock}</span>
                                     </div>
                                 </div>
-                            </>
-                        )}
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Harga Jual Umum</label>
-                    <input type="number" name="price" value={formData.price} onChange={handleChange} className="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm font-mono font-bold text-gray-800 focus:bg-white focus:border-green-500 outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-purple-600 mb-1 uppercase">Harga King Fano</label>
-                    <input type="number" name="kingFanoPrice" value={formData.kingFanoPrice} onChange={handleChange} className="w-full px-4 py-2 rounded-xl border border-purple-200 bg-purple-50 text-sm font-mono font-bold text-purple-800 focus:bg-white focus:border-purple-500 outline-none" />
-                  </div>
-                </div>
-              </div>
-
+                                <input type="text" placeholder={stockAdjustmentType === 'in' ? "Sumber (Tokopedia/Sales)..." : "Penerima / Customer..."} value={stockAdjustmentType === 'out' ? adjustmentCustomer : adjustmentEcommerce} onChange={(e) => stockAdjustmentType === 'out' ? setAdjustmentCustomer(e.target.value) : setAdjustmentEcommerce(e.target.value)} className="w-full p-2.5 bg-gray-50 rounded-xl text-xs outline-none focus:ring-1 focus:ring-blue-200" />
+                           </div>
+                       )}
+                   </div>
+               )}
             </div>
           </div>
         </form>
 
         {/* FOOTER ACTIONS */}
-        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
-          <button 
-            type="button" 
-            onClick={onCancel} 
-            className="px-5 py-2.5 rounded-xl text-sm font-bold text-gray-600 bg-white border border-gray-200 hover:bg-gray-100 hover:text-gray-800 transition-all shadow-sm"
-          >
-            Batal
-          </button>
-          <button 
-            onClick={handleSubmit} 
-            disabled={loading} 
-            className="px-6 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-md hover:shadow-lg active:scale-95 transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-          >
-            {loading ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-            {initialData ? 'Simpan Perubahan' : 'Simpan Barang'}
-          </button>
+        <div className="p-4 bg-white border-t border-gray-100 flex gap-3 sticky bottom-0 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+            <button onClick={onCancel} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200">Batal</button>
+            <button onClick={handleSubmit} disabled={loading} className="flex-[2] py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center justify-center gap-2 disabled:opacity-70">
+                {loading ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>} Simpan
+            </button>
         </div>
-
       </div>
     </div>
   );
