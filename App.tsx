@@ -1,339 +1,473 @@
 // FILE: src/App.tsx
-import React, { useState, useEffect } from 'react';
-import { 
-  LayoutDashboard, 
-  ShoppingBag, 
-  ClipboardList, 
-  MessageSquare, 
-  Menu, 
-  X, 
-  LogOut,
-  User,
-  PlusCircle,
-  BarChart3
-} from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { HashRouter as Router } from 'react-router-dom';
 import { Dashboard } from './components/Dashboard';
-import { ShopView } from './components/ShopView';
-import { OrderManagement } from './components/OrderManagement'; // Fitur Scan Resi sekarang ada di sini
-import { CustomerOrderView } from './components/CustomerOrderView';
-import { ChatView } from './components/ChatView';
 import { ItemForm } from './components/ItemForm';
+import { ShopView } from './components/ShopView';
+import { ChatView } from './components/ChatView';
+import { OrderManagement } from './components/OrderManagement';
+import { CustomerOrderView } from './components/CustomerOrderView';
+// ScanResiView di-hapus importnya karena sudah tidak dipakai di sini
+import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
+
+// --- IMPORT LOGIKA ---
 import { 
-  fetchInventory, 
-  fetchOrders, 
-  fetchInventoryStats, 
-  addInventory, 
-  updateInventory, 
-  deleteInventory,
-  updateOrderStatusService 
+  fetchInventory, addInventory, updateInventory, deleteInventory, getItemById, getItemByPartNumber, 
+  fetchOrders, saveOrder, updateOrderStatusService,
+  fetchHistory,
+  fetchChatSessions, saveChatSession,
+  addBarangMasuk, addBarangKeluar,
+  updateOrderData 
 } from './services/supabaseService';
-import { InventoryItem, InventoryFormData, OrderStatus } from './types';
 
-// Login sederhana (Hardcoded untuk demo)
-const ADMIN_CREDENTIALS = {
-  username: 'admin',
-  password: '123'
-};
+import { generateId } from './utils';
+import { 
+  Home, MessageSquare, Package, ShieldCheck, User, CheckCircle, XCircle, 
+  ClipboardList, LogOut, ArrowRight, CloudLightning, KeyRound, 
+  ShoppingCart, Car
+} from 'lucide-react';
 
-function App() {
-  // State Auth
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userRole, setUserRole] = useState<'admin' | 'customer' | null>(null);
-  const [usernameInput, setUsernameInput] = useState('');
-  const [passwordInput, setPasswordInput] = useState('');
+const CUSTOMER_ID_KEY = 'stockmaster_my_customer_id';
+const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 
-  // State Aplikasi
-  const [activeView, setActiveView] = useState('dashboard');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [stats, setStats] = useState({ totalItems: 0, totalStock: 0, totalAsset: 0 });
-  const [orders, setOrders] = useState<any[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
+// Hapus 'scan' dari tipe active view
+type ActiveView = 'shop' | 'chat' | 'inventory' | 'orders';
 
-  // --- Initial Load ---
-  useEffect(() => {
-    const checkSession = localStorage.getItem('stock_session');
-    if (checkSession) {
-      const session = JSON.parse(checkSession);
-      setIsAuthenticated(true);
-      setUserRole(session.role);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadData();
-    }
-  }, [isAuthenticated]);
-
-  const loadData = async () => {
-    setIsProcessing(true);
-    try {
-      const [invData, statData, orderData] = await Promise.all([
-        fetchInventory(),
-        fetchInventoryStats(),
-        fetchOrders()
-      ]);
-      setInventory(invData);
-      setStats(statData);
-      setOrders(orderData);
-    } catch (error) {
-      console.error("Gagal memuat data:", error);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // --- Auth Handlers ---
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (usernameInput === ADMIN_CREDENTIALS.username && passwordInput === ADMIN_CREDENTIALS.password) {
-      const session = { role: 'admin', timestamp: Date.now() };
-      localStorage.setItem('stock_session', JSON.stringify(session));
-      setIsAuthenticated(true);
-      setUserRole('admin');
-      setActiveView('dashboard');
-    } else if (usernameInput === 'user') {
-      const session = { role: 'customer', timestamp: Date.now() };
-      localStorage.setItem('stock_session', JSON.stringify(session));
-      setIsAuthenticated(true);
-      setUserRole('customer');
-      setActiveView('shop');
-    } else {
-      alert('Login Gagal! Coba username: admin / password: 123');
-    }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('stock_session');
-    setIsAuthenticated(false);
-    setUserRole(null);
-    setUsernameInput('');
-    setPasswordInput('');
-  };
-
-  // --- Data Handlers ---
-  const handleAddItem = async (formData: InventoryFormData) => {
-    setIsProcessing(true);
-    const newId = await addInventory(formData);
-    if (newId) {
-      await loadData();
-      setActiveView('inventory');
-    } else {
-      alert("Gagal menambah barang");
-    }
-    setIsProcessing(false);
-  };
-
-  const handleUpdateItem = async (item: InventoryItem, field: keyof InventoryItem, value: any) => {
-    // Optimistic Update
-    const updatedItem = { ...item, [field]: value };
-    setInventory(prev => prev.map(i => i.id === item.id ? updatedItem : i));
-    
-    // Server Update
-    await updateInventory(updatedItem);
-    await loadData(); // Refresh untuk memastikan data sinkron
-  };
-
-  const handleDeleteItem = async (id: string) => {
-    if (window.confirm('Yakin hapus barang ini?')) {
-      setIsProcessing(true);
-      const success = await deleteInventory(id);
-      if (success) await loadData();
-      setIsProcessing(false);
-    }
-  };
-
-  const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus) => {
-    setIsProcessing(true);
-    const success = await updateOrderStatusService(orderId, status);
-    if (success) await loadData();
-    setIsProcessing(false);
-  };
-
-  // --- Tampilan Login ---
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
-          <div className="flex justify-center mb-6">
-            <div className="bg-blue-600 p-3 rounded-xl">
-              <BarChart3 className="text-white w-8 h-8" />
-            </div>
-          </div>
-          <h2 className="text-2xl font-bold text-center text-gray-800 mb-8">Stock Master AI</h2>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-              <input 
-                type="text" 
-                value={usernameInput}
-                onChange={(e) => setUsernameInput(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-                placeholder="admin"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <input 
-                type="password" 
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-                placeholder="•••"
-              />
-            </div>
-            <button 
-              type="submit" 
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg transition-colors shadow-lg shadow-blue-600/30"
-            >
-              Masuk
-            </button>
-          </form>
-          <div className="mt-6 text-center text-xs text-gray-400">
-            <p>Demo Admin: admin / 123</p>
-            <p>Demo User: user / (bebas)</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // --- Tampilan User Customer ---
-  if (userRole === 'customer') {
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
-        <nav className="bg-white shadow-sm px-4 py-3 sticky top-0 z-30 flex justify-between items-center">
-           <h1 className="text-lg font-bold text-gray-800 flex items-center gap-2"><ShoppingBag className="text-blue-600"/> Toko Online</h1>
-           <button onClick={handleLogout} className="text-sm text-red-600 font-bold">Keluar</button>
-        </nav>
-        <div className="flex-1 overflow-auto">
-           {activeView === 'shop' && <CustomerOrderView />} 
-        </div>
-        {/* Bottom Nav untuk Mobile Customer bisa ditambahkan di sini */}
-      </div>
-    );
-  }
-
-  // --- Tampilan Admin Dashboard ---
-  const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'inventory', label: 'Stok Barang', icon: ShoppingBag },
-    { id: 'add-item', label: 'Tambah Barang', icon: PlusCircle },
-    // MENU SCAN RESI DIHAPUS DARI SINI KARENA SUDAH ADA DI DALAM ORDERS
-    { id: 'orders', label: 'Pesanan & Scan', icon: ClipboardList }, 
-    { id: 'chat', label: 'Live Chat', icon: MessageSquare },
-  ];
-
+const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
+  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
   return (
-    <div className="min-h-screen bg-gray-100 flex overflow-hidden">
-      {/* Sidebar Desktop */}
-      <aside 
-        className={`bg-slate-900 text-white transition-all duration-300 flex flex-col fixed md:relative z-40 h-full
-        ${isSidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full md:w-20 md:translate-x-0'}
-        `}
-      >
-        <div className="p-4 flex items-center justify-between border-b border-slate-800">
-          {isSidebarOpen ? (
-            <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
-              <div className="bg-blue-600 p-1.5 rounded-lg"><BarChart3 size={20}/></div>
-              <span>StockMaster</span>
-            </div>
-          ) : (
-            <div className="mx-auto bg-blue-600 p-2 rounded-xl"><BarChart3 size={24}/></div>
-          )}
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden text-gray-400 hover:text-white">
-            <X size={24} />
-          </button>
-        </div>
-
-        <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto">
-          {menuItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => { setActiveView(item.id); if(window.innerWidth < 768) setIsSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group
-                ${activeView === item.id 
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' 
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                }
-                ${!isSidebarOpen && 'justify-center'}
-              `}
-              title={!isSidebarOpen ? item.label : ''}
-            >
-              <item.icon size={20} className={activeView === item.id ? 'animate-pulse' : ''} />
-              {isSidebarOpen && <span className="font-medium text-sm">{item.label}</span>}
-            </button>
-          ))}
-        </nav>
-
-        <div className="p-4 border-t border-slate-800">
-          <button 
-            onClick={handleLogout}
-            className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors
-              ${!isSidebarOpen && 'justify-center'}
-            `}
-          >
-            <LogOut size={20} />
-            {isSidebarOpen && <span className="font-bold text-sm">Keluar</span>}
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
-        {/* Header Mobile */}
-        <header className="bg-white shadow-sm border-b border-gray-200 p-4 flex items-center justify-between md:hidden">
-          <button onClick={() => setIsSidebarOpen(true)} className="text-gray-600">
-            <Menu size={24} />
-          </button>
-          <span className="font-bold text-gray-800">Stock Master</span>
-          <div className="w-8"></div> 
-        </header>
-
-        {/* Content Area */}
-        <div className="flex-1 overflow-auto p-4 md:p-6 relative">
-          {activeView === 'dashboard' && (
-            <Dashboard stats={stats} />
-          )}
-
-          {activeView === 'inventory' && (
-            <ShopView 
-              items={inventory} 
-              onUpdate={handleUpdateItem}
-              onDelete={handleDeleteItem}
-              onRefresh={loadData}
-            />
-          )}
-
-          {activeView === 'add-item' && (
-            <ItemForm onSave={handleAddItem} onCancel={() => setActiveView('inventory')} />
-          )}
-
-          {activeView === 'orders' && (
-            <OrderManagement 
-              orders={orders} 
-              onUpdateStatus={handleUpdateOrderStatus}
-              onProcessReturn={() => {}} // Handle return logic internal
-              onRefresh={loadData}
-            />
-          )}
-
-          {activeView === 'chat' && (
-            <ChatView />
-          )}
-        </div>
-      </main>
-
-      {/* Overlay untuk Mobile Sidebar */}
-      {isSidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-30 md:hidden backdrop-blur-sm"
-          onClick={() => setIsSidebarOpen(false)}
-        />
-      )}
+    <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[70] px-6 py-3 rounded-full shadow-xl flex items-center text-white text-sm font-medium animate-in fade-in slide-in-from-top-2 duration-300 border ${type === 'success' ? 'bg-gray-900 border-gray-700' : 'bg-red-600 border-red-700'}`}>
+      {type === 'success' ? <CheckCircle size={18} className="mr-2 text-green-400" /> : <XCircle size={18} className="mr-2" />}
+      {message}
     </div>
   );
-}
+};
 
+const AppContent: React.FC = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loginName, setLoginName] = useState('');
+  const [loginPass, setLoginPass] = useState('');
+
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [history, setHistory] = useState<StockHistory[]>([]);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [loading, setLoading] = useState(false); 
+  const [activeView, setActiveView] = useState<ActiveView>('shop');
+  
+  const [bannerUrl, setBannerUrl] = useState<string>('');
+  const [myCustomerId, setMyCustomerId] = useState<string>('');
+  
+  const [isEditing, setIsEditing] = useState(false);
+  const [editItem, setEditItem] = useState<InventoryItem | null>(null);
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+
+  const showToast = (msg: string, type: 'success'|'error' = 'success') => setToast({msg, type});
+
+  const isKingFano = useMemo(() => {
+      return loginName.trim().toLowerCase() === 'king fano';
+  }, [loginName]);
+
+  useEffect(() => {
+    let cId = localStorage.getItem(CUSTOMER_ID_KEY);
+    if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
+    setMyCustomerId(cId);
+    
+    const savedName = localStorage.getItem('stockmaster_customer_name');
+    if(savedName) { setLoginName(savedName); setIsAuthenticated(true); }
+    
+    refreshData();
+  }, []);
+
+  const refreshData = async () => {
+    setLoading(true);
+    try {
+        const inventoryData = await fetchInventory();
+        const bannerItem = inventoryData.find(i => i.partNumber === BANNER_PART_NUMBER);
+        if (bannerItem) setBannerUrl(bannerItem.imageUrl);
+        setItems(inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER));
+
+        const ordersData = await fetchOrders();
+        setOrders(ordersData);
+
+        const historyData = await fetchHistory();
+        setHistory(historyData);
+
+        const chatData = await fetchChatSessions();
+        setChatSessions(chatData);
+
+    } catch (e) { console.error("Gagal memuat data:", e); showToast("Gagal sinkronisasi data", 'error'); }
+    setLoading(false);
+  };
+
+  const handleGlobalLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loginName.toLowerCase() === 'ava' && loginPass === '9193') {
+        setIsAdmin(true); setIsAuthenticated(true); setActiveView('inventory');
+        setMyCustomerId('ADMIN-AVA'); showToast('Login Admin Berhasil'); 
+        refreshData();
+    } else if (loginName.trim() !== '') {
+        loginAsCustomer(loginName);
+    } else { showToast('Masukkan Nama', 'error'); }
+  };
+
+  const loginAsCustomer = (name: string) => {
+      setIsAdmin(false); setIsAuthenticated(true); setActiveView('shop');
+      localStorage.setItem('stockmaster_customer_name', name); 
+      if (name.toLowerCase() === 'king fano') showToast(`Selamat Datang, King Fano! Harga Khusus Aktif.`);
+      else showToast(`Selamat Datang, ${name}!`);
+  };
+
+  const handleLogout = () => { setIsAuthenticated(false); setIsAdmin(false); setLoginName(''); setLoginPass(''); localStorage.removeItem('stockmaster_customer_name'); };
+
+  // --- SAVE ITEM ---
+  const handleSaveItem = async (data: InventoryFormData) => {
+      setLoading(true);
+      const newQuantity = Number(data.quantity) || 0;
+      let updatedItem: InventoryItem = { ...editItem, ...data, quantity: newQuantity, initialStock: data.initialStock || 0, qtyIn: data.qtyIn || 0, qtyOut: data.qtyOut || 0, lastUpdated: Date.now() };
+
+      if (editItem) {
+          if (await updateInventory(updatedItem)) { showToast('Update berhasil!'); refreshData(); }
+      } else {
+          if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number sudah ada!', 'error'); setLoading(false); return; }
+          if (await addInventory(data)) { showToast('Tersimpan!'); refreshData(); }
+      }
+      setIsEditing(false); setEditItem(null); setLoading(false);
+  };
+
+  const handleUpdateBanner = async (base64: string) => {
+      const bannerData: any = { partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', application: 'DO NOT DELETE', brand: 'SYS', price: 0, costPrice: 0, ecommerce: '', quantity: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, shelf: 'SYSTEM', imageUrl: base64 };
+      if (await (bannerUrl ? updateInventory(bannerData) : addInventory(bannerData))) { setBannerUrl(base64); showToast('Banner diperbarui!'); } else { showToast('Gagal update banner', 'error'); }
+  };
+  
+  const handleDelete = async (id: string) => {
+      if(confirm('Hapus Barang Permanen?')) {
+          setLoading(true);
+          if (await deleteInventory(id)) { showToast('Dihapus'); refreshData(); }
+          setLoading(false);
+      }
+  }
+
+  const addToCart = (item: InventoryItem) => {
+      setCart(prev => {
+          const ex = prev.find(c => c.id === item.id);
+          return ex ? prev.map(c => c.id === item.id ? {...c, cartQuantity: c.cartQuantity + 1} : c) : [...prev, {...item, cartQuantity: 1}];
+      });
+      showToast('Masuk keranjang');
+  };
+
+  const updateCartItem = (itemId: string, changes: Partial<CartItem>) => {
+      setCart(prev => prev.map(item => item.id === itemId ? { ...item, ...changes } : item));
+  };
+
+  const doCheckout = async (name: string) => {
+      if (name !== loginName && !isAdmin) { setLoginName(name); localStorage.setItem('stockmaster_customer_name', name); }
+      const totalAmount = cart.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
+      const newOrder: Order = { id: generateId(), customerName: name, items: [...cart], totalAmount: totalAmount, status: 'pending', timestamp: Date.now() };
+      
+      setLoading(true);
+      if (await saveOrder(newOrder)) {
+          showToast('Pesanan berhasil dibuat!'); setCart([]); setActiveView('orders'); await refreshData();
+      } else { showToast('Gagal membuat pesanan', 'error'); }
+      setLoading(false);
+  };
+
+  // --- LOGIC BARU: PROCESS PARTIAL RETURN ---
+  const handleProcessReturn = async (orderId: string, returnedItems: { itemId: string, qty: number }[]) => {
+      const order = orders.find(o => o.id === orderId);
+      if (!order) return;
+
+      setLoading(true);
+      const today = new Date().toISOString().split('T')[0];
+
+      let pureName = order.customerName;
+      let resiVal = '-';
+      let shopVal = '';
+      let ecommerceVal = 'APLIKASI';
+
+      const resiMatch = pureName.match(/\(Resi: (.*?)\)/);
+      if (resiMatch) { resiVal = resiMatch[1]; pureName = pureName.replace(/\(Resi:.*?\)/, ''); }
+      const shopMatch = pureName.match(/\(Toko: (.*?)\)/);
+      if (shopMatch) { shopVal = shopMatch[1]; pureName = pureName.replace(/\(Toko:.*?\)/, ''); }
+      const viaMatch = pureName.match(/\(Via: (.*?)\)/);
+      if (viaMatch) { ecommerceVal = viaMatch[1]; pureName = pureName.replace(/\(Via:.*?\)/, ''); }
+      pureName = pureName.trim() || "Pelanggan";
+
+      for (const retur of returnedItems) {
+          const itemInOrder = order.items.find(i => i.id === retur.itemId);
+          if (!itemInOrder) continue;
+
+          const currentItem = await getItemByPartNumber(itemInOrder.partNumber);
+          
+          if (currentItem) {
+              const restoreQty = retur.qty;
+              const newQuantity = currentItem.quantity + restoreQty;
+              const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
+              await updateInventory(itemToUpdate);
+
+              await addBarangMasuk({
+                  tanggal: today,
+                  tempo: `${resiVal} / ${shopVal}`,
+                  ecommerce: ecommerceVal,          
+                  keterangan: `${pureName} (RETUR)`,
+                  partNumber: itemToUpdate.partNumber,
+                  name: itemToUpdate.name,
+                  brand: itemToUpdate.brand,
+                  application: itemToUpdate.application,
+                  rak: itemToUpdate.shelf,
+                  stockAhir: newQuantity,
+                  qtyMasuk: restoreQty,
+                  hargaSatuan: itemInOrder.customPrice ?? itemInOrder.price,
+                  hargaTotal: (itemInOrder.customPrice ?? itemInOrder.price) * restoreQty
+              });
+          }
+      }
+
+      const newItems = order.items.map(item => {
+          const returInfo = returnedItems.find(r => r.itemId === item.id);
+          if (returInfo) {
+              const newQty = item.cartQuantity - returInfo.qty;
+              return { ...item, cartQuantity: newQty };
+          }
+          return item;
+      }).filter(item => item.cartQuantity > 0); 
+
+      const newTotal = newItems.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
+      const newStatus = newItems.length === 0 ? 'cancelled' : 'completed';
+
+      if (await updateOrderData(orderId, newItems, newTotal, newStatus)) {
+          showToast('Retur berhasil diproses & Stok kembali!');
+          await refreshData();
+      } else {
+          showToast('Gagal update data pesanan', 'error');
+      }
+      setLoading(false);
+  };
+
+  // --- UPDATE STATUS BIASA (FULL PROCESS / CANCEL) ---
+  const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
+      const order = orders.find(o => o.id === orderId);
+      if (!order) return;
+
+      let pureName = order.customerName;
+      let resiVal = '-';
+      let shopVal = '';
+      let ecommerceVal = 'APLIKASI';
+
+      const resiMatch = pureName.match(/\(Resi: (.*?)\)/);
+      if (resiMatch) { resiVal = resiMatch[1]; pureName = pureName.replace(/\(Resi:.*?\)/, ''); }
+      const shopMatch = pureName.match(/\(Toko: (.*?)\)/);
+      if (shopMatch) { shopVal = shopMatch[1]; pureName = pureName.replace(/\(Toko:.*?\)/, ''); }
+      const viaMatch = pureName.match(/\(Via: (.*?)\)/);
+      if (viaMatch) { ecommerceVal = viaMatch[1]; pureName = pureName.replace(/\(Via:.*?\)/, ''); }
+      pureName = pureName.trim() || "Pelanggan";
+
+      const today = new Date().toISOString().split('T')[0];
+      let updateTime = (newStatus === 'completed' || newStatus === 'cancelled') ? Date.now() : undefined;
+
+      if (order.status === 'pending' && newStatus === 'processing') {
+          if (await updateOrderStatusService(orderId, newStatus)) { 
+              for (const orderItem of order.items) {
+                  const currentItem = await getItemByPartNumber(orderItem.partNumber);
+                  
+                  if (currentItem) {
+                      const qtySold = orderItem.cartQuantity;
+                      const newQuantity = Math.max(0, currentItem.quantity - qtySold);
+                      const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: newQuantity, lastUpdated: Date.now() };
+                      
+                      await updateInventory(itemToUpdate);
+                      
+                      await addBarangKeluar({
+                          tanggal: today,
+                          kodeToko: 'APP',
+                          tempo: shopVal, 
+                          ecommerce: ecommerceVal, 
+                          customer: pureName, 
+                          partNumber: currentItem.partNumber,
+                          name: currentItem.name,
+                          brand: currentItem.brand,
+                          application: currentItem.application,
+                          rak: currentItem.shelf,
+                          stockAhir: newQuantity,
+                          qtyKeluar: qtySold,
+                          hargaSatuan: orderItem.customPrice ?? orderItem.price,
+                          hargaTotal: (orderItem.customPrice ?? orderItem.price) * qtySold,
+                          resi: resiVal
+                      });
+                  }
+              }
+              showToast('Pesanan diproses, stok berkurang.'); refreshData();
+          }
+      }
+      else if (newStatus === 'cancelled' && order.status !== 'cancelled') {
+          if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
+              if (order.status !== 'pending') {
+                  for (const orderItem of order.items) {
+                      const currentItem = await getItemByPartNumber(orderItem.partNumber);
+                      if (currentItem) {
+                          const restoreQty = orderItem.cartQuantity;
+                          const newQuantity = currentItem.quantity + restoreQty;
+                          const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
+                          
+                          await updateInventory(itemToUpdate);
+                          
+                          await addBarangMasuk({
+                              tanggal: today,
+                              tempo: `${resiVal} / ${shopVal}`, 
+                              ecommerce: ecommerceVal,          
+                              keterangan: `${pureName} (RETUR FULL)`, 
+                              partNumber: itemToUpdate.partNumber,
+                              name: itemToUpdate.name,
+                              brand: itemToUpdate.brand,
+                              application: itemToUpdate.application,
+                              rak: itemToUpdate.shelf,
+                              stockAhir: newQuantity,
+                              qtyMasuk: restoreQty,
+                              hargaSatuan: orderItem.customPrice ?? orderItem.price,
+                              hargaTotal: (orderItem.customPrice ?? orderItem.price) * restoreQty
+                          });
+                      }
+                  }
+                  showToast('Pesanan dibatalkan sepenuhnya.');
+              } else {
+                  showToast('Pesanan ditolak (Stok belum dipotong).');
+              }
+              refreshData();
+          }
+      }
+      else {
+          if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
+              refreshData();
+          }
+      }
+  };
+
+  const handleSendMessage = async (customerId: string, text: string, sender: 'user' | 'admin') => {
+    const newMessage: Message = { id: Date.now().toString(), sender, text, timestamp: Date.now(), read: false };
+    let currentSession = chatSessions.find(s => s.customerId === customerId);
+    let isNew = false;
+    if (!currentSession) { currentSession = { customerId, customerName: loginName || `Guest ${customerId.slice(-4)}`, messages: [], lastMessage: '', lastTimestamp: Date.now(), unreadAdminCount: 0, unreadUserCount: 0 }; isNew = true; }
+    const updatedSession: ChatSession = { ...currentSession, messages: [...currentSession.messages, newMessage], lastMessage: text, lastTimestamp: Date.now(), unreadAdminCount: sender === 'user' ? (currentSession.unreadAdminCount || 0) + 1 : (currentSession.unreadAdminCount || 0), unreadUserCount: sender === 'admin' ? (currentSession.unreadUserCount || 0) + 1 : (currentSession.unreadUserCount || 0) };
+    if (isNew) setChatSessions(prev => [...prev, updatedSession]); else setChatSessions(prev => prev.map(s => s.customerId === customerId ? updatedSession : s));
+    await saveChatSession(updatedSession);
+  };
+
+  const pendingOrdersCount = orders.filter(o => o.status === 'pending').length;
+  const myPendingOrdersCount = orders.filter(o => o.customerName === loginName && o.status === 'pending').length;
+  const unreadChatCount = chatSessions.reduce((sum, s) => sum + (s.unreadAdminCount || 0), 0);
+
+  if (loading && items.length === 0) return <div className="flex flex-col h-screen items-center justify-center bg-white font-sans text-gray-600 space-y-6"><div className="relative"><div className="w-16 h-16 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin"></div><div className="absolute inset-0 flex items-center justify-center"><CloudLightning size={20} className="text-blue-600 animate-pulse" /></div></div><div className="text-center space-y-1"><p className="font-medium text-gray-900">Menghubungkan Database</p><p className="text-xs text-gray-400">Sinkronisasi Supabase...</p></div></div>;
+
+  if (!isAuthenticated) {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 flex items-center justify-center p-4 font-sans">
+            {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+            <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl shadow-2xl w-full max-w-md border border-white/50 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-400/10 rounded-full blur-3xl -mr-10 -mt-10"></div>
+                <div className="absolute bottom-0 left-0 w-24 h-24 bg-purple-400/10 rounded-full blur-2xl -ml-5 -mb-5"></div>
+                <div className="relative z-10">
+                    <div className="flex justify-center mb-6"><div className="bg-white p-4 rounded-2xl shadow-lg ring-1 ring-gray-100"><Car size={40} className="text-blue-600" strokeWidth={1.5} /></div></div>
+                    <div className="text-center mb-8"><h1 className="text-4xl font-extrabold text-gray-900 tracking-tight mb-1">BJW</h1><p className="text-gray-700 text-lg font-bold uppercase tracking-wider mb-1">Autopart</p><p className="text-gray-500 text-sm">Sukucadang Mobil</p></div>
+                    <form onSubmit={handleGlobalLogin} className="space-y-5">
+                        <div className="space-y-1.5"><label className="text-xs font-semibold text-gray-500 uppercase tracking-wider ml-1">Identitas</label><div className="relative group"><User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors" size={20} /><input type="text" value={loginName} onChange={(e) => setLoginName(e.target.value)} className="w-full pl-12 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all font-medium text-gray-800 placeholder:text-gray-400" placeholder="Nama Anda..." /></div></div>
+                        <div className="space-y-1.5"><label className="text-xs font-semibold text-gray-500 uppercase tracking-wider ml-1">Kode Akses <span className="text-gray-300 font-normal">(Opsional)</span></label><div className="relative group"><KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors" size={20} /><input type="password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} className="w-full pl-12 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all font-medium text-gray-800 placeholder:text-gray-400" placeholder="Password Admin" /></div></div>
+                        <button type="submit" className="w-full bg-gray-900 hover:bg-black text-white font-bold py-4 rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 group"><span>Masuk Aplikasi</span><ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" /></button>
+                    </form>
+                    <div className="mt-6 pt-6 border-t border-gray-100 flex flex-col items-center gap-3"><button onClick={() => loginAsCustomer('Tamu')} className="text-sm font-medium text-gray-500 hover:text-blue-600 transition-colors py-2 px-4 hover:bg-blue-50 rounded-lg w-full text-center">Masuk sebagai Tamu</button></div>
+                </div>
+            </div>
+        </div>
+      );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900">
+      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+      
+      {/* HEADER ATAS (NAVIGASI DESKTOP) */}
+      <div className="bg-white border-b px-4 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm backdrop-blur-md bg-white/90">
+          <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')}>
+              <div className={`${isAdmin ? 'bg-purple-600' : 'bg-blue-600'} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform`}>{isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />}</div>
+              <div>
+                  <div className="font-bold leading-none text-gray-900 text-lg">BJW</div>
+                  <div className="text-[10px] font-bold text-gray-600 leading-none mt-0.5">Autopart</div>
+                  <div className="text-[9px] text-gray-400 leading-none">Sukucadang Mobil</div>
+                  <div className={`text-[9px] font-bold mt-1 px-1.5 py-0.5 rounded-md inline-block ${isAdmin ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>{isAdmin ? 'ADMIN ACCESS' : 'STORE FRONT'}</div>
+              </div>
+          </div>
+          <div className="flex items-center gap-2">
+              <button onClick={() => { refreshData(); showToast('Data diperbarui'); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors active:scale-90"><CloudLightning size={20} className={loading ? 'animate-spin text-blue-500' : 'text-gray-500'}/></button>
+              
+              {/* NAVIGASI DESKTOP (Tampil di Layar Besar) */}
+              {isAdmin ? (
+                  <>
+                    <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><ShoppingCart size={18}/> Beranda</button>
+                    <button onClick={() => setActiveView('inventory')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='inventory'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><Package size={18}/> Gudang</button>
+                    {/* Menu Scan Resi sudah dihapus dari sini karena ada di dalam Orders */}
+                    <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><ClipboardList size={18}/> Manajemen Pesanan {pendingOrdersCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{pendingOrdersCount}</span>}</button>
+                    <button onClick={() => setActiveView('chat')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='chat'?'bg-purple-50 text-purple-700 ring-1 ring-purple-200':'text-gray-500 hover:bg-gray-50'}`}><MessageSquare size={18}/> Chat {unreadChatCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{unreadChatCount}</span>}</button>
+                  </>
+              ) : (
+                  <>
+                    <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-blue-50 text-blue-700 ring-1 ring-blue-200':'text-gray-500 hover:bg-gray-50'}`}><Home size={18}/> Belanja</button>
+                    <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-blue-50 text-blue-700 ring-1 ring-blue-200':'text-gray-500 hover:bg-gray-50'}`}><ClipboardList size={18}/> Pesanan {myPendingOrdersCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-white"></span>}</button>
+                    <button onClick={() => setActiveView('chat')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='chat'?'bg-blue-50 text-blue-700 ring-1 ring-blue-200':'text-gray-500 hover:bg-gray-50'}`}><MessageSquare size={18}/> Chat</button>
+                  </>
+              )}
+
+              <div className="h-8 w-px bg-gray-200 mx-2"></div>
+              <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 text-gray-500 hover:bg-red-50 hover:text-red-600 rounded-lg transition-all" title="Keluar"><span className="text-xs font-semibold hidden lg:inline">{loginName}</span><LogOut size={20} /></button>
+          </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
+        {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
+        
+        {/* Pass onProcessReturn to OrderManagement */}
+        {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
+        
+        {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
+        {activeView === 'chat' && <ChatView isAdmin={isAdmin} currentCustomerId={isAdmin ? undefined : myCustomerId} sessions={chatSessions} onSendMessage={handleSendMessage} />}
+        {/* Scan Resi View sudah dihapus */}
+        
+        {isEditing && isAdmin && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in">
+                <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl">
+                    <ItemForm initialData={editItem || undefined} onSubmit={handleSaveItem} onCancel={() => { setIsEditing(false); setEditItem(null); }} />
+                </div>
+            </div>
+        )}
+      </div>
+
+      {/* --- NAVIGASI BAWAH ORIGINAL (MOBILE) --- */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pb-safe z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+        {/* Grid diubah dari 5 menjadi 4 karena scan resi dihapus */}
+        <div className={`grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'} h-16`}>
+            {isAdmin ? (
+                <>
+                    <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><ShoppingCart size={22} className={activeView==='shop'?'fill-purple-100':''} /><span className="text-[10px] font-medium">Beranda</span></button>
+                    {/* Tombol Scan dihapus dari sini */}
+                    <button onClick={()=>setActiveView('inventory')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='inventory'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><Package size={22} className={activeView==='inventory'?'fill-purple-100':''} /><span className="text-[10px] font-medium">Gudang</span></button>
+                    <button onClick={()=>setActiveView('orders')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='orders'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><div className="relative"><ClipboardList size={22} className={activeView==='orders'?'fill-purple-100':''} />{pendingOrdersCount>0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}</div><span className="text-[10px] font-medium">Pesanan</span></button>
+                    <button onClick={()=>setActiveView('chat')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='chat'?'text-purple-600':'text-gray-400 hover:text-gray-600'}`}><div className="relative"><MessageSquare size={22} className={activeView==='chat'?'fill-purple-100':''} />{unreadChatCount>0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>}</div><span className="text-[10px] font-medium">Chat</span></button>
+                </>
+            ) : (
+                <>
+                    <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}><Home size={22} className={activeView==='shop'?'fill-blue-100':''} /><span className="text-[10px] font-medium">Belanja</span></button>
+                    <button onClick={()=>setActiveView('orders')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='orders'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}>
+                        <div className="relative"><ClipboardList size={22} className={activeView==='orders'?'fill-blue-100':''} />{myPendingOrdersCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-white"></span>}</div>
+                        <span className="text-[10px] font-medium">Pesanan</span></button>
+                    <button onClick={()=>setActiveView('chat')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='chat'?'text-blue-600':'text-gray-400 hover:text-gray-600'}`}><MessageSquare size={22} className={activeView==='chat'?'fill-blue-100':''} /><span className="text-[10px] font-medium">Chat</span></button>
+                </>
+            )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const App = () => <Router><AppContent /></Router>;
 export default App;
