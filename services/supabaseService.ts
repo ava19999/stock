@@ -688,8 +688,7 @@ export const updateScanResiLogField = async (id: number, field: string, value: a
     return true;
 };
 
-// 3. Proses Kirim (Pindah ke Orders + Update Status)
-// UPDATE: Return type diubah menjadi object { success, message } untuk handle validasi
+// 3. Proses Kirim (Pindah ke Orders + Update Status + UPDATE INVENTORY)
 export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Promise<{ success: boolean; message?: string }> => {
     try {
         // --- 1. VALIDASI: Cek Apakah Part Number Ada di Base ---
@@ -727,19 +726,25 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
 
         // --- 2. PROSES UPDATE (Jika Validasi Lolos) ---
         for (const log of selectedLogs) {
-            // A. Cari Nama Barang Asli di Base Inventory berdasarkan Part Number
-            // (Agar nama di laporan konsisten dengan nama di database, bukan nama dari label resi)
+            // A. Cari Nama Barang Asli & UPDATE STOK DI BARANG KELUAR
             let realItemName = log.nama_barang;
             
             if (log.part_number) {
-                const { data: baseItem } = await supabase
-                    .from(TABLE_NAME)
-                    .select('name')
-                    .eq('part_number', log.part_number)
-                    .single();
+                const item = await getItemByPartNumber(log.part_number);
                 
-                if (baseItem) {
-                    realItemName = baseItem.name;
+                if (item) {
+                    realItemName = item.name;
+
+                    // TAMBAHAN: Update Inventory (Kurangi Stok & Catat Barang Keluar)
+                    // Ini akan otomatis memasukkan data ke tabel 'barang_keluar'
+                    await updateInventory(item, {
+                        type: 'out',
+                        qty: log.quantity,
+                        ecommerce: log.ecommerce,
+                        resiTempo: log.resi, // Resi dimasukkan ke kolom Resi/Tempo di history
+                        customer: log.customer,
+                        price: log.harga_satuan
+                    });
                 }
             }
 
@@ -755,7 +760,7 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                 quantity: log.quantity,
                 harga_satuan: log.harga_satuan,
                 harga_total: log.harga_total,
-                status: 'processing' // UBAH DISINI: Masuk sebagai 'processing' agar muncul di tab Terjual
+                status: 'processing' // Masuk sebagai 'processing' agar muncul di tab Terjual
             }]);
 
             if (insertError) {
@@ -764,7 +769,7 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                 continue; 
             }
 
-            // C. Update status di tabel 'scan_resi' menjadi 'Terjual' (Ini hanya log scan, tidak apa-apa Terjual/Completed)
+            // C. Update status di tabel 'scan_resi' menjadi 'Terjual' (Ini hanya log scan)
             await supabase
                 .from('scan_resi')
                 .update({ status: 'Terjual' })
