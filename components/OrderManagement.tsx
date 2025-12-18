@@ -5,7 +5,7 @@ import {
   Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, 
   ShoppingBag, Tag, Search, X, Store, Save, Loader, FileText, 
   AlertCircle, ChevronLeft, ChevronRight, ScanBarcode, CheckSquare, 
-  FileSpreadsheet, Upload, Send, Square, ChevronDown, Check, Loader2, Edit2, XCircle, Filter, Camera
+  FileSpreadsheet, Upload, Send, Square, ChevronDown, Check, Loader2, Edit2, XCircle, Camera
 } from 'lucide-react';
 import { formatRupiah, compressImage } from '../utils';
 import { analyzeResiImage } from '../services/geminiService';
@@ -539,11 +539,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                 const isReady = log.status === 'Siap Kirim';
                                 const isSold = log.status === 'Terjual';
                                 const isSelected = selectedResis.includes(log.resi);
-                                // Logic Status Baru:
-                                // 1. Terjual -> Abu-abu
-                                // 2. Siap Kirim -> Hijau
-                                // 3. Data Lengkap tapi belum scan -> Merah (Belum Scan)
-                                // 4. Data Tidak Lengkap -> Merah (Belum Upload/Lengkapi)
                                 const isComplete = !!log.part_number && !!log.nama_barang && !!log.quantity;
 
                                 return (
@@ -691,7 +686,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     <button onClick={() => setCurrentPage(p => Math.min(scanTotalPages, p + 1))} disabled={currentPage >= scanTotalPages} className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16}/></button>
                 </div>
             </div>
-        </>
+        </div>
       ) : (
         // =======================
         // TAMPILAN ORDER LIST (Baru/Terjual/Retur)
