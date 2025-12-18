@@ -98,12 +98,10 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
   return mapped;
 };
 
-// --- FUNGSI BARU: GET ITEM BY PART NUMBER (PENTING UNTUK PROSES PESANAN) ---
 export const getItemByPartNumber = async (partNumber: string): Promise<InventoryItem | null> => {
   const { data, error } = await supabase.from(TABLE_NAME).select('*').eq('part_number', partNumber).limit(1).single();
   if (error || !data) return null;
   const mapped = mapBaseItem(data);
-  // Optional: Fetch prices if needed, but for stock update logic, base data is usually enough
   return mapped;
 };
 
@@ -186,7 +184,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   return data ? data.id : null;
 };
 
-// --- UPDATE INVENTORY (MENGURUS FISIK STOK & LOG DEFAULT) ---
+// --- UPDATE INVENTORY ---
 export const updateInventory = async (
     item: InventoryItem, 
     transaction?: { type: 'in' | 'out', qty: number, ecommerce: string, resiTempo: string, customer?: string, price?: number, isReturn?: boolean }
@@ -312,8 +310,12 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
     const table = type === 'in' ? 'barang_masuk' : 'barang_keluar';
     let query = supabase.from(table).select('*', { count: 'exact' });
     if (search) {
-        if (type === 'in') { query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,keterangan.ilike.%${search}%,tempo.ilike.%${search}%`); }
-        else { query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,customer.ilike.%${search}%,resi.ilike.%${search}%,tempo.ilike.%${search}%`); }
+        if (type === 'in') {
+            query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,keterangan.ilike.%${search}%,tempo.ilike.%${search}%`);
+        }
+        else {
+            query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,customer.ilike.%${search}%,resi.ilike.%${search}%,tempo.ilike.%${search}%`);
+        }
     }
     const from = (page - 1) * limit; const to = from + limit - 1;
     const { data, error, count } = await query.order('created_at', { ascending: false, nullsFirst: false }).range(from, to);
@@ -414,7 +416,8 @@ export const addHistoryLog = async (h: StockHistory) => {
     }
 };
 
-// --- FUNGSI UPDATE ORDER (PENTING UNTUK PARTIAL RETUR) ---
+// --- FUNGSI UPDATE ORDER ---
+
 export const updateOrderData = async (orderId: string, newItems: any[], newTotal: number, newStatus: string): Promise<boolean> => {
     const { data: oldData } = await supabase.from('orders').select('*').eq('resi', orderId).limit(1).single();
     if (!oldData) return false;
@@ -436,34 +439,56 @@ export const updateOrderData = async (orderId: string, newItems: any[], newTotal
     return true;
 };
 
-// --- FUNGSI UTAMA ORDERS ---
+// --- FUNGSI UTAMA ORDERS (GROUPING FIX) ---
 
 export const fetchOrders = async (): Promise<Order[]> => { 
-    const { data } = await supabase.from('orders').select('*').order('tanggal', { ascending: false }).limit(200); 
+    // Mengambil data dari tabel 'orders'
+    const { data } = await supabase.from('orders').select('*').order('tanggal', { ascending: false }).limit(300); 
     if (!data) return [];
 
+    // Grouping berdasarkan RESI DAN STATUS
+    // Agar "Processing" dan "Cancelled" (Retur) terpisah meskipun resinya sama
     const groupedOrders: Record<string, Order> = {};
+
     data.forEach((row: any) => {
         const resi = row.resi || row.id || 'UNKNOWN';
-        if (!groupedOrders[resi]) {
+        // UNIQUE KEY: Gabungan Resi + Status
+        const groupKey = `${resi}_${row.status}`; 
+        
+        if (!groupedOrders[groupKey]) {
             const customerStr = row.customer || '-';
             const tokoStr = row.toko ? ` (Toko: ${row.toko})` : '';
             const viaStr = row.ecommerce ? ` (Via: ${row.ecommerce})` : '';
             const resiStr = row.resi ? ` (Resi: ${row.resi})` : '';
             const constructedCustomerName = `${customerStr}${tokoStr}${viaStr}${resiStr}`;
 
-            groupedOrders[resi] = {
-                id: resi, customerName: constructedCustomerName, items: [], totalAmount: 0,
-                status: row.status as any, timestamp: row.tanggal ? new Date(row.tanggal).getTime() : Date.now(), keterangan: '' 
+            groupedOrders[groupKey] = {
+                // ID di frontend menggunakan Resi, tapi jika ada split, kita gunakan resi asli
+                // karena updateOrderStatusService menggunakan .eq('resi', id)
+                id: resi, 
+                customerName: constructedCustomerName,
+                items: [],
+                totalAmount: 0,
+                status: row.status as any,
+                timestamp: row.tanggal ? new Date(row.tanggal).getTime() : Date.now(),
+                keterangan: '' 
             };
         }
-        groupedOrders[resi].items.push({
-            id: row.part_number, partNumber: row.part_number, name: row.nama_barang,
-            quantity: 0, price: Number(row.harga_satuan), cartQuantity: Number(row.quantity), customPrice: Number(row.harga_satuan),
+
+        groupedOrders[groupKey].items.push({
+            id: row.part_number, 
+            partNumber: row.part_number,
+            name: row.nama_barang,
+            quantity: 0, 
+            price: Number(row.harga_satuan),
+            cartQuantity: Number(row.quantity),
+            customPrice: Number(row.harga_satuan),
             brand: '', application: '', shelf: '', ecommerce: '', imageUrl: '', lastUpdated: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, costPrice: 0, kingFanoPrice: 0
         });
-        groupedOrders[resi].totalAmount += Number(row.harga_total);
+
+        groupedOrders[groupKey].totalAmount += Number(row.harga_total);
     });
+
     return Object.values(groupedOrders);
 };
 
@@ -481,9 +506,17 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
     const orderDate = new Date(order.timestamp).toISOString().split('T')[0];
 
     const rows = order.items.map(item => ({
-        tanggal: orderDate, resi: details.resi, toko: details.toko, ecommerce: details.ecommerce, customer: details.customer,
-        part_number: item.partNumber || '-', nama_barang: item.name, quantity: item.cartQuantity,
-        harga_satuan: item.customPrice || item.price, harga_total: (item.customPrice || item.price) * item.cartQuantity, status: order.status
+        tanggal: orderDate, 
+        resi: details.resi, 
+        toko: details.toko, 
+        ecommerce: details.ecommerce, 
+        customer: details.customer,
+        part_number: item.partNumber || '-', 
+        nama_barang: item.name, 
+        quantity: item.cartQuantity,
+        harga_satuan: item.customPrice || item.price, 
+        harga_total: (item.customPrice || item.price) * item.cartQuantity, 
+        status: order.status
     }));
 
     const { error } = await supabase.from('orders').insert(rows);
