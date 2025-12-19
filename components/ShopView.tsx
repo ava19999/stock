@@ -90,26 +90,26 @@ export const ShopView: React.FC<ShopViewProps> = ({
   const cartItemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
 
   return (
-    <div className="relative min-h-full pb-20" onClick={() => setShowAdminPriceMenu(false)}>
+    <div className="relative min-h-full pb-20 bg-gray-900 text-gray-100" onClick={() => setShowAdminPriceMenu(false)}>
       {tempBannerImg && <ImageCropper imageSrc={tempBannerImg} onConfirm={handleCropConfirm} onCancel={() => setTempBannerImg(null)} />}
       
       {/* BANNER */}
-      <div className="relative w-full aspect-[21/9] md:aspect-[32/9] bg-gray-900 rounded-2xl overflow-hidden shadow-lg mb-6 group select-none">
-          {bannerUrl ? <img src={bannerUrl} alt="Promo Banner" className="w-full h-full object-cover" referrerPolicy="no-referrer"/> : <div className="w-full h-full bg-gradient-to-r from-blue-900 to-purple-900 flex flex-col items-center justify-center text-white p-6 text-center"><Sparkles className="mb-3 text-yellow-400 opacity-80" size={32} /><h2 className="text-xl md:text-3xl font-bold mb-1">Promo Spesial Hari Ini</h2><p className="text-blue-200 text-xs md:text-sm">Temukan sparepart terbaik untuk mobil Anda</p></div>}
-          {isAdmin && (<div className="absolute top-3 right-3 z-10"><button onClick={() => bannerInputRef.current?.click()} disabled={isUploadingBanner} className="bg-white/90 backdrop-blur text-gray-800 px-3 py-2 rounded-lg text-xs font-bold shadow-md hover:bg-white flex items-center gap-2 transition-all active:scale-95">{isUploadingBanner ? <Loader2 size={14} className="animate-spin"/> : <Camera size={14}/>}{isUploadingBanner ? 'Upload...' : 'Ganti Banner'}</button><input type="file" ref={bannerInputRef} className="hidden" accept="image/*" onChange={handleFileSelect} /></div>)}
+      <div className="relative w-full aspect-[21/9] md:aspect-[32/9] bg-gray-800 rounded-2xl overflow-hidden shadow-lg mb-6 group select-none border border-gray-700">
+          {bannerUrl ? <img src={bannerUrl} alt="Promo Banner" className="w-full h-full object-cover" referrerPolicy="no-referrer"/> : <div className="w-full h-full bg-gradient-to-r from-gray-800 to-gray-900 flex flex-col items-center justify-center text-white p-6 text-center border border-gray-700"><Sparkles className="mb-3 text-yellow-500 opacity-80" size={32} /><h2 className="text-xl md:text-3xl font-bold mb-1 text-gray-100">Promo Spesial Hari Ini</h2><p className="text-gray-400 text-xs md:text-sm">Temukan sparepart terbaik untuk mobil Anda</p></div>}
+          {isAdmin && (<div className="absolute top-3 right-3 z-10"><button onClick={() => bannerInputRef.current?.click()} disabled={isUploadingBanner} className="bg-black/60 backdrop-blur text-white px-3 py-2 rounded-lg text-xs font-bold shadow-md hover:bg-black/80 flex items-center gap-2 transition-all active:scale-95 border border-white/10">{isUploadingBanner ? <Loader2 size={14} className="animate-spin"/> : <Camera size={14}/>}{isUploadingBanner ? 'Upload...' : 'Ganti Banner'}</button><input type="file" ref={bannerInputRef} className="hidden" accept="image/*" onChange={handleFileSelect} /></div>)}
       </div>
 
       {/* FILTER BAR */}
-      <div className="sticky top-[64px] z-30 bg-gray-50/95 backdrop-blur-sm pt-2 pb-2 -mx-2 px-2 md:mx-0 md:px-0 space-y-3 border-b border-gray-200/50">
+      <div className="sticky top-[64px] z-30 bg-gray-900/95 backdrop-blur-sm pt-2 pb-2 -mx-2 px-2 md:mx-0 md:px-0 space-y-3 border-b border-gray-800">
         <div className="flex gap-2">
-            <div className="relative w-full group"><div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none"><Search size={18} className="text-gray-400 group-focus-within:text-blue-600 transition-colors" /></div><input type="text" placeholder="Cari sparepart..." className="pl-10 pr-4 py-3 w-full bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm transition-all" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/></div>
+            <div className="relative w-full group"><div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none"><Search size={18} className="text-gray-500 group-focus-within:text-blue-400 transition-colors" /></div><input type="text" placeholder="Cari sparepart..." className="pl-10 pr-4 py-3 w-full bg-gray-800 border border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none shadow-sm transition-all text-white placeholder-gray-500" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/></div>
             
             {/* ADMIN PRICE SWITCHER */}
             {isAdmin && (
                 <div className="relative">
                     <button 
                         onClick={(e) => { e.stopPropagation(); setShowAdminPriceMenu(!showAdminPriceMenu); }}
-                        className={`h-full px-3 rounded-xl flex items-center gap-2 border shadow-sm transition-all whitespace-nowrap ${adminPriceMode === 'kingFano' ? 'bg-purple-50 border-purple-200 text-purple-700' : 'bg-white border-gray-200 text-gray-600'}`}
+                        className={`h-full px-3 rounded-xl flex items-center gap-2 border shadow-sm transition-all whitespace-nowrap ${adminPriceMode === 'kingFano' ? 'bg-purple-900/30 border-purple-800 text-purple-300' : 'bg-gray-800 border-gray-700 text-gray-300'}`}
                     >
                         <Eye size={16} />
                         <span className="text-xs font-bold hidden sm:inline">{adminPriceMode === 'retail' ? 'Harga Eceran' : 'View: King Fano'}</span>
@@ -117,19 +117,19 @@ export const ShopView: React.FC<ShopViewProps> = ({
                     </button>
 
                     {showAdminPriceMenu && (
-                        <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-50 animate-in zoom-in-95">
+                        <div className="absolute right-0 top-full mt-2 w-48 bg-gray-800 rounded-xl shadow-xl border border-gray-700 overflow-hidden z-50 animate-in zoom-in-95">
                             <div className="p-1">
-                                <div className="px-3 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Mode Tampilan Harga</div>
+                                <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider">Mode Tampilan Harga</div>
                                 <button 
                                     onClick={() => { setAdminPriceMode('retail'); setShowAdminPriceMenu(false); }}
-                                    className={`w-full text-left px-3 py-2 text-xs font-bold rounded-lg flex items-center justify-between group transition-colors ${adminPriceMode === 'retail' ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'}`}
+                                    className={`w-full text-left px-3 py-2 text-xs font-bold rounded-lg flex items-center justify-between group transition-colors ${adminPriceMode === 'retail' ? 'bg-blue-900/30 text-blue-300' : 'text-gray-300 hover:bg-gray-700'}`}
                                 >
                                     <div className="flex items-center gap-2"><Tag size={14} /> Eceran (Umum)</div>
                                     {adminPriceMode === 'retail' && <Check size={14}/>}
                                 </button>
                                 <button 
                                     onClick={() => { setAdminPriceMode('kingFano'); setShowAdminPriceMenu(false); }}
-                                    className={`w-full text-left px-3 py-2 text-xs font-bold rounded-lg flex items-center justify-between group transition-colors ${adminPriceMode === 'kingFano' ? 'bg-purple-50 text-purple-700' : 'text-gray-700 hover:bg-gray-50'}`}
+                                    className={`w-full text-left px-3 py-2 text-xs font-bold rounded-lg flex items-center justify-between group transition-colors ${adminPriceMode === 'kingFano' ? 'bg-purple-900/30 text-purple-300' : 'text-gray-300 hover:bg-gray-700'}`}
                                 >
                                     <div className="flex items-center gap-2"><Crown size={14} /> King Fano</div>
                                     {adminPriceMode === 'kingFano' && <Check size={14}/>}
@@ -140,7 +140,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 </div>
             )}
             
-            <div className="bg-white rounded-xl p-1 flex shadow-sm border border-gray-200"><button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={18}/></button><button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-gray-100 text-blue-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><List size={18}/></button></div>
+            <div className="bg-gray-800 rounded-xl p-1 flex shadow-sm border border-gray-700"><button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-gray-700 text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}><LayoutGrid size={18}/></button><button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-gray-700 text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}><List size={18}/></button></div>
         </div>
       </div>
 
@@ -148,7 +148,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
       {loading ? (
           <div className="flex flex-col items-center justify-center py-20 text-blue-500"><Loader2 size={32} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat Produk...</p></div>
       ) : shopItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center text-gray-400"><Search size={48} className="opacity-20 mb-3" /><p>Tidak ditemukan barang yang tersedia</p></div>
+          <div className="flex flex-col items-center justify-center py-20 text-center text-gray-500"><Search size={48} className="opacity-20 mb-3" /><p>Tidak ditemukan barang yang tersedia</p></div>
       ) : (
         <>
         {viewMode === 'grid' ? (
@@ -159,33 +159,33 @@ export const ShopView: React.FC<ShopViewProps> = ({
                     const displayPrice = useSpecialPrice ? item.kingFanoPrice : item.price;
                     
                     return (
-                    <div key={item.id} className="group bg-white rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:shadow-lg border border-gray-100 overflow-hidden flex flex-col transition-all duration-300 transform hover:-translate-y-1">
-                        <div className="aspect-square w-full bg-gray-50 relative overflow-hidden">
-                            {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}} /> : <div className="w-full h-full flex flex-col items-center justify-center text-gray-300"><Car size={32}/><span className="text-[10px] mt-1">No Image</span></div>}
-                            <div className="absolute top-2 right-2 bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold text-gray-700 shadow-sm border border-gray-100">{item.quantity} Unit</div>
+                    <div key={item.id} className="group bg-gray-800 rounded-xl shadow-none hover:shadow-lg border border-gray-700 overflow-hidden flex flex-col transition-all duration-300 transform hover:-translate-y-1 hover:border-gray-600">
+                        <div className="aspect-square w-full bg-gray-700 relative overflow-hidden">
+                            {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}} /> : <div className="w-full h-full flex flex-col items-center justify-center text-gray-600"><Car size={32}/><span className="text-[10px] mt-1">No Image</span></div>}
+                            <div className="absolute top-2 right-2 bg-black/70 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold text-gray-200 shadow-sm border border-gray-600">{item.quantity} Unit</div>
                             
                             {useSpecialPrice && (
-                                <div className="absolute top-2 left-2 bg-purple-600 text-white px-2 py-1 rounded-lg text-[10px] font-bold shadow-sm flex items-center gap-1">
+                                <div className="absolute top-2 left-2 bg-purple-600 text-white px-2 py-1 rounded-lg text-[10px] font-bold shadow-sm flex items-center gap-1 border border-purple-400">
                                     <Crown size={10} fill="white"/> SPECIAL
                                 </div>
                             )}
                         </div>
                         <div className="p-3 flex-1 flex flex-col">
-                            <div className="flex items-center gap-1.5 mb-1.5"><Tag size={10} className="text-blue-500" /><span className="text-xs font-mono text-gray-500 uppercase tracking-wider truncate">{item.partNumber || '-'}</span></div>
-                            <h3 className="text-sm font-bold text-gray-900 mb-1 leading-snug line-clamp-1" title={item.name}>{item.name}</h3>
+                            <div className="flex items-center gap-1.5 mb-1.5"><Tag size={10} className="text-blue-400" /><span className="text-xs font-mono text-gray-400 uppercase tracking-wider truncate">{item.partNumber || '-'}</span></div>
+                            <h3 className="text-sm font-bold text-gray-100 mb-1 leading-snug line-clamp-1" title={item.name}>{item.name}</h3>
                             
                             {/* NEW: Brand & Application Badges */}
                             <div className="flex flex-wrap gap-1 mb-2">
-                                {item.brand && <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded font-medium">{item.brand}</span>}
-                                {item.application && <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-medium">{item.application}</span>}
+                                {item.brand && <span className="text-[10px] px-1.5 py-0.5 bg-gray-700 text-gray-300 rounded font-medium border border-gray-600">{item.brand}</span>}
+                                {item.application && <span className="text-[10px] px-1.5 py-0.5 bg-blue-900/30 text-blue-300 rounded font-medium border border-blue-900/50">{item.application}</span>}
                             </div>
                             
                             <p className="text-xs text-gray-500 line-clamp-2 mb-3 leading-relaxed flex-1">{item.description}</p>
-                            <div className="mt-auto pt-3 border-t border-gray-50 flex flex-col justify-between gap-2">
+                            <div className="mt-auto pt-3 border-t border-gray-700 flex flex-col justify-between gap-2">
                                 <div className="flex flex-col">
-                                    <span className={`text-sm font-extrabold ${useSpecialPrice ? 'text-purple-700' : 'text-gray-900'}`}>{formatRupiah(displayPrice)}</span>
+                                    <span className={`text-sm font-extrabold ${useSpecialPrice ? 'text-purple-400' : 'text-gray-100'}`}>{formatRupiah(displayPrice)}</span>
                                 </div>
-                                <button onClick={() => onAddToCart({ ...item, customPrice: displayPrice })} className="bg-gray-900 text-white py-2 px-3 rounded-lg hover:bg-blue-600 active:scale-95 transition-all flex items-center justify-center space-x-1.5 w-full shadow-sm"><Plus size={14} /><span className="text-[10px] sm:text-xs font-bold uppercase tracking-wide">Keranjang</span></button>
+                                <button onClick={() => onAddToCart({ ...item, customPrice: displayPrice })} className="bg-gray-100 text-gray-900 py-2 px-3 rounded-lg hover:bg-blue-600 hover:text-white active:scale-95 transition-all flex items-center justify-center space-x-1.5 w-full shadow-sm font-bold"><Plus size={14} /><span className="text-[10px] sm:text-xs uppercase tracking-wide">Keranjang</span></button>
                             </div>
                         </div>
                     </div>
@@ -200,27 +200,27 @@ export const ShopView: React.FC<ShopViewProps> = ({
                     const displayPrice = useSpecialPrice ? item.kingFanoPrice : item.price;
 
                     return (
-                    <div key={item.id} className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 flex gap-3 hover:shadow-md transition-shadow">
-                         <div className="w-20 h-20 bg-gray-50 rounded-lg overflow-hidden flex-shrink-0 relative">
-                            {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}} /> : <div className="w-full h-full flex items-center justify-center text-gray-300"><Car size={20}/></div>}
-                            <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[9px] font-bold text-center py-0.5">{item.quantity} Unit</div>
+                    <div key={item.id} className="bg-gray-800 rounded-xl p-3 shadow-sm border border-gray-700 flex gap-3 hover:border-gray-600 transition-colors">
+                         <div className="w-20 h-20 bg-gray-700 rounded-lg overflow-hidden flex-shrink-0 relative">
+                            {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}} /> : <div className="w-full h-full flex items-center justify-center text-gray-600"><Car size={20}/></div>}
+                            <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-[9px] font-bold text-center py-0.5">{item.quantity} Unit</div>
                          </div>
                          <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
                              <div>
-                                 <h3 className="text-sm font-bold text-gray-900 leading-tight line-clamp-2 mb-1">{item.name}</h3>
+                                 <h3 className="text-sm font-bold text-gray-100 leading-tight line-clamp-2 mb-1">{item.name}</h3>
                                  <div className="flex items-center flex-wrap gap-2 mb-1">
-                                    <span className="text-xs font-mono text-gray-500 bg-gray-50 px-1 rounded truncate">{item.partNumber || '-'}</span>
+                                    <span className="text-xs font-mono text-gray-400 bg-gray-700 px-1 rounded truncate border border-gray-600">{item.partNumber || '-'}</span>
                                     {/* NEW: Brand & Application Badges */}
-                                    {item.brand && <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded font-medium">{item.brand}</span>}
-                                    {item.application && <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-medium">{item.application}</span>}
+                                    {item.brand && <span className="text-[10px] px-1.5 py-0.5 bg-gray-700 text-gray-300 rounded font-medium border border-gray-600">{item.brand}</span>}
+                                    {item.application && <span className="text-[10px] px-1.5 py-0.5 bg-blue-900/30 text-blue-300 rounded font-medium border border-blue-900/50">{item.application}</span>}
                                  </div>
                                  <p className="text-xs text-gray-500 line-clamp-1 truncate">{item.description}</p>
                              </div>
                              <div className="flex justify-between items-end mt-2">
                                  <div>
-                                     <span className={`text-sm font-extrabold ${useSpecialPrice ? 'text-purple-700' : 'text-gray-900'}`}>{formatRupiah(displayPrice)}</span>
+                                     <span className={`text-sm font-extrabold ${useSpecialPrice ? 'text-purple-400' : 'text-gray-100'}`}>{formatRupiah(displayPrice)}</span>
                                  </div>
-                                 <button onClick={() => onAddToCart({ ...item, customPrice: displayPrice })} className="bg-gray-900 text-white p-2 rounded-lg hover:bg-blue-600 active:scale-95 transition-all shadow-sm flex items-center gap-1"><Plus size={14} /><span className="text-[10px] font-bold">Beli</span></button>
+                                 <button onClick={() => onAddToCart({ ...item, customPrice: displayPrice })} className="bg-gray-100 text-gray-900 p-2 rounded-lg hover:bg-blue-600 hover:text-white active:scale-95 transition-all shadow-sm flex items-center gap-1"><Plus size={14} /><span className="text-[10px] font-bold">Beli</span></button>
                              </div>
                          </div>
                     </div>
@@ -230,61 +230,61 @@ export const ShopView: React.FC<ShopViewProps> = ({
         )}
 
         {/* PAGINATION */}
-        <div className="flex justify-between items-center mt-8 bg-white p-3 rounded-xl border border-gray-100 shadow-sm sticky bottom-20 md:bottom-4 z-20">
-            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="flex items-center gap-1 text-xs font-bold px-4 py-2 rounded-lg hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16} /> Sebelumnya</button>
-            <span className="text-xs font-medium text-gray-500">Halaman <span className="font-bold text-gray-900">{page}</span> dari {totalPages || 1}</span>
-            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages || totalPages === 0} className="flex items-center gap-1 text-xs font-bold px-4 py-2 rounded-lg hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed">Selanjutnya <ChevronRight size={16} /></button>
+        <div className="flex justify-between items-center mt-8 bg-gray-800/90 backdrop-blur p-3 rounded-xl border border-gray-700 shadow-sm sticky bottom-20 md:bottom-4 z-20">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="flex items-center gap-1 text-xs font-bold px-4 py-2 rounded-lg hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16} /> Sebelumnya</button>
+            <span className="text-xs font-medium text-gray-500">Halaman <span className="font-bold text-gray-200">{page}</span> dari {totalPages || 1}</span>
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages || totalPages === 0} className="flex items-center gap-1 text-xs font-bold px-4 py-2 rounded-lg hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed">Selanjutnya <ChevronRight size={16} /></button>
         </div>
         </>
       )}
 
       {/* FLOAT BUTTON */}
-      <button onClick={() => setIsCartOpen(true)} className="fixed bottom-20 right-4 sm:bottom-8 sm:right-8 bg-gray-900 text-white p-4 rounded-full shadow-xl hover:bg-blue-600 hover:scale-105 active:scale-95 transition-all z-40 flex items-center justify-center group"><ShoppingCart size={24} />{cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-white shadow-sm">{cartItemCount}</span>}</button>
+      <button onClick={() => setIsCartOpen(true)} className="fixed bottom-20 right-4 sm:bottom-8 sm:right-8 bg-gray-100 text-gray-900 p-4 rounded-full shadow-xl hover:bg-blue-600 hover:text-white hover:scale-105 active:scale-95 transition-all z-40 flex items-center justify-center group"><ShoppingCart size={24} />{cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-gray-800 shadow-sm">{cartItemCount}</span>}</button>
       
       {/* CART MODAL (SEMUA USER BISA TAWAR HARGA) */}
       {isCartOpen && (
         <div className="fixed inset-0 z-[60] flex justify-end">
-            <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setIsCartOpen(false)}></div>
-            <div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right">
-                <div className="px-5 py-4 border-b flex justify-between items-center bg-white">
-                    <h2 className="text-lg font-bold">Keranjang</h2>
-                    <button onClick={() => setIsCartOpen(false)}><X size={20}/></button>
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setIsCartOpen(false)}></div>
+            <div className="relative w-full max-w-md bg-gray-800 h-full shadow-2xl flex flex-col animate-in slide-in-from-right border-l border-gray-700">
+                <div className="px-5 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
+                    <h2 className="text-lg font-bold text-gray-100">Keranjang</h2>
+                    <button onClick={() => setIsCartOpen(false)} className="text-gray-400 hover:text-white"><X size={20}/></button>
                 </div>
                 
-                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-900">
                     {cart.map(item => (
-                        <div key={item.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 relative group">
+                        <div key={item.id} className="bg-gray-800 p-3 rounded-xl shadow-sm border border-gray-700 relative group">
                             {/* Tombol Hapus */}
                             <button 
                                 onClick={() => onRemoveFromCart(item.id)} 
-                                className="absolute top-2 right-2 text-gray-300 hover:text-red-500 transition-colors"
+                                className="absolute top-2 right-2 text-gray-600 hover:text-red-500 transition-colors"
                             >
                                 <X size={16}/>
                             </button>
 
                             <div className="flex gap-3 mb-3">
-                                <div className="w-14 h-14 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
-                                    {item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer"/> : <div className="h-full flex items-center justify-center"><Package size={16}/></div>}
+                                <div className="w-14 h-14 bg-gray-700 rounded-lg overflow-hidden flex-shrink-0">
+                                    {item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer"/> : <div className="h-full flex items-center justify-center text-gray-500"><Package size={16}/></div>}
                                 </div>
                                 <div className="flex-1 pr-4">
-                                    <h4 className="text-sm font-bold line-clamp-2 leading-snug">{item.name}</h4>
+                                    <h4 className="text-sm font-bold line-clamp-2 leading-snug text-gray-200">{item.name}</h4>
                                     <p className="text-[10px] text-gray-500 font-mono mt-0.5">{item.partNumber}</p>
                                 </div>
                             </div>
 
-                            <div className="flex items-center justify-between pt-2 border-t border-gray-50">
+                            <div className="flex items-center justify-between pt-2 border-t border-gray-700">
                                 {/* Kontrol Qty (+/-) */}
-                                <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+                                <div className="flex items-center gap-2 bg-gray-700 rounded-lg p-1">
                                     <button 
                                         onClick={() => onUpdateCartItem(item.id, { cartQuantity: Math.max(1, item.cartQuantity - 1) })}
-                                        className="w-6 h-6 flex items-center justify-center bg-white rounded text-gray-600 shadow-sm hover:bg-gray-50 active:scale-95"
+                                        className="w-6 h-6 flex items-center justify-center bg-gray-600 rounded text-gray-300 shadow-sm hover:bg-gray-500 active:scale-95"
                                     >
                                         <Minus size={12}/>
                                     </button>
-                                    <span className="text-xs font-bold w-4 text-center">{item.cartQuantity}</span>
+                                    <span className="text-xs font-bold w-4 text-center text-gray-200">{item.cartQuantity}</span>
                                     <button 
                                         onClick={() => onUpdateCartItem(item.id, { cartQuantity: item.cartQuantity + 1 })}
-                                        className="w-6 h-6 flex items-center justify-center bg-white rounded text-gray-600 shadow-sm hover:bg-gray-50 active:scale-95"
+                                        className="w-6 h-6 flex items-center justify-center bg-gray-600 rounded text-gray-300 shadow-sm hover:bg-gray-500 active:scale-95"
                                     >
                                         <Plus size={12}/>
                                     </button>
@@ -294,17 +294,17 @@ export const ShopView: React.FC<ShopViewProps> = ({
                                 <div className="text-right">
                                     <div className="flex flex-col items-end">
                                         <div className="relative">
-                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 font-bold">Rp</span>
+                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-blue-300 font-bold">Rp</span>
                                             <input 
                                                 type="number"
-                                                className="w-24 pl-6 pr-2 py-1 text-right text-xs font-bold border border-blue-200 rounded focus:ring-2 focus:ring-blue-100 outline-none bg-blue-50/50"
+                                                className="w-24 pl-6 pr-2 py-1 text-right text-xs font-bold border border-blue-900 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-blue-900/20 text-blue-200 placeholder-blue-500/50"
                                                 placeholder={item.price.toString()}
                                                 value={item.customPrice ?? ''}
                                                 onChange={(e) => onUpdateCartItem(item.id, { customPrice: e.target.value ? Number(e.target.value) : undefined })}
                                             />
                                         </div>
                                         <span className="text-[9px] text-gray-500 mt-0.5">Harga Tawar</span>
-                                        {item.customPrice && <span className="text-[9px] text-gray-400 line-through mr-1">{formatRupiah(item.price)}</span>}
+                                        {item.customPrice && <span className="text-[9px] text-gray-600 line-through mr-1">{formatRupiah(item.price)}</span>}
                                     </div>
                                 </div>
                             </div>
@@ -312,22 +312,22 @@ export const ShopView: React.FC<ShopViewProps> = ({
                     ))}
                     
                     {cart.length === 0 && (
-                        <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                        <div className="flex flex-col items-center justify-center h-64 text-gray-500">
                             <ShoppingCart size={48} className="mb-2 opacity-20"/>
                             <p>Keranjang kosong</p>
                         </div>
                     )}
                 </div>
 
-                <div className="p-5 border-t bg-white safe-area-bottom">
+                <div className="p-5 border-t border-gray-700 bg-gray-800 safe-area-bottom">
                     <div className="flex justify-between mb-4">
-                        <span className="font-bold">Total</span>
-                        <span className="font-extrabold text-xl">{formatRupiah(cartTotal)}</span>
+                        <span className="font-bold text-gray-400">Total</span>
+                        <span className="font-extrabold text-xl text-gray-100">{formatRupiah(cartTotal)}</span>
                     </div>
                     <button 
                         onClick={() => { setIsCartOpen(false); setIsCheckoutModalOpen(true); }} 
                         disabled={cart.length===0} 
-                        className="w-full bg-gray-900 text-white py-3.5 rounded-xl font-bold hover:bg-black disabled:opacity-50"
+                        className="w-full bg-gray-100 text-gray-900 py-3.5 rounded-xl font-bold hover:bg-white disabled:opacity-50"
                     >
                         Lanjut Bayar
                     </button>
@@ -338,10 +338,10 @@ export const ShopView: React.FC<ShopViewProps> = ({
 
       {isCheckoutModalOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsCheckoutModalOpen(false)}></div>
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm relative overflow-hidden animate-in zoom-in-95">
-                <div className="bg-gray-50 px-6 py-4 border-b">
-                    <h3 className="text-lg font-bold">Konfirmasi</h3>
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setIsCheckoutModalOpen(false)}></div>
+            <div className="bg-gray-800 rounded-3xl shadow-2xl w-full max-w-sm relative overflow-hidden animate-in zoom-in-95 border border-gray-700">
+                <div className="bg-gray-900 px-6 py-4 border-b border-gray-700">
+                    <h3 className="text-lg font-bold text-gray-100">Konfirmasi</h3>
                 </div>
                 <form onSubmit={(e) => { 
                     e.preventDefault(); 
@@ -361,15 +361,15 @@ export const ShopView: React.FC<ShopViewProps> = ({
                     } 
                 }} className="p-6">
                     <div className="space-y-4">
-                        <div><label className="text-xs font-bold text-gray-500 uppercase">Nama</label><input type="text" required autoFocus value={customerNameInput} onChange={(e) => setCustomerNameInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Nama Anda..." /></div>
-                        <div><label className="text-xs font-bold text-gray-500 uppercase">No. Resi</label><input type="text" value={resiInput} onChange={(e) => setResiInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Nomor Resi..." /></div>
+                        <div><label className="text-xs font-bold text-gray-500 uppercase">Nama</label><input type="text" required autoFocus value={customerNameInput} onChange={(e) => setCustomerNameInput(e.target.value)} className="w-full p-3 border border-gray-600 bg-gray-700 rounded-xl mt-1 text-white placeholder-gray-500 outline-none focus:border-blue-500" placeholder="Nama Anda..." /></div>
+                        <div><label className="text-xs font-bold text-gray-500 uppercase">No. Resi</label><input type="text" value={resiInput} onChange={(e) => setResiInput(e.target.value)} className="w-full p-3 border border-gray-600 bg-gray-700 rounded-xl mt-1 text-white placeholder-gray-500 outline-none focus:border-blue-500" placeholder="Nomor Resi..." /></div>
                         
-                        <div><label className="text-xs font-bold text-gray-500 uppercase">E-Commerce</label><input type="text" value={ecommerceInput} onChange={(e) => setEcommerceInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Contoh: Shopee..." /></div>
+                        <div><label className="text-xs font-bold text-gray-500 uppercase">E-Commerce</label><input type="text" value={ecommerceInput} onChange={(e) => setEcommerceInput(e.target.value)} className="w-full p-3 border border-gray-600 bg-gray-700 rounded-xl mt-1 text-white placeholder-gray-500 outline-none focus:border-blue-500" placeholder="Contoh: Shopee..." /></div>
                         
-                        <div><label className="text-xs font-bold text-gray-500 uppercase">Toko</label><input type="text" value={shopNameInput} onChange={(e) => setShopNameInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Nama Toko..." /></div>
+                        <div><label className="text-xs font-bold text-gray-500 uppercase">Toko</label><input type="text" value={shopNameInput} onChange={(e) => setShopNameInput(e.target.value)} className="w-full p-3 border border-gray-600 bg-gray-700 rounded-xl mt-1 text-white placeholder-gray-500 outline-none focus:border-blue-500" placeholder="Nama Toko..." /></div>
                     </div>
                     <div className="mt-6 grid grid-cols-2 gap-3">
-                        <button type="button" onClick={() => setIsCheckoutModalOpen(false)} className="py-3 bg-gray-100 font-bold rounded-xl">Batal</button>
+                        <button type="button" onClick={() => setIsCheckoutModalOpen(false)} className="py-3 bg-gray-700 text-gray-300 font-bold rounded-xl hover:bg-gray-600">Batal</button>
                         <button type="submit" disabled={!customerNameInput.trim()} className="py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50">Kirim</button>
                     </div>
                 </form>
