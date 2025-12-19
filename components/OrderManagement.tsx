@@ -34,7 +34,7 @@ const MARKETPLACES = ['Shopee', 'Tiktok', 'Tokopedia', 'Lazada', 'Offline'];
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
   return (
-    <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-full shadow-xl flex items-center text-white text-sm font-medium animate-in fade-in slide-in-from-top-2 duration-300 border ${type === 'success' ? 'bg-gray-900 border-gray-700' : 'bg-red-600 border-red-700'}`}>
+    <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-full shadow-xl flex items-center text-white text-sm font-medium animate-in fade-in slide-in-from-top-2 duration-300 border ${type === 'success' ? 'bg-gray-900 border-gray-700' : 'bg-red-900 border-red-700'}`}>
       {type === 'success' ? <CheckCircle size={18} className="mr-2 text-green-400" /> : <XCircle size={18} className="mr-2" />}
       {message}
     </div>
@@ -295,10 +295,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   const getMarketplaceColor = (mp: string) => {
     switch(mp) {
-        case 'Shopee': return 'bg-orange-100 text-orange-700 border-orange-200';
-        case 'Tokopedia': return 'bg-green-100 text-green-700 border-green-200';
-        case 'Tiktok': return 'bg-gray-800 text-white border-gray-900';
-        default: return 'bg-gray-100 text-gray-700 border-gray-200';
+        case 'Shopee': return 'bg-orange-900/30 text-orange-300 border-orange-800';
+        case 'Tokopedia': return 'bg-green-900/30 text-green-300 border-green-800';
+        case 'Tiktok': return 'bg-gray-700 text-white border-gray-600';
+        default: return 'bg-gray-700 text-gray-300 border-gray-600';
     }
   };
 
@@ -350,7 +350,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const handleProcessReturn = async () => {
       if (!selectedOrderForReturn) return;
       
-      // 1. Hitung items yang akan diretur
       const itemsToReturnData = selectedOrderForReturn.items.map(item => {
             const qtyRetur = returnQuantities[item.id] || 0;
             return qtyRetur > 0 ? { ...item, cartQuantity: qtyRetur } : null;
@@ -364,19 +363,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
         const combinedResiShop = `${resiText} / ${shopName}`;
         const orderDate = selectedOrderForReturn.items[0]?.timestamp ? new Date(selectedOrderForReturn.timestamp).toISOString() : new Date().toISOString();
 
-        // 2. Hitung sisa barang (untuk menentukan status Full Retur atau Sebagian)
-        // Kita simulasikan sisa barang setelah retur diproses
         const remainingItems = selectedOrderForReturn.items.map(item => {
             const returItem = itemsToReturnData.find(r => r.id === item.id);
-            // Jika item ini diretur, kurangi quantity aslinya dengan qty retur
             const qtyReturned = returItem ? returItem.cartQuantity : 0;
             return { ...item, cartQuantity: (item.cartQuantity || 0) - qtyReturned };
         }).filter(item => (item.cartQuantity || 0) > 0);
 
-        // 3. Tentukan Status
         const statusLabel = remainingItems.length === 0 ? 'Full Retur' : 'Retur Sebagian';
 
-        // 4. Proses Inventory dan Simpan Log Retur
         for (const item of itemsToReturnData) {
             const hargaSatuan = item.customPrice ?? item.price ?? 0;
             const realItem = await getItemByPartNumber(item.partNumber);
@@ -397,19 +391,16 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 harga_satuan: hargaSatuan, 
                 harga_total: hargaSatuan * item.cartQuantity, 
                 tanggal_retur: new Date().toISOString(),
-                status: statusLabel, // <--- GUNAKAN STATUS DINAMIS DI SINI
+                status: statusLabel, 
                 keterangan: 'Retur Barang'
             };
             await addReturTransaction(returData);
         }
 
-        // 5. Update Data Order (Cancelled jika habis, atau Processing jika sisa)
         if (remainingItems.length === 0) {
             await updateOrderData(selectedOrderForReturn.id, selectedOrderForReturn.items, selectedOrderForReturn.totalAmount, 'cancelled');
         } else {
             const returnTotal = itemsToReturnData.reduce((sum, item) => sum + ((item.customPrice ?? item.price ?? 0) * item.cartQuantity), 0);
-            
-            // Buat record order baru untuk barang yang diretur (history only, status cancelled)
             await saveOrder({ 
                 id: `${selectedOrderForReturn.id}-RET-${Date.now()}`, 
                 customerName: `${selectedOrderForReturn.customerName} (RETUR)`, 
@@ -419,7 +410,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 timestamp: Date.now() 
             });
             
-            // Update order asli dengan sisa barang
             const remainingTotal = remainingItems.reduce((sum, item) => sum + ((item.customPrice ?? item.price ?? 0) * item.cartQuantity), 0);
             await updateOrderData(selectedOrderForReturn.id, remainingItems, remainingTotal, 'processing');
         }
@@ -441,7 +431,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     return [];
   }, [safeOrders, returDbRecords, activeTab, searchTerm]);
 
-  // Filter untuk Scan Resi
   const filteredScanLogs = useMemo(() => {
       if (!scanLogs) return [];
       return scanLogs.filter(log => 
@@ -463,7 +452,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const currentItems = filteredData.slice(startIndex, startIndex + itemsPerPage);
 
   const getStatusColor = (status: OrderStatus) => {
-    switch (status) { case 'pending': return 'bg-amber-100 text-amber-700 border-amber-200'; case 'processing': return 'bg-blue-100 text-blue-700 border-blue-200'; case 'completed': return 'bg-green-100 text-green-700 border-green-200'; case 'cancelled': return 'bg-red-100 text-red-700 border-red-200'; default: return 'bg-gray-100 text-gray-700'; }
+    switch (status) { case 'pending': return 'bg-amber-900/30 text-amber-400 border-amber-900/50'; case 'processing': return 'bg-blue-900/30 text-blue-400 border-blue-900/50'; case 'completed': return 'bg-green-900/30 text-green-400 border-green-900/50'; case 'cancelled': return 'bg-red-900/30 text-red-400 border-red-900/50'; default: return 'bg-gray-700 text-gray-300'; }
   };
   const getStatusLabel = (status: OrderStatus) => {
       if (status === 'cancelled') return 'RETUR / BATAL'; if (status === 'completed') return 'SELESAI'; if (status === 'processing') return 'TERJUAL'; if (status === 'pending') return 'BARU'; return status;
@@ -472,53 +461,53 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const readyToSendCount = selectedResis.length;
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 min-h-[80vh] flex flex-col overflow-hidden relative">
+    <div className="bg-gray-800 rounded-2xl shadow-sm border border-gray-700 min-h-[80vh] flex flex-col overflow-hidden relative text-gray-100">
       {/* TOAST LOCAL */}
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
 
       {/* MODALS (Retur & Note) */}
-      {isNoteModalOpen && editingNoteData && ( <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col"><div className="bg-purple-50 px-4 py-3 border-b border-purple-100 flex justify-between items-center"><h3 className="text-base font-bold text-purple-800 flex items-center gap-2"><FileText size={18}/> Edit Keterangan</h3><button onClick={() => setIsNoteModalOpen(false)}><X size={18} className="text-gray-400 hover:text-gray-600"/></button></div><div className="p-4"><textarea className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-200 outline-none text-sm min-h-[100px]" placeholder="Masukkan alasan atau catatan..." value={noteText} onChange={(e) => setNoteText(e.target.value)} /></div><div className="p-3 border-t bg-gray-50 flex justify-end gap-2"><button onClick={() => setIsNoteModalOpen(false)} className="px-3 py-1.5 text-xs font-bold text-gray-600 hover:bg-gray-200 rounded-lg">Batal</button><button onClick={handleSaveNote} disabled={isSavingNote} className="px-4 py-1.5 text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 rounded-lg shadow flex items-center gap-2">{isSavingNote ? <Loader size={14} className="animate-spin"/> : <Save size={14}/>} Simpan</button></div></div></div> )}
-      {isReturnModalOpen && selectedOrderForReturn && ( <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90%]"><div className="bg-orange-50 px-4 py-3 border-b border-orange-100 flex justify-between items-center"><h3 className="text-base font-bold text-orange-800 flex items-center gap-2"><RotateCcw size={18}/> Retur Barang</h3><button onClick={() => setIsReturnModalOpen(false)}><X size={18} className="text-orange-400 hover:text-orange-600"/></button></div><div className="p-4 overflow-y-auto text-sm"><div className="space-y-2">{selectedOrderForReturn.items.map((item) => (<div key={item.id} className="flex items-center justify-between p-2 border border-gray-200 rounded-lg hover:border-orange-200"><div className="flex-1"><div className="font-bold text-gray-800 text-xs">{item.name}</div><div className="text-[10px] text-gray-500 font-mono">{item.partNumber}</div></div><div className="flex items-center gap-2 bg-gray-50 p-1 rounded-lg border border-gray-200"><button onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.max(0, (prev[item.id] || 0) - 1)}))} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm hover:bg-red-50 text-gray-600 font-bold">-</button><div className="w-6 text-center font-bold text-sm text-gray-800">{returnQuantities[item.id] || 0}</div><button onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.min(item.cartQuantity || 0, (prev[item.id] || 0) + 1)}))} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm hover:bg-green-50 text-gray-600 font-bold">+</button></div></div>))}</div></div><div className="p-3 border-t bg-gray-50 flex justify-end gap-2"><button onClick={() => setIsReturnModalOpen(false)} className="px-3 py-1.5 text-xs font-bold text-gray-600 hover:bg-gray-200 rounded-lg">Batal</button><button onClick={handleProcessReturn} disabled={isLoading} className="px-4 py-1.5 text-xs font-bold bg-orange-600 text-white hover:bg-orange-700 rounded-lg shadow flex items-center gap-2">{isLoading ? <Loader size={14} className="animate-spin"/> : <Save size={14}/>} Proses</button></div></div></div> )}
+      {isNoteModalOpen && editingNoteData && ( <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in"><div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col border border-gray-700"><div className="bg-purple-900/30 px-4 py-3 border-b border-purple-800 flex justify-between items-center"><h3 className="text-base font-bold text-purple-300 flex items-center gap-2"><FileText size={18}/> Edit Keterangan</h3><button onClick={() => setIsNoteModalOpen(false)}><X size={18} className="text-gray-400 hover:text-gray-200"/></button></div><div className="p-4"><textarea className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl focus:ring-2 focus:ring-purple-900/50 outline-none text-sm min-h-[100px] text-gray-100 placeholder-gray-500" placeholder="Masukkan alasan atau catatan..." value={noteText} onChange={(e) => setNoteText(e.target.value)} /></div><div className="p-3 border-t border-gray-700 bg-gray-900/50 flex justify-end gap-2"><button onClick={() => setIsNoteModalOpen(false)} className="px-3 py-1.5 text-xs font-bold text-gray-400 hover:bg-gray-700 rounded-lg">Batal</button><button onClick={handleSaveNote} disabled={isSavingNote} className="px-4 py-1.5 text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 rounded-lg shadow flex items-center gap-2">{isSavingNote ? <Loader size={14} className="animate-spin"/> : <Save size={14}/>} Simpan</button></div></div></div> )}
+      {isReturnModalOpen && selectedOrderForReturn && ( <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in"><div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90%] border border-gray-700"><div className="bg-orange-900/30 px-4 py-3 border-b border-orange-800 flex justify-between items-center"><h3 className="text-base font-bold text-orange-300 flex items-center gap-2"><RotateCcw size={18}/> Retur Barang</h3><button onClick={() => setIsReturnModalOpen(false)}><X size={18} className="text-orange-400 hover:text-orange-200"/></button></div><div className="p-4 overflow-y-auto text-sm"><div className="space-y-2">{selectedOrderForReturn.items.map((item) => (<div key={item.id} className="flex items-center justify-between p-2 border border-gray-700 rounded-lg hover:border-orange-700/50"><div className="flex-1"><div className="font-bold text-gray-200 text-xs">{item.name}</div><div className="text-[10px] text-gray-500 font-mono">{item.partNumber}</div></div><div className="flex items-center gap-2 bg-gray-900 p-1 rounded-lg border border-gray-700"><button onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.max(0, (prev[item.id] || 0) - 1)}))} className="w-6 h-6 flex items-center justify-center bg-gray-700 rounded shadow-sm hover:bg-red-900/50 text-gray-300 font-bold">-</button><div className="w-6 text-center font-bold text-sm text-gray-200">{returnQuantities[item.id] || 0}</div><button onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.min(item.cartQuantity || 0, (prev[item.id] || 0) + 1)}))} className="w-6 h-6 flex items-center justify-center bg-gray-700 rounded shadow-sm hover:bg-green-900/50 text-gray-300 font-bold">+</button></div></div>))}</div></div><div className="p-3 border-t border-gray-700 bg-gray-900/50 flex justify-end gap-2"><button onClick={() => setIsReturnModalOpen(false)} className="px-3 py-1.5 text-xs font-bold text-gray-400 hover:bg-gray-700 rounded-lg">Batal</button><button onClick={handleProcessReturn} disabled={isLoading} className="px-4 py-1.5 text-xs font-bold bg-orange-600 text-white hover:bg-orange-700 rounded-lg shadow flex items-center gap-2">{isLoading ? <Loader size={14} className="animate-spin"/> : <Save size={14}/>} Proses</button></div></div></div> )}
 
       {/* HEADER UTAMA */}
-      <div className="px-4 py-3 border-b border-gray-100 bg-white flex justify-between items-center"><div><h2 className="text-lg font-bold text-gray-900 flex items-center gap-2"><ClipboardList className="text-purple-600" size={20} /> Manajemen Pesanan</h2></div></div>
+      <div className="px-4 py-3 border-b border-gray-700 bg-gray-800 flex justify-between items-center"><div><h2 className="text-lg font-bold text-gray-100 flex items-center gap-2"><ClipboardList className="text-purple-400" size={20} /> Manajemen Pesanan</h2></div></div>
 
       {/* TABS */}
-      <div className="flex border-b border-gray-100 bg-gray-50/50">
-          {[{ id: 'pending', label: 'Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-600' }, { id: 'scan', label: 'Scan Resi', icon: ScanBarcode, count: 0, color: 'text-gray-800' }, { id: 'processing', label: 'Terjual', icon: Package, count: 0, color: 'text-blue-600' }, { id: 'history', label: 'Retur', icon: CheckCircle, count: returDbRecords.length, color: 'text-red-600' }].map((tab: any) => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-3 text-xs font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-white relative ${activeTab === tab.id ? `border-purple-600 text-purple-700 bg-white` : 'border-transparent text-gray-400 hover:text-gray-600'}`}><tab.icon size={16} className={activeTab === tab.id ? tab.color : ''} /><span>{tab.label}</span>{tab.id === 'pending' && tab.count > 0 && <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full min-w-[16px] text-center">{tab.count}</span>}</button>
+      <div className="flex border-b border-gray-700 bg-gray-900/50">
+          {[{ id: 'pending', label: 'Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-400' }, { id: 'scan', label: 'Scan Resi', icon: ScanBarcode, count: 0, color: 'text-gray-300' }, { id: 'processing', label: 'Terjual', icon: Package, count: 0, color: 'text-blue-400' }, { id: 'history', label: 'Retur', icon: CheckCircle, count: returDbRecords.length, color: 'text-red-400' }].map((tab: any) => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-3 text-xs font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-gray-800 relative ${activeTab === tab.id ? `border-purple-500 text-purple-400 bg-gray-800` : 'border-transparent text-gray-500 hover:text-gray-300'}`}><tab.icon size={16} className={activeTab === tab.id ? tab.color : ''} /><span>{tab.label}</span>{tab.id === 'pending' && tab.count > 0 && <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full min-w-[16px] text-center">{tab.count}</span>}</button>
           ))}
       </div>
 
       {/* SEARCH BAR (ALL TABS) */}
-      <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
+      <div className="px-4 py-2 bg-gray-900 border-b border-gray-700">
           <div className="relative max-w-sm w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-              <input type="text" placeholder={activeTab === 'scan' ? "Cari Resi / Pelanggan..." : "Cari Pesanan..."} className="w-full pl-9 pr-8 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-purple-200 focus:border-purple-400 outline-none transition-all" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/>
-              {searchTerm && (<button onClick={() => setSearchTerm('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"><X size={12} /></button>)}
+              <input type="text" placeholder={activeTab === 'scan' ? "Cari Resi / Pelanggan..." : "Cari Pesanan..."} className="w-full pl-9 pr-8 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm focus:ring-1 focus:ring-purple-900 focus:border-purple-500 outline-none transition-all text-white placeholder-gray-500" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}/>
+              {searchTerm && (<button onClick={() => setSearchTerm('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"><X size={12} /></button>)}
           </div>
       </div>
 
       {/* MAIN CONTENT */}
       {activeTab === 'scan' ? (
-        <div className="flex-1 flex flex-col overflow-hidden bg-gray-50">
+        <div className="flex-1 flex flex-col overflow-hidden bg-gray-900">
             {/* AREA INPUT SCAN (RESPONSIVE) */}
-            <div className="bg-white p-3 shadow-sm border-b border-gray-200 z-20">
+            <div className="bg-gray-800 p-3 shadow-sm border-b border-gray-700 z-20">
                 <div className="flex flex-col gap-3">
                     {/* Top Row: Store & Marketplace Select */}
                     <div className="grid grid-cols-2 gap-2">
-                        <select value={selectedStore} onChange={(e) => { setSelectedStore(e.target.value); barcodeInputRef.current?.focus(); }} className="bg-gray-50 border border-gray-200 text-gray-700 text-xs font-bold rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2">
+                        <select value={selectedStore} onChange={(e) => { setSelectedStore(e.target.value); barcodeInputRef.current?.focus(); }} className="bg-gray-700 border border-gray-600 text-gray-200 text-xs font-bold rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2 outline-none">
                             {STORE_LIST.map(store => <option key={store} value={store}>{store}</option>)}
                         </select>
                         <div className="relative flex">
                             <button onClick={() => setShowMarketplacePopup(!showMarketplacePopup)} className={`flex items-center justify-between w-full gap-2 px-2 py-2 text-xs font-bold border rounded-lg transition-colors ${getMarketplaceColor(selectedMarketplace)}`}>
                                 <span className="truncate">{selectedMarketplace}</span>
-                                <ChevronDown className="w-3 h-3 text-gray-500 flex-shrink-0" />
+                                <ChevronDown className="w-3 h-3 text-gray-300 flex-shrink-0" />
                             </button>
                             {showMarketplacePopup && (
-                                <div className="absolute top-full right-0 mt-1 w-40 bg-white rounded-xl shadow-xl border border-gray-100 z-50 animate-in fade-in zoom-in-95 overflow-hidden">
+                                <div className="absolute top-full right-0 mt-1 w-40 bg-gray-800 rounded-xl shadow-xl border border-gray-700 z-50 animate-in fade-in zoom-in-95 overflow-hidden">
                                     {MARKETPLACES.map((mp) => (
-                                        <button key={mp} onClick={() => { setSelectedMarketplace(mp); setShowMarketplacePopup(false); barcodeInputRef.current?.focus(); }} className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-gray-50 border-b border-gray-50 last:border-0 ${selectedMarketplace === mp ? 'text-blue-600 font-bold bg-blue-50' : 'text-gray-700'}`}>
+                                        <button key={mp} onClick={() => { setSelectedMarketplace(mp); setShowMarketplacePopup(false); barcodeInputRef.current?.focus(); }} className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-gray-700 border-b border-gray-700 last:border-0 ${selectedMarketplace === mp ? 'text-blue-400 font-bold bg-blue-900/20' : 'text-gray-300'}`}>
                                             {mp}
                                             {selectedMarketplace === mp && <Check className="w-3 h-3"/>}
                                         </button>
@@ -534,12 +523,12 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                             <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
                                 {isSavingLog ? <Loader2 className="w-4 h-4 text-blue-500 animate-spin" /> : <ScanBarcode className="w-4 h-4 text-gray-400" />}
                             </div>
-                            <input ref={barcodeInputRef} type="text" value={barcodeInput} onChange={(e) => setBarcodeInput(e.target.value)} onKeyDown={handleBarcodeInput} className="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 block w-full pl-9 p-2 font-mono font-medium shadow-sm" placeholder="Scan Barcode..." autoComplete="off" disabled={isSavingLog} />
+                            <input ref={barcodeInputRef} type="text" value={barcodeInput} onChange={(e) => setBarcodeInput(e.target.value)} onKeyDown={handleBarcodeInput} className="bg-gray-700 border border-gray-600 text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 block w-full pl-9 p-2 font-mono font-medium shadow-sm placeholder-gray-500" placeholder="Scan Barcode..." autoComplete="off" disabled={isSavingLog} />
                         </div>
-                        <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="flex-shrink-0 bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-lg p-2 flex items-center justify-center">
+                        <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="flex-shrink-0 bg-gray-700 border border-gray-600 text-gray-300 hover:bg-gray-600 rounded-lg p-2 flex items-center justify-center">
                             {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
                         </button>
-                        <button onClick={() => cameraInputRef.current?.click()} disabled={analyzing} className="flex-shrink-0 bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-lg p-2 flex items-center justify-center">
+                        <button onClick={() => cameraInputRef.current?.click()} disabled={analyzing} className="flex-shrink-0 bg-gray-700 border border-gray-600 text-gray-300 hover:bg-gray-600 rounded-lg p-2 flex items-center justify-center">
                             {analyzing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Camera className="w-5 h-5" />}
                         </button>
                         <input type="file" ref={fileInputRef} accept=".xlsx, .xls, .csv" className="hidden" onChange={handleFileUpload} />
@@ -559,7 +548,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             {/* LIST / TABLE VIEW */}
             <div className="flex-1 overflow-auto p-2">
                 {scanCurrentItems.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-48 text-gray-400 gap-2">
+                    <div className="flex flex-col items-center justify-center h-48 text-gray-500 gap-2">
                         <ScanBarcode size={40} className="opacity-20"/>
                         <p className="text-sm">Belum ada resi yang di-scan</p>
                     </div>
@@ -574,60 +563,60 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                 const isComplete = !!log.part_number && !!log.nama_barang && !!log.quantity;
 
                                 return (
-                                    <div key={log.id} className={`bg-white p-3 rounded-xl border shadow-sm transition-all ${isSelected ? 'border-blue-300 ring-1 ring-blue-100' : 'border-gray-100'}`}>
+                                    <div key={log.id} className={`bg-gray-800 p-3 rounded-xl border shadow-sm transition-all ${isSelected ? 'border-blue-500 ring-1 ring-blue-500/30' : 'border-gray-700'}`}>
                                         <div className="flex justify-between items-start mb-2">
                                             <div className="flex items-center gap-2">
                                                 {!isSold && (
                                                     <button onClick={() => toggleSelect(log.resi)} disabled={!isReady} className="p-1 -ml-1">
-                                                        {isSelected ? <CheckSquare size={20} className="text-blue-600"/> : <Square size={20} className={isReady ? "text-gray-300" : "text-gray-200"}/>}
+                                                        {isSelected ? <CheckSquare size={20} className="text-blue-500"/> : <Square size={20} className={isReady ? "text-gray-500" : "text-gray-600"}/>}
                                                     </button>
                                                 )}
                                                 <div>
-                                                    <div className="font-mono font-bold text-gray-900 text-sm">{log.resi}</div>
+                                                    <div className="font-mono font-bold text-gray-200 text-sm">{log.resi}</div>
                                                     <div className="text-[10px] text-gray-500">{new Date(log.tanggal).toLocaleString('id-ID')}</div>
                                                 </div>
                                             </div>
                                             {/* STATUS BADGE RESPONSIVE */}
                                             {isSold ? (
-                                                <span className="bg-gray-100 text-gray-600 text-[10px] font-bold px-2 py-1 rounded-full">Terjual</span>
+                                                <span className="bg-gray-700 text-gray-400 text-[10px] font-bold px-2 py-1 rounded-full">Terjual</span>
                                             ) : isReady ? (
-                                                <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><Check size={10}/> Siap</span>
+                                                <span className="bg-green-900/30 text-green-400 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><Check size={10}/> Siap</span>
                                             ) : isComplete ? (
-                                                <span className="bg-red-50 text-red-600 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><XCircle size={10}/> Belum Scan</span>
+                                                <span className="bg-red-900/30 text-red-400 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><XCircle size={10}/> Belum Scan</span>
                                             ) : (
-                                                <span className="bg-red-50 text-red-600 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><XCircle size={10}/> Belum Upload</span>
+                                                <span className="bg-red-900/30 text-red-400 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><XCircle size={10}/> Belum Upload</span>
                                             )}
                                         </div>
                                         
                                         <div className="grid grid-cols-2 gap-2 text-xs mb-2">
-                                            <div className="bg-gray-50 p-1.5 rounded border border-gray-100">
-                                                <span className="block text-[9px] text-gray-400 uppercase">Toko</span>
-                                                <span className="font-bold text-gray-700 truncate block">{log.toko || '-'}</span>
+                                            <div className="bg-gray-700/50 p-1.5 rounded border border-gray-700">
+                                                <span className="block text-[9px] text-gray-500 uppercase">Toko</span>
+                                                <span className="font-bold text-gray-300 truncate block">{log.toko || '-'}</span>
                                             </div>
-                                            <div className="bg-gray-50 p-1.5 rounded border border-gray-100">
-                                                <span className="block text-[9px] text-gray-400 uppercase">Via</span>
-                                                <span className="font-bold text-gray-700 truncate block">{log.ecommerce || '-'}</span>
+                                            <div className="bg-gray-700/50 p-1.5 rounded border border-gray-700">
+                                                <span className="block text-[9px] text-gray-500 uppercase">Via</span>
+                                                <span className="font-bold text-gray-300 truncate block">{log.ecommerce || '-'}</span>
                                             </div>
                                         </div>
 
                                         <div className="space-y-1 mb-2">
                                             <div className="flex items-center gap-2">
-                                                <span className="text-[10px] text-gray-400 w-12 flex-shrink-0">Produk</span>
-                                                <span className="text-xs font-medium text-gray-800 truncate flex-1">{log.nama_barang || '-'}</span>
+                                                <span className="text-[10px] text-gray-500 w-12 flex-shrink-0">Produk</span>
+                                                <span className="text-xs font-medium text-gray-300 truncate flex-1">{log.nama_barang || '-'}</span>
                                             </div>
                                             <div className="flex items-center gap-2">
-                                                <span className="text-[10px] text-gray-400 w-12 flex-shrink-0">Part No</span>
+                                                <span className="text-[10px] text-gray-500 w-12 flex-shrink-0">Part No</span>
                                                 <div className="flex-1">
                                                     {!isSold ? (
-                                                        <input className="w-full bg-gray-50 border-b border-gray-200 focus:border-blue-500 text-xs py-0.5 px-1 font-mono outline-none" placeholder="Isi Part Number" value={log.part_number || ''} onChange={(e) => handlePartNumberChange(log.id!, e.target.value)} />
+                                                        <input className="w-full bg-gray-700 border-b border-gray-600 focus:border-blue-500 text-xs py-0.5 px-1 font-mono outline-none text-gray-200" placeholder="Isi Part Number" value={log.part_number || ''} onChange={(e) => handlePartNumberChange(log.id!, e.target.value)} />
                                                     ) : (
-                                                        <span className="text-xs font-mono text-gray-600">{log.part_number || '-'}</span>
+                                                        <span className="text-xs font-mono text-gray-400">{log.part_number || '-'}</span>
                                                     )}
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-2">
-                                                <span className="text-[10px] text-gray-400 w-12 flex-shrink-0">Info</span>
-                                                <span className="text-xs text-gray-600">{log.quantity}x @{formatRupiah(log.harga_satuan)}</span>
+                                                <span className="text-[10px] text-gray-500 w-12 flex-shrink-0">Info</span>
+                                                <span className="text-xs text-gray-400">{log.quantity}x @{formatRupiah(log.harga_satuan)}</span>
                                             </div>
                                         </div>
                                     </div>
@@ -636,24 +625,24 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                         </div>
 
                         {/* DESKTOP TABLE VIEW */}
-                        <div className="hidden md:block bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden min-w-[1000px]">
+                        <div className="hidden md:block bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden min-w-[1000px]">
                             <table className="w-full text-left border-collapse">
-                                <thead className="bg-white sticky top-0 z-10 shadow-sm text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                                <thead className="bg-gray-800 sticky top-0 z-10 shadow-sm text-[10px] font-bold text-gray-400 uppercase tracking-wider">
                                     <tr>
-                                        <th className="px-4 py-3 border-b border-gray-100 w-10 text-center"><CheckSquare size={16} className="text-gray-300 mx-auto"/></th>
-                                        <th className="px-4 py-3 border-b border-gray-100">Tanggal</th>
-                                        <th className="px-4 py-3 border-b border-gray-100">Resi</th>
-                                        <th className="px-4 py-3 border-b border-gray-100">Toko</th>
-                                        <th className="px-4 py-3 border-b border-gray-100">Via</th>
-                                        <th className="px-4 py-3 border-b border-gray-100">Pelanggan</th>
-                                        <th className="px-4 py-3 border-b border-gray-100">Part.No (Edit)</th>
-                                        <th className="px-4 py-3 border-b border-gray-100">Barang</th>
-                                        <th className="px-4 py-3 border-b border-gray-100 text-center">Qty</th>
-                                        <th className="px-4 py-3 border-b border-gray-100 text-right">Total</th>
-                                        <th className="px-4 py-3 border-b border-gray-100 text-center">Status</th>
+                                        <th className="px-4 py-3 border-b border-gray-700 w-10 text-center"><CheckSquare size={16} className="text-gray-600 mx-auto"/></th>
+                                        <th className="px-4 py-3 border-b border-gray-700">Tanggal</th>
+                                        <th className="px-4 py-3 border-b border-gray-700">Resi</th>
+                                        <th className="px-4 py-3 border-b border-gray-700">Toko</th>
+                                        <th className="px-4 py-3 border-b border-gray-700">Via</th>
+                                        <th className="px-4 py-3 border-b border-gray-700">Pelanggan</th>
+                                        <th className="px-4 py-3 border-b border-gray-700">Part.No (Edit)</th>
+                                        <th className="px-4 py-3 border-b border-gray-700">Barang</th>
+                                        <th className="px-4 py-3 border-b border-gray-700 text-center">Qty</th>
+                                        <th className="px-4 py-3 border-b border-gray-700 text-right">Total</th>
+                                        <th className="px-4 py-3 border-b border-gray-700 text-center">Status</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-gray-50 text-xs">
+                                <tbody className="divide-y divide-gray-700 text-xs">
                                     {scanCurrentItems.map((log, idx) => {
                                         const dateObj = new Date(log.tanggal);
                                         const displayDate = dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -663,40 +652,40 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                         const isComplete = !!log.part_number && !!log.nama_barang && !!log.quantity;
 
                                         return (
-                                            <tr key={log.id || idx} className={`transition-colors ${isSold ? 'bg-gray-50 opacity-60' : (isSelected ? 'bg-blue-50' : 'hover:bg-gray-50')}`}>
+                                            <tr key={log.id || idx} className={`transition-colors ${isSold ? 'bg-gray-900/50 opacity-60' : (isSelected ? 'bg-blue-900/20' : 'hover:bg-gray-700/50')}`}>
                                                 <td className="px-4 py-3 text-center">
                                                     {!isSold && (
                                                         <button onClick={() => toggleSelect(log.resi)} disabled={!isReady} className="focus:outline-none">
-                                                            {isSelected ? <CheckSquare size={16} className="text-blue-600"/> : <Square size={16} className={isReady ? "text-gray-400 hover:text-blue-500" : "text-gray-200 cursor-not-allowed"}/>}
+                                                            {isSelected ? <CheckSquare size={16} className="text-blue-500"/> : <Square size={16} className={isReady ? "text-gray-500 hover:text-blue-400" : "text-gray-600 cursor-not-allowed"}/>}
                                                         </button>
                                                     )}
                                                     {isSold && <Check size={16} className="text-green-500 mx-auto"/>}
                                                 </td>
                                                 <td className="px-4 py-3 text-gray-500 font-mono whitespace-nowrap">{displayDate}</td>
-                                                <td className="px-4 py-3 font-bold text-gray-900 font-mono select-all">{log.resi}</td>
-                                                <td className="px-4 py-3 text-gray-600 font-semibold">{log.toko || '-'}</td>
-                                                <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-gray-100 text-gray-600 border-gray-200">{log.ecommerce}</span></td>
-                                                <td className="px-4 py-3 text-gray-800 font-medium">{log.customer || '-'}</td>
+                                                <td className="px-4 py-3 font-bold text-gray-200 font-mono select-all">{log.resi}</td>
+                                                <td className="px-4 py-3 text-gray-400 font-semibold">{log.toko || '-'}</td>
+                                                <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-gray-700 text-gray-300 border-gray-600">{log.ecommerce}</span></td>
+                                                <td className="px-4 py-3 text-gray-300 font-medium">{log.customer || '-'}</td>
                                                 <td className="px-4 py-3">
                                                     <div className="flex items-center gap-1">
                                                         {!isSold ? (
-                                                            <input className="bg-transparent border-b border-transparent focus:border-blue-500 outline-none w-full font-mono text-gray-700 placeholder-red-200" placeholder="Part Number" value={log.part_number || ''} onChange={(e) => handlePartNumberChange(log.id!, e.target.value)} />
-                                                        ) : (<span className="font-mono text-gray-700">{log.part_number}</span>)}
-                                                        {!!log.part_number && <Search size={10} className="text-blue-300 flex-shrink-0" title="Terdeteksi Otomatis"/>}
+                                                            <input className="bg-transparent border-b border-transparent focus:border-blue-500 outline-none w-full font-mono text-gray-300 placeholder-red-900/50" placeholder="Part Number" value={log.part_number || ''} onChange={(e) => handlePartNumberChange(log.id!, e.target.value)} />
+                                                        ) : (<span className="font-mono text-gray-400">{log.part_number}</span>)}
+                                                        {!!log.part_number && <Search size={10} className="text-blue-400 flex-shrink-0" title="Terdeteksi Otomatis"/>}
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3 text-gray-500 truncate max-w-[150px]" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td>
-                                                <td className="px-4 py-3 text-gray-500 text-center">{log.quantity || '-'}</td>
-                                                <td className="px-4 py-3 text-gray-800 font-bold text-right">{log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}</td>
+                                                <td className="px-4 py-3 text-gray-400 truncate max-w-[150px]" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td>
+                                                <td className="px-4 py-3 text-gray-400 text-center">{log.quantity || '-'}</td>
+                                                <td className="px-4 py-3 text-gray-200 font-bold text-right">{log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}</td>
                                                 <td className="px-4 py-3 text-center whitespace-nowrap">
                                                     {isSold ? (
-                                                        <span className="inline-flex items-center gap-1 text-gray-500 font-bold bg-gray-200 px-2 py-0.5 rounded-full text-[10px]">Terjual</span>
+                                                        <span className="inline-flex items-center gap-1 text-gray-400 font-bold bg-gray-700 px-2 py-0.5 rounded-full text-[10px]">Terjual</span>
                                                     ) : isReady ? (
-                                                        <span className="inline-flex items-center gap-1 text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded-full border border-green-100 text-[10px]"><Check size={10}/> Siap Kirim</span>
+                                                        <span className="inline-flex items-center gap-1 text-green-400 font-bold bg-green-900/30 px-2 py-0.5 rounded-full border border-green-800 text-[10px]"><Check size={10}/> Siap Kirim</span>
                                                     ) : isComplete ? (
-                                                        <span className="inline-flex items-center gap-1 text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded-full border border-red-100 text-[10px]"><XCircle size={10}/> Belum Scan</span>
+                                                        <span className="inline-flex items-center gap-1 text-red-400 font-bold bg-red-900/30 px-2 py-0.5 rounded-full border border-red-800 text-[10px]"><XCircle size={10}/> Belum Scan</span>
                                                     ) : (
-                                                        <span className="inline-flex items-center gap-1 text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded-full border border-red-100 text-[10px]"><XCircle size={10}/> Belum Upload</span>
+                                                        <span className="inline-flex items-center gap-1 text-red-400 font-bold bg-red-900/30 px-2 py-0.5 rounded-full border border-red-800 text-[10px]"><XCircle size={10}/> Belum Upload</span>
                                                     )}
                                                 </td>
                                             </tr>
@@ -710,12 +699,12 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             </div>
 
             {/* PAGINATION FOOTER (SCAN TAB) */}
-            <div className="px-4 py-3 bg-white border-t border-gray-200 flex items-center justify-between text-xs text-gray-500 sticky bottom-0 z-30">
+            <div className="px-4 py-3 bg-gray-800 border-t border-gray-700 flex items-center justify-between text-xs text-gray-500 sticky bottom-0 z-30">
                 <div>Menampilkan {scanStartIndex + 1}-{Math.min(scanStartIndex + itemsPerPage, scanTotalItems)} dari {scanTotalItems} data</div>
                 <div className="flex items-center gap-2">
-                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16}/></button>
-                    <span className="font-bold text-gray-900">Halaman {currentPage}</span>
-                    <button onClick={() => setCurrentPage(p => Math.min(scanTotalPages, p + 1))} disabled={currentPage >= scanTotalPages} className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16}/></button>
+                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16}/></button>
+                    <span className="font-bold text-gray-200">Halaman {currentPage}</span>
+                    <button onClick={() => setCurrentPage(p => Math.min(scanTotalPages, p + 1))} disabled={currentPage >= scanTotalPages} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16}/></button>
                 </div>
             </div>
         </div>
@@ -724,8 +713,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
         // TAMPILAN ORDER LIST (Baru/Terjual/Retur)
         // =======================
         <>
-            <div className="flex-1 overflow-x-auto p-2 bg-gray-50"><div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden min-w-[1000px]"><table className="w-full text-left border-collapse"><thead className="bg-gray-50 text-[10px] font-bold text-gray-600 uppercase tracking-wider border-b border-gray-200"><tr><th className="px-3 py-2 w-28">Tanggal</th><th className="px-3 py-2 w-32">Resi / Toko</th><th className="px-3 py-2 w-24">Via</th> <th className="px-3 py-2 w-32">Pelanggan</th><th className="px-3 py-2 w-28">Part No.</th><th className="px-3 py-2">Barang</th><th className="px-3 py-2 text-right w-16">Qty</th><th className="px-3 py-2 text-right w-24">Satuan</th><th className="px-3 py-2 text-right w-24">Total</th>{activeTab === 'history' ? (<><th className="px-3 py-2 w-24 bg-red-50/50 text-red-600 border-l border-red-100">Tgl Retur</th><th className="px-3 py-2 text-center w-24 bg-red-50/50 text-red-600">Status</th></>) : (<th className="px-3 py-2 text-center w-24">Status</th>)}<th className="px-3 py-2 text-center w-32">{activeTab === 'history' ? 'Ket' : 'Aksi'}</th></tr></thead><tbody className="divide-y divide-gray-100 text-xs">{currentItems.length === 0 ? (<tr><td colSpan={13} className="p-8 text-center text-gray-400"><ClipboardList size={32} className="opacity-20 mx-auto mb-2" /><p>Belum ada data</p></td></tr>) : (activeTab==='history' ? (currentItems as ReturRecord[]).map(retur => { const dtOrder = formatDate(retur.tanggal_pemesanan||''); const dtRetur = formatDate(retur.tanggal_retur); return (<tr key={`retur-${retur.id}`} className="hover:bg-red-50/20 transition-colors"><td className="px-3 py-2 align-top border-r border-gray-100"><div className="font-bold text-gray-900">{dtOrder.date}</div></td><td className="px-3 py-2 align-top font-mono text-[10px] text-gray-600"><div className="flex flex-col gap-1"><span className="font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 w-fit">{retur.resi || '-'}</span>{retur.toko && <span className="uppercase text-gray-500 bg-gray-100 px-1 py-0.5 rounded w-fit">{retur.toko}</span>}</div></td><td className="px-3 py-2 align-top">{retur.ecommerce ? <span className="px-1.5 py-0.5 bg-orange-50 text-orange-700 text-[9px] font-bold rounded border border-orange-100">{retur.ecommerce}</span> : '-'}</td><td className="px-3 py-2 align-top font-medium text-gray-900 truncate max-w-[120px]" title={retur.customer}>{retur.customer||'Guest'}</td><td className="px-3 py-2 align-top font-mono text-[10px] text-gray-500">{retur.part_number||'-'}</td><td className="px-3 py-2 align-top text-gray-700 font-medium truncate max-w-[200px]" title={retur.nama_barang}>{retur.nama_barang}</td><td className="px-3 py-2 align-top text-right font-bold text-red-600">-{retur.quantity}</td><td className="px-3 py-2 align-top text-right font-mono text-[10px] text-gray-500">{formatRupiah(retur.harga_satuan)}</td><td className="px-3 py-2 align-top text-right font-mono text-[10px] font-bold text-gray-800">{formatRupiah(retur.harga_total)}</td><td className="px-3 py-2 align-top border-l border-red-100 bg-red-50/10"><div className="font-bold text-red-700 text-[10px]">{dtRetur.date}</div></td><td className="px-3 py-2 align-top text-center bg-red-50/10"><span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase ${retur.status==='Full Retur'?'bg-red-100 text-red-700 border-red-200':'bg-orange-100 text-orange-700 border-orange-200'}`}>{retur.status||'Retur'}</span></td><td className="px-3 py-2 align-top"><div className="flex items-start justify-between gap-1 group/edit"><div className="text-[10px] text-gray-600 italic truncate max-w-[100px]">{retur.keterangan||'-'}</div><button onClick={()=>openNoteModal(retur)} className="text-blue-500 hover:bg-blue-50 p-1 rounded opacity-0 group-hover/edit:opacity-100"><Edit3 size={12}/></button></div></td></tr>); }) : (currentItems as Order[]).map(order => { if(!order) return null; const {cleanName, resiText, ecommerce, shopName} = getOrderDetails(order); const isResi = !resiText.startsWith('#'); const dt = formatDate(order.timestamp); const items = Array.isArray(order.items) ? order.items : []; if(items.length===0) return null; return items.map((item, index) => { const dealPrice = item.customPrice ?? item.price ?? 0; const dealTotal = dealPrice * (item.cartQuantity || 0); const hasCustomPrice = item.customPrice !== undefined && item.customPrice !== item.price; return (<tr key={`${order.id}-${index}`} className="hover:bg-blue-50/10 transition-colors group">{index===0 && (<><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-100 bg-white group-hover:bg-blue-50/10"><div className="font-bold text-gray-900">{dt.date}</div><div className="text-[9px] text-gray-400 font-mono">{dt.time}</div></td><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-100 font-mono text-[10px] bg-white group-hover:bg-blue-50/10"><div className="flex flex-col gap-1"><span className={`px-1.5 py-0.5 rounded w-fit font-bold border ${isResi ? 'bg-blue-50 text-blue-700 border-blue-100' : 'text-gray-500 bg-gray-50 border-gray-200'}`}>{resiText}</span>{shopName!=='-' && <div className="flex items-center gap-1 text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded w-fit border border-gray-200"><Store size={8}/><span className="uppercase truncate max-w-[80px]">{shopName}</span></div>}</div></td><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-100 bg-white group-hover:bg-blue-50/10">{ecommerce!=='-'?<div className="px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-100 w-fit text-[9px] font-bold">{ecommerce}</div>:<span className="text-gray-300">-</span>}</td><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-100 font-medium text-gray-900 bg-white group-hover:bg-blue-50/10 truncate max-w-[120px]" title={cleanName}>{cleanName}</td></>)}<td className="px-3 py-2 align-top font-mono text-[10px] text-gray-500">{item.partNumber||'-'}</td><td className="px-3 py-2 align-top text-gray-700 font-medium truncate max-w-[180px]" title={item.name}>{item.name}</td><td className="px-3 py-2 align-top text-right font-bold text-gray-800">{item.cartQuantity||0}</td><td className="px-3 py-2 align-top text-right text-gray-500 font-mono text-[10px]"><div className={hasCustomPrice?"text-orange-600 font-bold":""}>{formatRupiah(dealPrice)}</div></td><td className="px-3 py-2 align-top text-right font-bold text-gray-900 font-mono text-[10px]">{formatRupiah(dealTotal)}</td>{index===0 && (<><td rowSpan={items.length} className="px-3 py-2 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/10"><div className={`inline-block px-2 py-0.5 rounded text-[9px] font-extrabold border uppercase mb-1 shadow-sm ${getStatusColor(order.status)}`}>{getStatusLabel(order.status)}</div><div className="text-[10px] font-extrabold text-purple-700">{formatRupiah(order.totalAmount||0)}</div></td><td rowSpan={items.length} className="px-3 py-2 align-top text-center border-l border-gray-100 bg-white group-hover:bg-blue-50/10"><div className="flex flex-col gap-1 items-center">{order.status==='pending' && (<><button onClick={()=>onUpdateStatus(order.id, 'processing')} className="w-full py-1 bg-purple-600 text-white text-[9px] font-bold rounded hover:bg-purple-700 shadow-sm flex items-center justify-center gap-1">Proses</button><button onClick={()=>onUpdateStatus(order.id, 'cancelled')} className="w-full py-1 bg-white border border-gray-300 text-gray-600 text-[9px] font-bold rounded hover:bg-red-50 hover:text-red-600">Tolak</button></>)}{order.status==='processing' && (<button onClick={()=>openReturnModal(order)} className="w-full py-1 bg-orange-50 border border-orange-200 text-orange-600 text-[9px] font-bold rounded hover:bg-orange-100 flex items-center justify-center gap-1">Retur</button>)}</div></td></>)}</tr>); }); }))}</tbody></table></div></div>
-            <div className="px-4 py-3 bg-white border-t border-gray-200 flex items-center justify-between text-xs text-gray-500"><div>Menampilkan {startIndex + 1}-{Math.min(startIndex + itemsPerPage, totalItems)} dari {totalItems} data</div><div className="flex items-center gap-2"><button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16}/></button><span className="font-bold text-gray-900">Halaman {currentPage}</span><button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} className="p-1 rounded hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16}/></button></div></div>
+            <div className="flex-1 overflow-x-auto p-2 bg-gray-900"><div className="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden min-w-[1000px]"><table className="w-full text-left border-collapse"><thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700"><tr><th className="px-3 py-2 w-28">Tanggal</th><th className="px-3 py-2 w-32">Resi / Toko</th><th className="px-3 py-2 w-24">Via</th> <th className="px-3 py-2 w-32">Pelanggan</th><th className="px-3 py-2 w-28">Part No.</th><th className="px-3 py-2">Barang</th><th className="px-3 py-2 text-right w-16">Qty</th><th className="px-3 py-2 text-right w-24">Satuan</th><th className="px-3 py-2 text-right w-24">Total</th>{activeTab === 'history' ? (<><th className="px-3 py-2 w-24 bg-red-900/20 text-red-400 border-l border-red-800">Tgl Retur</th><th className="px-3 py-2 text-center w-24 bg-red-900/20 text-red-400">Status</th></>) : (<th className="px-3 py-2 text-center w-24">Status</th>)}<th className="px-3 py-2 text-center w-32">{activeTab === 'history' ? 'Ket' : 'Aksi'}</th></tr></thead><tbody className="divide-y divide-gray-700 text-xs">{currentItems.length === 0 ? (<tr><td colSpan={13} className="p-8 text-center text-gray-500"><ClipboardList size={32} className="opacity-20 mx-auto mb-2" /><p>Belum ada data</p></td></tr>) : (activeTab==='history' ? (currentItems as ReturRecord[]).map(retur => { const dtOrder = formatDate(retur.tanggal_pemesanan||''); const dtRetur = formatDate(retur.tanggal_retur); return (<tr key={`retur-${retur.id}`} className="hover:bg-red-900/10 transition-colors"><td className="px-3 py-2 align-top border-r border-gray-700"><div className="font-bold text-gray-200">{dtOrder.date}</div></td><td className="px-3 py-2 align-top font-mono text-[10px] text-gray-400"><div className="flex flex-col gap-1"><span className="font-bold text-blue-400 bg-blue-900/30 px-1.5 py-0.5 rounded border border-blue-800 w-fit">{retur.resi || '-'}</span>{retur.toko && <span className="uppercase text-gray-400 bg-gray-700 px-1 py-0.5 rounded w-fit">{retur.toko}</span>}</div></td><td className="px-3 py-2 align-top">{retur.ecommerce ? <span className="px-1.5 py-0.5 bg-orange-900/30 text-orange-400 text-[9px] font-bold rounded border border-orange-800">{retur.ecommerce}</span> : '-'}</td><td className="px-3 py-2 align-top font-medium text-gray-200 truncate max-w-[120px]" title={retur.customer}>{retur.customer||'Guest'}</td><td className="px-3 py-2 align-top font-mono text-[10px] text-gray-500">{retur.part_number||'-'}</td><td className="px-3 py-2 align-top text-gray-300 font-medium truncate max-w-[200px]" title={retur.nama_barang}>{retur.nama_barang}</td><td className="px-3 py-2 align-top text-right font-bold text-red-400">-{retur.quantity}</td><td className="px-3 py-2 align-top text-right font-mono text-[10px] text-gray-500">{formatRupiah(retur.harga_satuan)}</td><td className="px-3 py-2 align-top text-right font-mono text-[10px] font-bold text-gray-300">{formatRupiah(retur.harga_total)}</td><td className="px-3 py-2 align-top border-l border-red-800 bg-red-900/10"><div className="font-bold text-red-400 text-[10px]">{dtRetur.date}</div></td><td className="px-3 py-2 align-top text-center bg-red-900/10"><span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase ${retur.status==='Full Retur'?'bg-red-900/30 text-red-400 border-red-800':'bg-orange-900/30 text-orange-400 border-orange-800'}`}>{retur.status||'Retur'}</span></td><td className="px-3 py-2 align-top"><div className="flex items-start justify-between gap-1 group/edit"><div className="text-[10px] text-gray-500 italic truncate max-w-[100px]">{retur.keterangan||'-'}</div><button onClick={()=>openNoteModal(retur)} className="text-blue-400 hover:bg-blue-900/50 p-1 rounded opacity-0 group-hover/edit:opacity-100"><Edit3 size={12}/></button></div></td></tr>); }) : (currentItems as Order[]).map(order => { if(!order) return null; const {cleanName, resiText, ecommerce, shopName} = getOrderDetails(order); const isResi = !resiText.startsWith('#'); const dt = formatDate(order.timestamp); const items = Array.isArray(order.items) ? order.items : []; if(items.length===0) return null; return items.map((item, index) => { const dealPrice = item.customPrice ?? item.price ?? 0; const dealTotal = dealPrice * (item.cartQuantity || 0); const hasCustomPrice = item.customPrice !== undefined && item.customPrice !== item.price; return (<tr key={`${order.id}-${index}`} className="hover:bg-blue-900/10 transition-colors group">{index===0 && (<><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-700 bg-gray-800 group-hover:bg-blue-900/10"><div className="font-bold text-gray-200">{dt.date}</div><div className="text-[9px] text-gray-500 font-mono">{dt.time}</div></td><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px] bg-gray-800 group-hover:bg-blue-900/10"><div className="flex flex-col gap-1"><span className={`px-1.5 py-0.5 rounded w-fit font-bold border ${isResi ? 'bg-blue-900/30 text-blue-400 border-blue-800' : 'text-gray-500 bg-gray-700 border-gray-600'}`}>{resiText}</span>{shopName!=='-' && <div className="flex items-center gap-1 text-gray-400 bg-gray-700 px-1.5 py-0.5 rounded w-fit border border-gray-600"><Store size={8}/><span className="uppercase truncate max-w-[80px]">{shopName}</span></div>}</div></td><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-700 bg-gray-800 group-hover:bg-blue-900/10">{ecommerce!=='-'?<div className="px-1.5 py-0.5 rounded bg-orange-900/30 text-orange-400 border border-orange-800 w-fit text-[9px] font-bold">{ecommerce}</div>:<span className="text-gray-600">-</span>}</td><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-700 font-medium text-gray-200 bg-gray-800 group-hover:bg-blue-900/10 truncate max-w-[120px]" title={cleanName}>{cleanName}</td></>)}<td className="px-3 py-2 align-top font-mono text-[10px] text-gray-500">{item.partNumber||'-'}</td><td className="px-3 py-2 align-top text-gray-300 font-medium truncate max-w-[180px]" title={item.name}>{item.name}</td><td className="px-3 py-2 align-top text-right font-bold text-gray-300">{item.cartQuantity||0}</td><td className="px-3 py-2 align-top text-right text-gray-500 font-mono text-[10px]"><div className={hasCustomPrice?"text-orange-400 font-bold":""}>{formatRupiah(dealPrice)}</div></td><td className="px-3 py-2 align-top text-right font-bold text-gray-200 font-mono text-[10px]">{formatRupiah(dealTotal)}</td>{index===0 && (<><td rowSpan={items.length} className="px-3 py-2 align-top text-center border-l border-gray-700 bg-gray-800 group-hover:bg-blue-900/10"><div className={`inline-block px-2 py-0.5 rounded text-[9px] font-extrabold border uppercase mb-1 shadow-sm ${getStatusColor(order.status)}`}>{getStatusLabel(order.status)}</div><div className="text-[10px] font-extrabold text-purple-400">{formatRupiah(order.totalAmount||0)}</div></td><td rowSpan={items.length} className="px-3 py-2 align-top text-center border-l border-gray-700 bg-gray-800 group-hover:bg-blue-900/10"><div className="flex flex-col gap-1 items-center">{order.status==='pending' && (<><button onClick={()=>onUpdateStatus(order.id, 'processing')} className="w-full py-1 bg-purple-700 text-white text-[9px] font-bold rounded hover:bg-purple-600 shadow-sm flex items-center justify-center gap-1">Proses</button><button onClick={()=>onUpdateStatus(order.id, 'cancelled')} className="w-full py-1 bg-gray-700 border border-gray-600 text-gray-400 text-[9px] font-bold rounded hover:bg-red-900/30 hover:text-red-400">Tolak</button></>)}{order.status==='processing' && (<button onClick={()=>openReturnModal(order)} className="w-full py-1 bg-orange-900/30 border border-orange-800 text-orange-400 text-[9px] font-bold rounded hover:bg-orange-800 flex items-center justify-center gap-1">Retur</button>)}</div></td></>)}</tr>); }); }))}</tbody></table></div></div>
+            <div className="px-4 py-3 bg-gray-800 border-t border-gray-700 flex items-center justify-between text-xs text-gray-500"><div>Menampilkan {startIndex + 1}-{Math.min(startIndex + itemsPerPage, totalItems)} dari {totalItems} data</div><div className="flex items-center gap-2"><button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16}/></button><span className="font-bold text-gray-200">Halaman {currentPage}</span><button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16}/></button></div></div>
         </>
       )}
     </div>
