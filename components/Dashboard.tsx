@@ -293,6 +293,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                          <span className="text-[9px] font-bold text-gray-400 flex items-center gap-0.5"><MapPin size={8}/> {item.shelf}</span>
                                     </div>
                                     <h3 className="font-bold text-gray-800 text-xs leading-snug line-clamp-2 min-h-[2.5em]">{item.name}</h3>
+                                    
+                                    {/* --- BRAND & APPLICATION BADGES (GRID) --- */}
+                                    <div className="flex flex-wrap gap-1 mt-1.5 mb-2">
+                                        {item.brand && <span className="text-[9px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded font-medium border border-gray-200">{item.brand}</span>}
+                                        {item.application && <span className="text-[9px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-medium border border-blue-100">{item.application}</span>}
+                                    </div>
+                                    {/* ----------------------------------------- */}
+
                                 </div>
                                 
                                 <div className="mt-auto border-t border-gray-50 pt-2">
@@ -320,10 +328,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     <span className={`text-[9px] font-bold px-1.5 rounded ${item.quantity === 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>{item.quantity} Unit</span>
                                 </div>
                                 <h3 className="font-bold text-sm text-gray-900 truncate">{item.name}</h3>
-                                <div className="flex items-center gap-3 mt-1 text-[10px] text-gray-500">
-                                    <span>Rak: <b>{item.shelf || '-'}</b></span>
-                                    <span>App: {item.application}</span>
+                                
+                                {/* --- BRAND & APPLICATION INFO (LIST) --- */}
+                                <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-gray-500">
+                                    {item.brand && <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200 font-medium">{item.brand}</span>}
+                                    {item.application && <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100 font-medium">{item.application}</span>}
+                                    <span className="flex items-center gap-1 ml-1"><MapPin size={10}/> Rak: <b>{item.shelf || '-'}</b></span>
                                 </div>
+                                {/* --------------------------------------- */}
+
                             </div>
                             <div className="flex flex-col items-end gap-2 pl-2">
                                 <div className="font-extrabold text-blue-700 text-sm">{formatCompactNumber(item.price)}</div>
