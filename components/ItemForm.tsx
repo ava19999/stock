@@ -65,11 +65,14 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     const file = e.target.files?.[0];
     if (file) {
       try {
+        // compressImage di utils.ts sekarang sudah bisa menerima object File secara langsung
         const compressed = await compressImage(file);
         setFormData(prev => ({ ...prev, imageUrl: compressed }));
         setImagePreview(compressed);
+        setError(null);
       } catch (err) {
-        alert("Gagal memproses gambar.");
+        console.error(err);
+        setError("Gagal memproses gambar. Pastikan format file didukung.");
       }
     }
   };
