@@ -34,8 +34,8 @@ const MARKETPLACES = ['Shopee', 'Tiktok', 'Tokopedia', 'Lazada', 'Offline'];
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
   return (
-    <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-full shadow-xl flex items-center text-white text-sm font-medium animate-in fade-in slide-in-from-top-2 duration-300 border ${type === 'success' ? 'bg-gray-900 border-gray-700' : 'bg-red-900 border-red-700'}`}>
-      {type === 'success' ? <CheckCircle size={18} className="mr-2 text-green-400" /> : <XCircle size={18} className="mr-2" />}
+    <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-full shadow-xl flex items-center text-white text-sm font-medium animate-in fade-in slide-in-from-top-2 duration-300 border ${type === 'success' ? 'bg-gray-800 border-gray-600 shadow-green-900/20' : 'bg-red-900/90 border-red-700'}`}>
+      {type === 'success' ? <CheckCircle size={18} className="mr-2 text-green-400" /> : <XCircle size={18} className="mr-2 text-red-300" />}
       {message}
     </div>
   );
@@ -151,7 +151,9 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       setScanLogs(prev => prev.map(log => {
           if (log.id === id) {
               const updated = { ...log, part_number: value };
-              updated.status = (updated.part_number && updated.nama_barang && updated.quantity) ? 'Siap Kirim' : 'Pending';
+              // PERBAIKAN: Jangan otomatis ubah status jadi 'Siap Kirim' saat edit manual.
+              // Status hanya berubah jika di-scan ulang atau logic lain.
+              // updated.status = (updated.part_number && updated.nama_barang && updated.quantity) ? 'Siap Kirim' : 'Pending'; 
               return updated;
           }
           return log;
