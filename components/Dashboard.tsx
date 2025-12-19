@@ -8,6 +8,7 @@ import {
   ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin,
   LayoutGrid, List, History, X, ChevronLeft, Loader2, AlertTriangle, AlertCircle, Store, Plus
 } from 'lucide-react';
+import { formatRupiah } from '../utils';
 
 interface DashboardProps {
   items: InventoryItem[]; 
@@ -107,7 +108,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
   };
 
-  const formatRupiah = (num: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(num || 0);
   const formatCompactNumber = (num: number, isCurrency = true) => { const n = num || 0; if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'M'; if (n >= 1000000) return (n / 1000000).toFixed(1) + 'jt'; return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(n); };
   
   useEffect(() => { if (showHistoryDetail) { setHistoryDetailLoading(true); const timer = setTimeout(async () => { const { data, count } = await fetchHistoryLogsPaginated(showHistoryDetail, historyDetailPage, 50, historyDetailSearch); setHistoryDetailData(data); setHistoryDetailTotalPages(Math.ceil(count / 50)); setHistoryDetailLoading(false); }, 500); return () => clearTimeout(timer); } else { setHistoryDetailData([]); setHistoryDetailPage(1); setHistoryDetailSearch(''); } }, [showHistoryDetail, historyDetailPage, historyDetailSearch]);
@@ -143,7 +143,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="bg-gray-950 min-h-screen pb-24 font-sans text-gray-100">
-      {/* Jika Form Edit muncul, gunakan logic ItemForm */}
+      {/* FORM MODAL - DARK MODE */}
       {showItemForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
             <div className="bg-gray-900 w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl border border-gray-800 shadow-2xl">
@@ -151,20 +151,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     initialData={editingItem}
                     onCancel={() => setShowItemForm(false)}
                     onSubmit={(data) => {
-                        // Dummy submit, actual logic handled inside ItemForm via API
-                        // This prop might need adjustment based on how you implemented ItemForm props
-                        // But sticking to your structure:
-                        handleFormSuccess();
+                        handleFormSuccess(); // Logic handled inside ItemForm via API but triggering refresh here
                     }}
                 />
             </div>
         </div>
       )}
 
-      {/* --- STATS SECTION (DARK MODE) --- */}
+      {/* --- STATS SECTION - DARK MODE --- */}
       <div className="bg-gray-900 border-b border-gray-800 sticky top-0 z-20 shadow-sm">
         <div className="px-4 py-3">
-            {/* Mobile: Scroll, Desktop: Grid 5 Columns */}
+            {/* Stats Grid */}
             <div className="flex gap-3 overflow-x-auto scrollbar-hide snap-x md:grid md:grid-cols-5 md:overflow-visible">
                 
                 {/* 1. Total Item */}
@@ -213,7 +210,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                 </button>
 
-                 {/* 5. Aset (PALING BELAKANG/KANAN) */}
+                 {/* 5. Aset */}
                  <div className="min-w-[180px] snap-start bg-gradient-to-br from-gray-800 to-gray-900 p-3 rounded-xl shadow-md border border-gray-700 text-white flex flex-col justify-between h-24 relative overflow-hidden md:w-auto">
                     <div className="absolute right-0 top-0 p-2 opacity-10"><Wallet size={48} /></div>
                     <div className="flex items-center gap-2 text-gray-300 mb-1">
@@ -226,7 +223,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
         </div>
 
-        {/* --- SEARCH & FILTER BAR (DARK MODE) --- */}
+        {/* --- SEARCH & FILTER BAR - DARK MODE --- */}
         <div className="px-4 pb-3">
             <div className="flex gap-2 items-center mb-2">
                  <div className="relative flex-1">
@@ -234,9 +231,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <input 
                         type="text" 
                         placeholder="Cari barang..." 
-                        value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)} 
-                        className="w-full pl-10 pr-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/50 outline-none text-gray-200 placeholder-gray-500" 
+                        className="w-full pl-10 pr-4 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/50 outline-none text-gray-100 placeholder-gray-500" 
                     />
                 </div>
                 <button onClick={handleAddNewClick} className="bg-blue-600 text-white p-2.5 rounded-xl shadow-md hover:bg-blue-700 active:scale-95 transition-all">
@@ -258,7 +254,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* --- CONTENT GRID/LIST (DARK MODE) --- */}
+      {/* --- CONTENT GRID/LIST - DARK MODE --- */}
       <div className="p-4">
         {loading ? (
              <div className="flex flex-col items-center justify-center py-20 text-gray-500">
@@ -276,27 +272,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
                     {localItems.map(item => (
                         <div key={item.id} className="bg-gray-800 rounded-xl shadow-sm border border-gray-700 overflow-hidden flex flex-col hover:border-gray-600 transition-colors">
-                            {/* Image Section */}
                             <div className="aspect-[4/3] relative bg-gray-900 cursor-pointer group" onClick={() => setSelectedItemHistory(item)}>
                                 {item.imageUrl ? (
                                     <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}/>
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center text-gray-700"><Package size={24}/></div>
                                 )}
-                                
-                                {/* Badges */}
                                 <div className="absolute top-2 left-2 flex flex-col gap-1">
                                     <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold shadow-sm border ${item.quantity === 0 ? 'bg-red-900 text-red-100 border-red-800' : item.quantity < 4 ? 'bg-orange-900 text-orange-100 border-orange-800' : 'bg-gray-900/90 text-gray-200 backdrop-blur border-gray-700'}`}>
                                         {item.quantity === 0 ? 'HABIS' : `${item.quantity} Unit`}
                                     </span>
                                 </div>
-
                                 <div className="absolute bottom-2 right-2 bg-black/70 backdrop-blur text-white px-1.5 py-0.5 rounded text-[9px] flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <History size={10} /> Riwayat
                                 </div>
                             </div>
-
-                            {/* Info Section */}
                             <div className="p-3 flex-1 flex flex-col">
                                 <div className="mb-2">
                                     <div className="flex justify-between items-start mb-1">
@@ -305,7 +295,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     </div>
                                     <h3 className="font-bold text-gray-200 text-xs leading-snug line-clamp-2 min-h-[2.5em]">{item.name}</h3>
                                 </div>
-                                
                                 <div className="mt-auto border-t border-gray-700 pt-2">
                                     <div className="text-sm font-extrabold text-blue-400 mb-2">{formatCompactNumber(item.price)}</div>
                                     <div className="grid grid-cols-2 gap-2">
@@ -348,7 +337,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
             )}
 
-            {/* Pagination Floating */}
             <div className="flex justify-between items-center mt-6 bg-gray-800/90 backdrop-blur p-3 rounded-2xl shadow-lg border border-gray-700 sticky bottom-4 z-10 max-w-sm mx-auto">
                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-600"><ChevronLeft size={18} /></button>
                 <span className="text-xs font-medium text-gray-300">Hal <b>{page}</b> / {totalPages}</span>
@@ -358,7 +346,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         )}
       </div>
 
-      {/* --- MODAL DETAIL RIWAYAT (DARK MODE) --- */}
+      {/* --- MODAL DETAIL RIWAYAT GLOBAL (DARK MODE) --- */}
       {showHistoryDetail && (
         <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm p-0 md:p-4 animate-in fade-in">
             <div className="bg-gray-900 w-full md:max-w-7xl h-[95vh] md:h-auto md:max-h-[90vh] rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-gray-800">
@@ -415,22 +403,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         const total = h.totalPrice || (price * (Number(h.quantity) || 0)); 
                                         const { ecommerce, customer, keterangan, resi } = parseHistoryReason(h.reason); 
                                         
-                                        let displayResi = '-';
-                                        let displayShop = '-';
-                                        
+                                        let displayResi = '-'; let displayShop = '-';
                                         if (h.type === 'in') {
                                             if (h.tempo && h.tempo.includes(' / ')) {
                                                 const parts = h.tempo.split(' / ');
                                                 displayResi = parts[0] !== '-' ? parts[0] : '-';
                                                 displayShop = parts[1] !== '-' ? parts[1] : '-';
-                                            } else {
-                                                displayShop = h.tempo || '-';
-                                            }
+                                            } else { displayShop = h.tempo || '-'; }
                                         } else {
                                             displayResi = resi !== '-' ? resi : (h.resi || '-');
                                             displayShop = h.tempo || '-';
                                         }
-
                                         let ketContent = h.type === 'in' ? h.reason.replace(/\(Via:.*?\)/, '').trim() : (customer !== '-' ? customer : keterangan);
                                         const isRetur = ketContent.toUpperCase().includes('(RETUR)');
                                         const cleanName = ketContent.replace(/\(RETUR\)/i, '').trim();
@@ -440,41 +423,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             <td className="px-3 py-2 align-top text-gray-300 whitespace-nowrap">
                                                 {h.timestamp ? <><div className="font-bold">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-[9px] text-gray-500 font-mono">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div></> : '-'}
                                             </td>
-                                            
                                             <td className="px-3 py-2 align-top font-mono text-[10px]">
                                                 <div className="flex flex-col gap-1 items-start">
-                                                    {displayResi !== '-' && displayResi !== '' && (
-                                                        <span className="inline-block px-1.5 py-0.5 rounded font-bold bg-blue-900/30 text-blue-300 border border-blue-800 truncate max-w-[120px]">
-                                                            {displayResi}
-                                                        </span>
-                                                    )}
-                                                    {displayShop !== '-' && displayShop !== '' && (
-                                                        <div className="flex items-center gap-1 text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded border border-gray-700 shadow-sm">
-                                                            <Store size={8} className="text-gray-500" />
-                                                            <span className="font-bold text-[9px] uppercase truncate max-w-[100px]">{displayShop}</span>
-                                                        </div>
-                                                    )}
+                                                    {displayResi !== '-' && displayResi !== '' && <span className="inline-block px-1.5 py-0.5 rounded font-bold bg-blue-900/30 text-blue-300 border border-blue-800 truncate max-w-[120px]">{displayResi}</span>}
+                                                    {displayShop !== '-' && displayShop !== '' && <div className="flex items-center gap-1 text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded border border-gray-700 shadow-sm"><Store size={8} className="text-gray-500" /><span className="font-bold text-[9px] uppercase truncate max-w-[100px]">{displayShop}</span></div>}
                                                     {displayResi === '-' && displayShop === '-' && <span className="text-gray-600">-</span>}
                                                 </div>
                                             </td>
-                                            
-                                            <td className="px-3 py-2 align-top">
-                                                {ecommerce !== '-' ? <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-900/30 text-orange-300 border border-orange-800">{ecommerce}</span> : <span className="text-gray-600">-</span>}
-                                            </td>
+                                            <td className="px-3 py-2 align-top">{ecommerce !== '-' ? <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-900/30 text-orange-300 border border-orange-800">{ecommerce}</span> : <span className="text-gray-600">-</span>}</td>
                                             <td className="px-3 py-2 font-mono text-gray-500 text-[10px] align-top">{h.partNumber || '-'}</td>
                                             <td className="px-3 py-2 font-medium text-gray-300 max-w-[200px] align-top truncate" title={h.name}>{h.name}</td>
                                             <td className={`px-3 py-2 text-right font-bold align-top ${showHistoryDetail==='in'?'text-green-400':'text-red-400'}`}>{showHistoryDetail==='in' ? '+' : '-'}{h.quantity}</td>
                                             <td className="px-3 py-2 text-right text-gray-500 font-mono align-top text-[10px]">{formatRupiah(price)}</td>
                                             <td className="px-3 py-2 text-right text-gray-200 font-bold font-mono align-top text-[10px]">{formatRupiah(total)}</td>
-                                            
                                             <td className="px-3 py-2 align-top text-gray-400 font-medium text-[10px]">
                                                 <div className="flex flex-col items-start gap-1">
                                                     <span className="font-bold text-gray-300 truncate max-w-[150px]" title={cleanName}>{cleanName}</span>
-                                                    {isRetur && (
-                                                        <span className="bg-red-900/30 text-red-300 px-1 py-0.5 rounded text-[8px] font-bold border border-red-800 flex items-center gap-1">
-                                                            <TrendingDown size={8} /> RETUR
-                                                        </span>
-                                                    )}
+                                                    {isRetur && <span className="bg-red-900/30 text-red-300 px-1 py-0.5 rounded text-[8px] font-bold border border-red-800 flex items-center gap-1"><TrendingDown size={8} /> RETUR</span>}
                                                 </div>
                                             </td>
                                         </tr>); 
@@ -536,13 +501,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                                 {h.timestamp ? <><div className="font-bold text-gray-300">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-[9px] text-gray-500 font-mono">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div></> : '-'}
                                             </td>
                                             <td className="px-3 py-2 align-top text-center">
-                                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border ${h.type === 'in' ? 'bg-green-900/40 text-green-300 border-green-800' : 'bg-red-900/40 text-red-300 border-red-800'}`}>
-                                                    {h.type === 'in' ? 'Masuk' : 'Keluar'}
-                                                </span>
+                                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border ${h.type === 'in' ? 'bg-green-900/40 text-green-300 border-green-800' : 'bg-red-900/40 text-red-300 border-red-800'}`}>{h.type === 'in' ? 'Masuk' : 'Keluar'}</span>
                                             </td>
-                                            <td className={`px-3 py-2 align-top text-right font-bold ${h.type === 'in' ? 'text-green-400' : 'text-red-400'}`}>
-                                                {h.type === 'in' ? '+' : '-'}{h.quantity}
-                                            </td>
+                                            <td className={`px-3 py-2 align-top text-right font-bold ${h.type === 'in' ? 'text-green-400' : 'text-red-400'}`}>{h.type === 'in' ? '+' : '-'}{h.quantity}</td>
                                             <td className="px-3 py-2 align-top text-right font-mono text-gray-500 text-[10px]">{formatRupiah(h.price)}</td>
                                             <td className="px-3 py-2 align-top text-right font-bold font-mono text-gray-300 text-[10px]">{formatRupiah(h.totalPrice)}</td>
                                             <td className="px-3 py-2 align-top text-gray-400">
