@@ -349,6 +349,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   const handleProcessReturn = async () => {
       if (!selectedOrderForReturn) return;
+      
+      // 1. Hitung items yang akan diretur
       const itemsToReturnData = selectedOrderForReturn.items.map(item => {
             const qtyRetur = returnQuantities[item.id] || 0;
             return qtyRetur > 0 ? { ...item, cartQuantity: qtyRetur } : null;
@@ -362,6 +364,19 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
         const combinedResiShop = `${resiText} / ${shopName}`;
         const orderDate = selectedOrderForReturn.items[0]?.timestamp ? new Date(selectedOrderForReturn.timestamp).toISOString() : new Date().toISOString();
 
+        // 2. Hitung sisa barang (untuk menentukan status Full Retur atau Sebagian)
+        // Kita simulasikan sisa barang setelah retur diproses
+        const remainingItems = selectedOrderForReturn.items.map(item => {
+            const returItem = itemsToReturnData.find(r => r.id === item.id);
+            // Jika item ini diretur, kurangi quantity aslinya dengan qty retur
+            const qtyReturned = returItem ? returItem.cartQuantity : 0;
+            return { ...item, cartQuantity: (item.cartQuantity || 0) - qtyReturned };
+        }).filter(item => (item.cartQuantity || 0) > 0);
+
+        // 3. Tentukan Status
+        const statusLabel = remainingItems.length === 0 ? 'Full Retur' : 'Retur Sebagian';
+
+        // 4. Proses Inventory dan Simpan Log Retur
         for (const item of itemsToReturnData) {
             const hargaSatuan = item.customPrice ?? item.price ?? 0;
             const realItem = await getItemByPartNumber(item.partNumber);
@@ -371,27 +386,44 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 });
             }
             const returData: ReturRecord = {
-                tanggal_pemesanan: orderDate, resi: resiText, toko: shopName, ecommerce, customer: cleanName,
-                part_number: item.partNumber, nama_barang: item.name, quantity: item.cartQuantity,
-                harga_satuan: hargaSatuan, harga_total: hargaSatuan * item.cartQuantity, tanggal_retur: new Date().toISOString(),
-                status: 'Retur Sebagian', keterangan: 'Retur Barang'
+                tanggal_pemesanan: orderDate, 
+                resi: resiText, 
+                toko: shopName, 
+                ecommerce, 
+                customer: cleanName,
+                part_number: item.partNumber, 
+                nama_barang: item.name, 
+                quantity: item.cartQuantity,
+                harga_satuan: hargaSatuan, 
+                harga_total: hargaSatuan * item.cartQuantity, 
+                tanggal_retur: new Date().toISOString(),
+                status: statusLabel, // <--- GUNAKAN STATUS DINAMIS DI SINI
+                keterangan: 'Retur Barang'
             };
             await addReturTransaction(returData);
         }
 
-        const remainingItems = selectedOrderForReturn.items.map(item => {
-            const returItem = itemsToReturnData.find(r => r.id === item.id);
-            return returItem ? { ...item, cartQuantity: (item.cartQuantity || 0) - returItem.cartQuantity } : item;
-        }).filter(item => (item.cartQuantity || 0) > 0);
-
+        // 5. Update Data Order (Cancelled jika habis, atau Processing jika sisa)
         if (remainingItems.length === 0) {
             await updateOrderData(selectedOrderForReturn.id, selectedOrderForReturn.items, selectedOrderForReturn.totalAmount, 'cancelled');
         } else {
             const returnTotal = itemsToReturnData.reduce((sum, item) => sum + ((item.customPrice ?? item.price ?? 0) * item.cartQuantity), 0);
-            await saveOrder({ id: `${selectedOrderForReturn.id}-RET`, customerName: `${selectedOrderForReturn.customerName} (RETUR)`, items: itemsToReturnData, totalAmount: returnTotal, status: 'cancelled', timestamp: Date.now() });
+            
+            // Buat record order baru untuk barang yang diretur (history only, status cancelled)
+            await saveOrder({ 
+                id: `${selectedOrderForReturn.id}-RET-${Date.now()}`, 
+                customerName: `${selectedOrderForReturn.customerName} (RETUR)`, 
+                items: itemsToReturnData, 
+                totalAmount: returnTotal, 
+                status: 'cancelled', 
+                timestamp: Date.now() 
+            });
+            
+            // Update order asli dengan sisa barang
             const remainingTotal = remainingItems.reduce((sum, item) => sum + ((item.customPrice ?? item.price ?? 0) * item.cartQuantity), 0);
             await updateOrderData(selectedOrderForReturn.id, remainingItems, remainingTotal, 'processing');
         }
+
         setIsReturnModalOpen(false); setSelectedOrderForReturn(null); setActiveTab('history');
         if (onRefresh) onRefresh();
       } catch (error) { console.error("Error processing return:", error); } 
