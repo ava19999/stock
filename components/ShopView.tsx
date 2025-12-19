@@ -59,8 +59,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
   const [customerNameInput, setCustomerNameInput] = useState(''); 
   const [resiInput, setResiInput] = useState('');
   const [ecommerceInput, setEcommerceInput] = useState('');
-  
-  // State untuk Toko
   const [shopNameInput, setShopNameInput] = useState('');
   
   const bannerInputRef = useRef<HTMLInputElement>(null); 
@@ -175,6 +173,13 @@ export const ShopView: React.FC<ShopViewProps> = ({
                         <div className="p-3 flex-1 flex flex-col">
                             <div className="flex items-center gap-1.5 mb-1.5"><Tag size={10} className="text-blue-500" /><span className="text-xs font-mono text-gray-500 uppercase tracking-wider truncate">{item.partNumber || '-'}</span></div>
                             <h3 className="text-sm font-bold text-gray-900 mb-1 leading-snug line-clamp-1" title={item.name}>{item.name}</h3>
+                            
+                            {/* NEW: Brand & Application Badges */}
+                            <div className="flex flex-wrap gap-1 mb-2">
+                                {item.brand && <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded font-medium">{item.brand}</span>}
+                                {item.application && <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-medium">{item.application}</span>}
+                            </div>
+                            
                             <p className="text-xs text-gray-500 line-clamp-2 mb-3 leading-relaxed flex-1">{item.description}</p>
                             <div className="mt-auto pt-3 border-t border-gray-50 flex flex-col justify-between gap-2">
                                 <div className="flex flex-col">
@@ -203,7 +208,12 @@ export const ShopView: React.FC<ShopViewProps> = ({
                          <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
                              <div>
                                  <h3 className="text-sm font-bold text-gray-900 leading-tight line-clamp-2 mb-1">{item.name}</h3>
-                                 <div className="flex items-center gap-2 mb-1"><span className="text-xs font-mono text-gray-500 bg-gray-50 px-1 rounded truncate">{item.partNumber || '-'}</span></div>
+                                 <div className="flex items-center flex-wrap gap-2 mb-1">
+                                    <span className="text-xs font-mono text-gray-500 bg-gray-50 px-1 rounded truncate">{item.partNumber || '-'}</span>
+                                    {/* NEW: Brand & Application Badges */}
+                                    {item.brand && <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded font-medium">{item.brand}</span>}
+                                    {item.application && <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-medium">{item.application}</span>}
+                                 </div>
                                  <p className="text-xs text-gray-500 line-clamp-1 truncate">{item.description}</p>
                              </div>
                              <div className="flex justify-between items-end mt-2">
@@ -356,7 +366,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
                         
                         <div><label className="text-xs font-bold text-gray-500 uppercase">E-Commerce</label><input type="text" value={ecommerceInput} onChange={(e) => setEcommerceInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Contoh: Shopee..." /></div>
                         
-                        {/* POSITION MOVED: Input is now below Ecommerce */}
                         <div><label className="text-xs font-bold text-gray-500 uppercase">Toko</label><input type="text" value={shopNameInput} onChange={(e) => setShopNameInput(e.target.value)} className="w-full p-3 border rounded-xl mt-1" placeholder="Nama Toko..." /></div>
                     </div>
                     <div className="mt-6 grid grid-cols-2 gap-3">
