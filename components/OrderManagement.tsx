@@ -152,30 +152,13 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   };
 
   const handlePartNumberChange = async (id: number, value: string) => {
-      // 1. Update State Lokal (Optimistic)
       setScanLogs(prev => prev.map(log => {
           if (log.id === id) {
               const updated = { ...log, part_number: value };
-              
-              // PERBAIKAN: Hitung Status secara lokal agar UI langsung berubah
-              const isCustomerValid = updated.customer && updated.customer !== '-' && updated.customer.trim() !== '';
-              const isPartNoValid = updated.part_number && updated.part_number !== '-' && updated.part_number.trim() !== '';
-              const isBarangValid = updated.nama_barang && updated.nama_barang !== '-' && updated.nama_barang.trim() !== '';
-              const isQtyValid = (updated.quantity || 0) > 0;
-              
-              const isComplete = isCustomerValid && isPartNoValid && isBarangValid && isQtyValid;
-              
-              // Jangan ubah status jika sudah Terjual
-              if (updated.status !== 'Terjual') {
-                  updated.status = isComplete ? 'Siap Kirim' : 'Pending';
-              }
-
               return updated;
           }
           return log;
       }));
-      
-      // 2. Simpan ke Database
       if (id) await updateScanResiLogField(id, 'part_number', value);
   };
 
