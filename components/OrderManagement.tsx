@@ -168,6 +168,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   };
 
   // --- MODIFIKASI: LOGIKA VALIDASI KETAT PADA UPLOAD CSV ---
+  // Status dipaksa 'Pending' agar terhitung "Belum Scan" sampai scan fisik
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -232,7 +233,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     }
                 }
 
-                // --- VALIDASI KETAT STATUS SIAP KIRIM ---
                 if (resiRaw) {
                     const finalResi = String(resiRaw).trim();
                     
@@ -244,24 +244,17 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     const finalHargaSatuan = parseIndonesianNumber(hargaRaw);
                     const finalHargaTotal = finalQty * finalHargaSatuan;
 
-                    // SYARAT STATUS 'Siap Kirim': Semua kolom harus terisi valid
-                    const isCustomerFilled = finalCustomer !== '-' && finalCustomer !== '';
-                    const isPartNoFilled = finalPartNo !== null && finalPartNo !== '';
-                    const isBarangFilled = finalBarang !== '-' && finalBarang !== '';
-                    const isQtyValid = finalQty > 0;
-                    const isTotalValid = finalHargaTotal > 0;
-
-                    // Jika SEMUA syarat terpenuhi = Siap Kirim, jika TIDAK = Pending
-                    const statusFinal = (isCustomerFilled && isPartNoFilled && isBarangFilled && isQtyValid && isTotalValid) 
-                        ? 'Siap Kirim' 
-                        : 'Pending';
+                    // --- PERUBAHAN UTAMA ---
+                    // Status SELALU 'Pending' saat upload CSV.
+                    // Toko & Via diambil dari Pilihan Dropdown di Aplikasi.
+                    const statusFinal = 'Pending';
 
                     return {
                         resi: finalResi,
-                        toko: selectedStore,
-                        ecommerce: selectedMarketplace,
+                        toko: selectedStore,          // Dari Dropdown
+                        ecommerce: selectedMarketplace, // Dari Dropdown
                         customer: finalCustomer,
-                        part_number: finalPartNo, // Null jika tidak ketemu
+                        part_number: finalPartNo, 
                         nama_barang: finalBarang,
                         quantity: finalQty,
                         harga_satuan: finalHargaSatuan,
@@ -298,7 +291,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     };
     reader.readAsBinaryString(file);
   };
-  // --- AKHIR MODIFIKASI ---
 
   const handleProcessKirim = async () => {
       if (selectedResis.length === 0) return;

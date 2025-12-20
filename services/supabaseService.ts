@@ -687,7 +687,8 @@ export const addScanResiLog = async (resi: string, ecommerce: string, toko: stri
     }
 };
 
-// --- FUNGSI BARU: IMPORT DARI EXCEL (LOGIKA VALIDASI DI BACKEND) ---
+// --- FUNGSI BARU: IMPORT DARI EXCEL (LOGIKA MODIFIKASI) ---
+// Status default: Pending, kecuali data existing sudah Siap Kirim/Terjual
 export const importScanResiFromExcel = async (updates: any[]): Promise<{ success: boolean, skippedCount: number, updatedCount: number }> => {
     try {
         const resiList = updates.map(u => u.resi).filter(Boolean);
@@ -711,53 +712,51 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
         updates.forEach(item => {
             const existing = existingMap.get(item.resi);
             
-            // --- VALIDASI BACKEND YANG KETAT ---
-            // Kita hitung nilai final yang akan masuk ke DB, lalu cek kelengkapannya
-            // Ini mencegah data "Pending" terubah jadi "Siap Kirim" padahal kolom masih kosong
+            // LOGIKA UTAMA:
+            // Import CSV tidak boleh auto-promote ke 'Siap Kirim'.
+            // Harus tetap 'Pending' (Belum Scan) sampai di-scan fisik.
+            // KECUALI: Data sudah ada dan statusnya sudah 'Siap Kirim'/'Terjual'.
             
-            const finalData = {
-                customer: item.customer || (existing ? existing.customer : '-'),
-                part_number: item.part_number || (existing ? existing.part_number : null),
-                nama_barang: item.nama_barang || (existing ? existing.nama_barang : '-'),
-                quantity: item.quantity || (existing ? existing.quantity : 0),
-                harga_total: item.harga_total || (existing ? existing.harga_total : 0)
-            };
-
-            const isDataComplete = checkIsComplete(finalData);
-            const statusToUse = isDataComplete ? 'Siap Kirim' : 'Pending';
+            let statusToUse = 'Pending';
+            
+            if (existing) {
+                if (existing.status === 'Siap Kirim' || existing.status === 'Terjual') {
+                    statusToUse = existing.status;
+                }
+            }
 
             if (existing) {
-                // JIKA SUDAH ADA: Update data jika perlu
-                // Kondisi: Jika part_number kosong, atau status masih Pending, kita coba update dan cek ulang statusnya
-                if (!existing.part_number || existing.status === 'Pending' || isDataComplete) {
-                    updatePromises.push(
-                        supabase.from('scan_resi').update({
-                            toko: item.toko || existing.toko,
-                            ecommerce: item.ecommerce || existing.ecommerce,
-                            customer: item.customer,
-                            part_number: item.part_number,
-                            nama_barang: item.nama_barang,
-                            quantity: item.quantity,
-                            harga_satuan: item.harga_satuan,
-                            harga_total: item.harga_total,
-                            status: statusToUse // Menggunakan validasi backend
-                        }).eq('id', existing.id)
-                    );
-                }
+                // JIKA SUDAH ADA: Update detailnya
+                // Jika status lama Pending, tetap Pending.
+                // Update toko & via sesuai input aplikasi (item.toko)
+                
+                updatePromises.push(
+                    supabase.from('scan_resi').update({
+                        toko: item.toko,
+                        ecommerce: item.ecommerce,
+                        customer: item.customer,
+                        part_number: item.part_number,
+                        nama_barang: item.nama_barang,
+                        quantity: item.quantity,
+                        harga_satuan: item.harga_satuan,
+                        harga_total: item.harga_total,
+                        status: statusToUse 
+                    }).eq('id', existing.id)
+                );
             } else {
-                // JIKA BELUM ADA: Insert Baru
+                // JIKA BELUM ADA: Insert Baru dengan status Pending
                 insertPayload.push({
                     tanggal: getWIBISOString(),
                     resi: item.resi,
-                    toko: item.toko || '-',
-                    ecommerce: item.ecommerce || '-',
+                    toko: item.toko,
+                    ecommerce: item.ecommerce,
                     customer: item.customer || '-',
                     part_number: item.part_number || null,
                     nama_barang: item.nama_barang || '-',
                     quantity: item.quantity || 0,
                     harga_satuan: item.harga_satuan || 0,
                     harga_total: item.harga_total || 0,
-                    status: statusToUse // Menggunakan validasi backend
+                    status: statusToUse // Pasti Pending
                 });
             }
         });
@@ -809,6 +808,8 @@ export const updateScanResiLogField = async (id: number, field: string, value: a
             harga_total: data.harga_total
         });
 
+        // Hanya ubah ke 'Siap Kirim' jika sebelumnya 'Pending' dan data sudah lengkap
+        // (NOTE: Biasanya dipicu oleh edit manual)
         const newStatus = isComplete ? 'Siap Kirim' : 'Pending';
 
         if (data.status !== newStatus && data.status !== 'Terjual') {
