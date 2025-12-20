@@ -55,8 +55,6 @@ const checkIsComplete = (data: {
     const isPartNoValid = data.part_number && data.part_number !== '-' && data.part_number.trim() !== '';
     const isBarangValid = data.nama_barang && data.nama_barang !== '-' && data.nama_barang.trim() !== '';
     const isQtyValid = Number(data.quantity) > 0;
-    // Harga total boleh 0 jika memang barang bonus, tapi idealnya ada nilai. Kita cek > -1 agar 0 lolos jika perlu, atau > 0.
-    // Sesuai request sebelumnya: "jika semua data ada".
     return !!(isCustomerValid && isPartNoValid && isBarangValid && isQtyValid);
 };
 
@@ -771,7 +769,7 @@ export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
             .from('scan_resi')
             .select('*')
             .eq('resi', sourceItem.resi)
-            .eq('nama_barang', sourceItem.nama_barang); // Asumsi: Barang yg diduplikasi adalah yg namanya sama
+            .eq('nama_barang', sourceItem.nama_barang); 
 
         if (!siblings) return false;
 
@@ -787,21 +785,29 @@ export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
         const updatePromises = siblings.map(item => 
             supabase.from('scan_resi').update({ 
                 harga_total: newPricePerItem,
-                harga_satuan: newPricePerItem // Asumsi Qty per baris = 1
+                harga_satuan: newPricePerItem 
             }).eq('id', item.id)
         );
         await Promise.all(updatePromises);
 
-        // 6. Insert Item Baru (Clone) dengan harga yang sudah dibagi
+        // 6. Insert Item Baru (Clone)
+        // PERBAIKAN: Pisahkan id lama agar tidak konflik
+        const { id: oldId, ...cleanItemData } = sourceItem;
+
         const { error: insertError } = await supabase.from('scan_resi').insert([{
-            ...sourceItem,
-            id: undefined, // Buat ID baru
+            ...cleanItemData,
             tanggal: getWIBISOString(),
             harga_total: newPricePerItem,
-            harga_satuan: newPricePerItem
+            harga_satuan: newPricePerItem,
+            status: 'Pending'
         }]);
 
-        return !insertError;
+        if (insertError) {
+            console.error("Gagal insert duplikat:", insertError);
+            return false;
+        }
+
+        return true;
     } catch (err) {
         console.error("Error duplicating:", err);
         return false;
