@@ -141,6 +141,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const filteredItemHistory = useMemo(() => { if (!selectedItemHistory) return []; let itemHistory = [...itemHistoryData]; if (itemHistorySearch.trim() !== '') { const lowerSearch = itemHistorySearch.toLowerCase(); itemHistory = itemHistory.filter(h => { const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason); return ( keterangan.toLowerCase().includes(lowerSearch) || resi.toLowerCase().includes(lowerSearch) || ecommerce.toLowerCase().includes(lowerSearch) || customer.toLowerCase().includes(lowerSearch) || h.reason.toLowerCase().includes(lowerSearch) ); }); } return itemHistory; }, [itemHistoryData, selectedItemHistory, itemHistorySearch]);
 
+  // --- LOGIKA WARNA KARTU ---
+  const getItemCardStyle = (qty: number) => {
+      if (qty === 0) return "bg-red-900/30 border-red-800 hover:border-red-600";
+      if (qty < 4) return "bg-orange-900/30 border-orange-800 hover:border-orange-600";
+      return "bg-gray-800 border-gray-700 hover:border-gray-600";
+  };
+
   return (
     <div className="bg-gray-900 min-h-screen pb-24 font-sans text-gray-100">
       {showItemForm && (
@@ -264,7 +271,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {viewMode === 'grid' ? (
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
                     {localItems.map(item => (
-                        <div key={item.id} className="bg-gray-800 rounded-xl shadow-none border border-gray-700 overflow-hidden flex flex-col hover:border-gray-600 transition-all">
+                        <div key={item.id} className={`rounded-xl shadow-none border overflow-hidden flex flex-col transition-all ${getItemCardStyle(item.quantity)}`}>
                             {/* Image Section */}
                             <div className="aspect-[4/3] relative bg-gray-700 cursor-pointer group" onClick={() => setSelectedItemHistory(item)}>
                                 {item.imageUrl ? (
@@ -316,7 +323,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             ) : (
                 <div className="flex flex-col gap-3">
                     {localItems.map(item => (
-                         <div key={item.id} className="bg-gray-800 rounded-xl p-3 border border-gray-700 shadow-none flex items-center gap-3">
+                         <div key={item.id} className={`rounded-xl p-3 border shadow-none flex items-center gap-3 ${getItemCardStyle(item.quantity)}`}>
                             <div className="w-16 h-16 bg-gray-700 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer relative" onClick={() => setSelectedItemHistory(item)}>
                                 {item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-600"><Package size={20}/></div>}
                                 {item.quantity < 4 && <div className="absolute inset-0 border-2 border-orange-600 rounded-lg opacity-50"></div>}
