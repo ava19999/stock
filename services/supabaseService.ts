@@ -18,22 +18,16 @@ const handleDbError = (op: string, err: any) => { console.error(`${op} Error:`, 
 
 // --- HELPER FUNCTIONS ---
 
-// Generate ISO String tapi Waktu WIB (UTC+7)
 const getWIBISOString = (): string => {
     const now = new Date();
-    // Geser waktu ke WIB (UTC+7)
     const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
     const wibTime = new Date(utc + (7 * 3600000));
-    
     const pad = (n: number) => n < 10 ? '0' + n : n;
     const pad3 = (n: number) => n < 10 ? '00' + n : (n < 100 ? '0' + n : n);
-    
     return `${wibTime.getFullYear()}-${pad(wibTime.getMonth() + 1)}-${pad(wibTime.getDate())}T${pad(wibTime.getHours())}:${pad(wibTime.getMinutes())}:${pad(wibTime.getSeconds())}.${pad3(wibTime.getMilliseconds())}`;
 };
 
-// Helper khusus untuk format tanggal YYYY-MM-DD sesuai WIB dari timestamp angka
 const getWIBDateString = (timestamp: number): string => {
-    // Geser timestamp ke WIB
     const wibTime = new Date(timestamp + (7 * 3600000));
     return wibTime.toISOString().split('T')[0];
 };
@@ -50,7 +44,6 @@ const formatDisplayTempo = (tempo: string | null | undefined): string => {
     return val;
 };
 
-// --- VALIDASI KELENGKAPAN DATA (Order Management) ---
 const checkIsComplete = (data: { 
     customer?: string | null, 
     part_number?: string | null, 
@@ -62,9 +55,9 @@ const checkIsComplete = (data: {
     const isPartNoValid = data.part_number && data.part_number !== '-' && data.part_number.trim() !== '';
     const isBarangValid = data.nama_barang && data.nama_barang !== '-' && data.nama_barang.trim() !== '';
     const isQtyValid = Number(data.quantity) > 0;
-    const isTotalValid = Number(data.harga_total) > 0;
-
-    return !!(isCustomerValid && isPartNoValid && isBarangValid && isQtyValid && isTotalValid);
+    // Harga total boleh 0 jika memang barang bonus, tapi idealnya ada nilai. Kita cek > -1 agar 0 lolos jika perlu, atau > 0.
+    // Sesuai request sebelumnya: "jika semua data ada".
+    return !!(isCustomerValid && isPartNoValid && isBarangValid && isQtyValid);
 };
 
 const mapBaseItem = (item: any): InventoryItem => ({
@@ -110,7 +103,6 @@ const fetchLatestSellingPrices = async (partNumbers?: string[]) => {
 };
 
 // --- CORE INVENTORY FUNCTIONS ---
-
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
   const { data: baseData, error } = await supabase.from(TABLE_NAME).select('*').order('date', { ascending: false, nullsFirst: false });
   if (error) { console.error(error); return []; }
@@ -415,8 +407,6 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
-// --- INSERT FUNCTIONS (EXPORTED PROPERLY) ---
-
 export const addBarangMasuk = async (data: any) => { 
     const ecommerceVal = data.ecommerce || 'Lainnya';
     const keteranganVal = data.keterangan || 'Restock'; 
@@ -462,8 +452,6 @@ export const addHistoryLog = async (h: StockHistory) => {
     }
 };
 
-// --- FUNGSI UPDATE ORDER ---
-
 export const updateOrderData = async (orderId: string, newItems: any[], newTotal: number, newStatus: string): Promise<boolean> => {
     const { data: oldData } = await supabase.from('orders').select('*').eq('resi', orderId).limit(1).single();
     if (!oldData) return false;
@@ -485,20 +473,12 @@ export const updateOrderData = async (orderId: string, newItems: any[], newTotal
     return true;
 };
 
-// --- FUNGSI UTAMA ORDERS (GROUPING FIX) ---
-
 export const fetchOrders = async (): Promise<Order[]> => { 
-    // Mengambil data dari tabel 'orders'
     const { data } = await supabase.from('orders').select('*').order('tanggal', { ascending: false }).limit(300); 
     if (!data) return [];
-
-    // Grouping berdasarkan RESI DAN STATUS
-    // Agar "Processing" dan "Cancelled" (Retur) terpisah meskipun resinya sama
     const groupedOrders: Record<string, Order> = {};
-
     data.forEach((row: any) => {
         const resi = row.resi || row.id || 'UNKNOWN';
-        // UNIQUE KEY: Gabungan Resi + Status
         const groupKey = `${resi}_${row.status}`; 
         
         if (!groupedOrders[groupKey]) {
@@ -509,8 +489,6 @@ export const fetchOrders = async (): Promise<Order[]> => {
             const constructedCustomerName = `${customerStr}${tokoStr}${viaStr}${resiStr}`;
 
             groupedOrders[groupKey] = {
-                // ID di frontend menggunakan Resi, tapi jika ada split, kita gunakan resi asli
-                // karena updateOrderStatusService menggunakan .eq('resi', id)
                 id: resi, 
                 customerName: constructedCustomerName,
                 items: [],
@@ -520,7 +498,6 @@ export const fetchOrders = async (): Promise<Order[]> => {
                 keterangan: '' 
             };
         }
-
         groupedOrders[groupKey].items.push({
             id: row.part_number, 
             partNumber: row.part_number,
@@ -531,10 +508,8 @@ export const fetchOrders = async (): Promise<Order[]> => {
             customPrice: Number(row.harga_satuan),
             brand: '', application: '', shelf: '', ecommerce: '', imageUrl: '', lastUpdated: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, costPrice: 0, kingFanoPrice: 0
         });
-
         groupedOrders[groupKey].totalAmount += Number(row.harga_total);
     });
-
     return Object.values(groupedOrders);
 };
 
@@ -549,8 +524,6 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
     };
 
     const details = parseDetails(order.customerName);
-    
-    // PERBAIKAN: Gunakan Helper WIB untuk tanggal
     const orderDate = getWIBDateString(order.timestamp); 
 
     const rows = order.items.map(item => ({
@@ -575,7 +548,6 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
 export const updateOrderStatusService = async (id: string, status: string, timestamp?: number): Promise<boolean> => { 
     const updateData: any = { status }; 
     if (timestamp) { 
-        // PERBAIKAN: Gunakan Helper WIB untuk update tanggal
         updateData.tanggal = getWIBDateString(timestamp);
     } 
     const { error } = await supabase.from('orders').update(updateData).eq('resi', id); 
@@ -585,7 +557,6 @@ export const updateOrderStatusService = async (id: string, status: string, times
 export const fetchChatSessions = async (): Promise<ChatSession[]> => { const { data } = await supabase.from('chat_sessions').select('*'); return (data || []).map((c: any) => ({ customerId: c.customer_id, customerName: c.customer_name, messages: c.messages, lastMessage: c.last_message, lastTimestamp: c.last_timestamp, unreadAdminCount: c.unread_admin_count, unreadUserCount: c.unread_user_count })); };
 export const saveChatSession = async (s: ChatSession): Promise<boolean> => { const { error } = await supabase.from('chat_sessions').upsert([{ customer_id: s.customerId, customer_name: s.customerName, messages: s.messages, last_message: s.lastMessage, last_timestamp: s.lastTimestamp, unread_admin_count: s.unreadAdminCount, unread_user_count: s.unreadUserCount }]); return !error; };
 
-// --- MISC (DIPULIHKAN KEMBALI) ---
 export const addReturTransaction = async (data: ReturRecord): Promise<boolean> => {
     const { error } = await supabase.from('retur').insert([{
         tanggal_pemesanan: data.tanggal_pemesanan, resi: data.resi, toko: data.toko, ecommerce: data.ecommerce,
@@ -609,7 +580,6 @@ export const updateReturKeterangan = async (resi: string, keterangan: string): P
     return true;
 };
 
-// --- FUNGSI YANG SEBELUMNYA HILANG DAN DIPULIHKAN ---
 export const fetchPriceHistoryBySource = async (partNumber: string) => { 
     const { data, error } = await supabase.from('barang_masuk').select('ecommerce, harga_satuan, created_at').eq('part_number', partNumber).order('created_at', { ascending: false }); 
     if (error || !data) return []; 
@@ -633,8 +603,6 @@ export const clearBarangKeluar = async (): Promise<boolean> => {
     return true; 
 };
 
-// --- FUNGSI SCAN RESI LOG ---
-
 export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
     const { data, error } = await supabase
         .from('scan_resi')
@@ -649,21 +617,12 @@ export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
     return data || [];
 };
 
-// --- UPDATE PENTING: SCAN FISIK 1X UPDATE SEMUA ITEM ---
 export const addScanResiLog = async (resi: string, ecommerce: string, toko: string): Promise<boolean> => {
     try {
-        // Ambil SEMUA baris dengan resi yang sama
-        const { data: existingItems } = await supabase
-            .from('scan_resi')
-            .select('*')
-            .eq('resi', resi);
+        const { data: existingItems } = await supabase.from('scan_resi').select('*').eq('resi', resi);
 
         if (existingItems && existingItems.length > 0) {
-            // JIKA DATA SUDAH ADA (Misal dari Upload CSV):
-            // Loop semua item dengan resi tersebut dan update statusnya jadi 'Siap Kirim'
-            
             const updatePromises = existingItems.map(async (item) => {
-                // Cek kelengkapan data per item
                 const isComplete = checkIsComplete({
                     customer: item.customer,
                     part_number: item.part_number,
@@ -671,29 +630,21 @@ export const addScanResiLog = async (resi: string, ecommerce: string, toko: stri
                     quantity: item.quantity,
                     harga_total: item.harga_total
                 });
-
-                // Syarat Siap Kirim: Data harus lengkap
                 const newStatus = isComplete ? 'Siap Kirim' : 'Pending';
-
-                // Update Status & Tanggal Scan
                 return supabase.from('scan_resi').update({
                     status: newStatus,
                     tanggal: getWIBISOString(), 
                 }).eq('id', item.id);
             });
-
             await Promise.all(updatePromises);
             return true;
-
         } else {
-            // JIKA DATA BELUM ADA SAMA SEKALI:
-            // Insert baru (Hanya 1 baris, karena kita belum tahu isinya apa)
             const { error } = await supabase.from('scan_resi').insert([{
                 tanggal: getWIBISOString(),
                 resi: resi,
                 ecommerce: ecommerce,
                 toko: toko,
-                status: 'Pending', // Tetap pending sampai diedit part numbernya
+                status: 'Pending', 
             }]);
             return !error;
         }
@@ -703,25 +654,14 @@ export const addScanResiLog = async (resi: string, ecommerce: string, toko: stri
     }
 };
 
-// --- UPDATE PENTING: IMPORT EXCEL SUPPORT MULTI-ITEM ---
 export const importScanResiFromExcel = async (updates: any[]): Promise<{ success: boolean, skippedCount: number, updatedCount: number }> => {
     try {
         const resiList = updates.map(u => u.resi).filter(Boolean);
         if (resiList.length === 0) return { success: false, skippedCount: 0, updatedCount: 0 };
+        const { data: existingData, error: checkError } = await supabase.from('scan_resi').select('*').in('resi', resiList);
 
-        // 1. Ambil SEMUA data existing yang cocok dengan daftar resi
-        const { data: existingData, error: checkError } = await supabase
-            .from('scan_resi')
-            .select('*') 
-            .in('resi', resiList);
+        if (checkError) return { success: false, skippedCount: 0, updatedCount: 0 };
 
-        if (checkError) {
-            console.error("Gagal cek duplikasi:", checkError);
-            return { success: false, skippedCount: 0, updatedCount: 0 };
-        }
-
-        // 2. Grouping existing data berdasarkan Resi
-        // (Satu Resi bisa punya banyak item/baris)
         const existingGrouped = new Map<string, any[]>();
         existingData?.forEach(item => {
             if (!existingGrouped.has(item.resi)) existingGrouped.set(item.resi, []);
@@ -730,18 +670,10 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
 
         const insertPayload: any[] = [];
         const updatePromises: any[] = [];
-        
-        // 3. Track ID yang sudah diupdate agar tidak double update
         const updatedIds = new Set<number>();
 
         updates.forEach(item => {
             const candidates = existingGrouped.get(item.resi) || [];
-            
-            // LOGIKA PENCARIAN ITEM YANG SPESIFIK:
-            // Kita cari baris di database yang memiliki PART NUMBER atau NAMA BARANG yang sama.
-            // Jika ketemu -> Update baris tersebut.
-            // Jika tidak ketemu -> Insert sebagai item baru dalam resi yang sama.
-            
             let existing = candidates.find(c => 
                 !updatedIds.has(c.id) && (
                     (item.part_number && c.part_number === item.part_number) || 
@@ -749,7 +681,6 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
                 )
             );
 
-            // Default status: Pending (Belum Scan Fisik)
             let statusToUse = 'Pending';
             if (existing) {
                  if (existing.status === 'Siap Kirim' || existing.status === 'Terjual') {
@@ -758,8 +689,7 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
             }
 
             if (existing) {
-                // UPDATE ITEM YANG ADA
-                updatedIds.add(existing.id); // Tandai agar tidak dipakai lagi oleh baris CSV lain
+                updatedIds.add(existing.id); 
                 updatePromises.push(
                     supabase.from('scan_resi').update({
                         toko: item.toko,
@@ -774,7 +704,6 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
                     }).eq('id', existing.id)
                 );
             } else {
-                // INSERT ITEM BARU (Beda Barang)
                 insertPayload.push({
                     tanggal: getWIBISOString(),
                     resi: item.resi,
@@ -786,20 +715,13 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
                     quantity: item.quantity || 0,
                     harga_satuan: item.harga_satuan || 0,
                     harga_total: item.harga_total || 0,
-                    status: statusToUse // Pasti Pending
+                    status: statusToUse 
                 });
             }
         });
 
-        // Eksekusi Insert
-        if (insertPayload.length > 0) {
-            await supabase.from('scan_resi').insert(insertPayload);
-        }
-
-        // Eksekusi Update
-        if (updatePromises.length > 0) {
-            await Promise.all(updatePromises);
-        }
+        if (insertPayload.length > 0) await supabase.from('scan_resi').insert(insertPayload);
+        if (updatePromises.length > 0) await Promise.all(updatePromises);
 
         return { 
             success: true, 
@@ -813,22 +735,9 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
     }
 };
 
-// 2. Fungsi Update Single Field (Validasi juga diterapkan di sini)
 export const updateScanResiLogField = async (id: number, field: string, value: any): Promise<boolean> => {
-    // 1. Update Field Target
-    const { data, error } = await supabase
-        .from('scan_resi')
-        .update({ [field]: value })
-        .eq('id', id)
-        .select()
-        .single();
-
-    if (error) {
-        console.error(`Gagal update field ${field}:`, error);
-        return false;
-    }
-
-    // 2. Auto-Update Status dengan Validasi Ketat
+    const { data, error } = await supabase.from('scan_resi').update({ [field]: value }).eq('id', id).select().single();
+    if (error) return false;
     if (data) {
         const isComplete = checkIsComplete({
             customer: data.customer,
@@ -837,66 +746,102 @@ export const updateScanResiLogField = async (id: number, field: string, value: a
             quantity: data.quantity,
             harga_total: data.harga_total
         });
-
-        // Hanya ubah ke 'Siap Kirim' jika sebelumnya 'Pending' dan data sudah lengkap
-        // (NOTE: Biasanya dipicu oleh edit manual)
         const newStatus = isComplete ? 'Siap Kirim' : 'Pending';
-
         if (data.status !== newStatus && data.status !== 'Terjual') {
-            await supabase
-                .from('scan_resi')
-                .update({ status: newStatus })
-                .eq('id', id);
+            await supabase.from('scan_resi').update({ status: newStatus }).eq('id', id);
         }
     }
-
     return true;
 };
 
-// 3. Proses Kirim (Pindah ke Orders + Update Status + UPDATE INVENTORY DENGAN NAMA TOKO)
+// --- FUNGSI BARU: DUPLICATE & SPLIT PRICE ---
+export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
+    try {
+        // 1. Ambil data baris yang diklik
+        const { data: sourceItem, error: fetchError } = await supabase
+            .from('scan_resi')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !sourceItem) return false;
+
+        // 2. Cari SEMUA saudara kembar (Resi sama & Nama Barang sama) untuk menghitung Total Pool Harga
+        const { data: siblings } = await supabase
+            .from('scan_resi')
+            .select('*')
+            .eq('resi', sourceItem.resi)
+            .eq('nama_barang', sourceItem.nama_barang); // Asumsi: Barang yg diduplikasi adalah yg namanya sama
+
+        if (!siblings) return false;
+
+        // 3. Hitung Total Harga dari semua saudara
+        const totalPoolPrice = siblings.reduce((sum, item) => sum + (Number(item.harga_total) || 0), 0);
+        
+        // 4. Hitung Harga Baru Rata-Rata
+        // Jumlah item sekarang + 1 item baru
+        const newCount = siblings.length + 1;
+        const newPricePerItem = Math.floor(totalPoolPrice / newCount);
+
+        // 5. Update harga SEMUA saudara yang ada
+        const updatePromises = siblings.map(item => 
+            supabase.from('scan_resi').update({ 
+                harga_total: newPricePerItem,
+                harga_satuan: newPricePerItem // Asumsi Qty per baris = 1
+            }).eq('id', item.id)
+        );
+        await Promise.all(updatePromises);
+
+        // 6. Insert Item Baru (Clone) dengan harga yang sudah dibagi
+        const { error: insertError } = await supabase.from('scan_resi').insert([{
+            ...sourceItem,
+            id: undefined, // Buat ID baru
+            tanggal: getWIBISOString(),
+            harga_total: newPricePerItem,
+            harga_satuan: newPricePerItem
+        }]);
+
+        return !insertError;
+    } catch (err) {
+        console.error("Error duplicating:", err);
+        return false;
+    }
+};
+
+// --- FUNGSI BARU: DELETE ROW ---
+export const deleteScanResiLog = async (id: number): Promise<boolean> => {
+    try {
+        const { error } = await supabase.from('scan_resi').delete().eq('id', id);
+        return !error;
+    } catch (err) {
+        console.error("Error deleting:", err);
+        return false;
+    }
+};
+
 export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Promise<{ success: boolean; message?: string }> => {
     try {
-        // --- 1. VALIDASI: Cek Apakah Part Number Ada di Base ---
-        const partNumbersToCheck = selectedLogs
-            .map(log => log.part_number)
-            .filter(pn => pn !== null && pn !== '') as string[];
-        
+        const partNumbersToCheck = selectedLogs.map(log => log.part_number).filter(pn => pn !== null && pn !== '') as string[];
         const uniquePartNumbers = [...new Set(partNumbersToCheck)];
 
         if (uniquePartNumbers.length > 0) {
-            const { data: existingItems, error } = await supabase
-                .from(TABLE_NAME) // Tabel 'base'
-                .select('part_number')
-                .in('part_number', uniquePartNumbers);
-            
-            if (error) {
-                console.error("Error validating parts:", error);
-                return { success: false, message: "Gagal memvalidasi Part Number di database." };
-            }
+            const { data: existingItems, error } = await supabase.from(TABLE_NAME).select('part_number').in('part_number', uniquePartNumbers);
+            if (error) return { success: false, message: "Gagal memvalidasi Part Number di database." };
 
             const existingSet = new Set(existingItems?.map(item => item.part_number));
             const missingParts = uniquePartNumbers.filter(pn => !existingSet.has(pn));
 
             if (missingParts.length > 0) {
-                return { 
-                    success: false, 
-                    message: `GAGAL PROSES KIRIM!\n\nPart Number berikut tidak ditemukan di database Base Inventory:\n\n${missingParts.join(', ')}\n\nSilakan daftarkan barang tersebut terlebih dahulu di menu Inventory/Shop sebelum diproses.` 
-                };
+                return { success: false, message: `GAGAL PROSES KIRIM!\n\nPart Number berikut tidak ditemukan di database Base Inventory:\n\n${missingParts.join(', ')}\n\nSilakan daftarkan barang tersebut terlebih dahulu di menu Inventory/Shop sebelum diproses.` };
             }
         }
 
-        // --- 2. PROSES UPDATE (Jika Validasi Lolos) ---
         for (const log of selectedLogs) {
-            // A. Cari Nama Barang Asli & UPDATE STOK DI BARANG KELUAR
             let realItemName = log.nama_barang;
-            
             if (log.part_number) {
                 const item = await getItemByPartNumber(log.part_number);
-                
                 if (item) {
                     realItemName = item.name;
-
-                    // TAMBAHAN: Update Inventory dengan STORE (log.toko)
                     await updateInventory(item, {
                         type: 'out',
                         qty: log.quantity,
@@ -904,12 +849,10 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                         resiTempo: log.resi, 
                         customer: log.customer,
                         price: log.harga_satuan,
-                        store: log.toko // <--- PENTING: Kirim Nama Toko agar masuk ke kolom tempo
+                        store: log.toko 
                     });
                 }
             }
-
-            // B. Masukkan ke tabel 'orders' (Manajemen Pesanan)
             const { error: insertError } = await supabase.from('orders').insert([{
                 tanggal: getWIBISOString(), 
                 resi: log.resi,
@@ -921,23 +864,13 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                 quantity: log.quantity,
                 harga_satuan: log.harga_satuan,
                 harga_total: log.harga_total,
-                status: 'processing' // Masuk sebagai 'processing' agar muncul di tab Terjual
+                status: 'processing' 
             }]);
 
-            if (insertError) {
-                console.error(`Gagal insert order ${log.resi}:`, insertError);
-                continue; 
-            }
-
-            // C. Update status di tabel 'scan_resi' menjadi 'Terjual'
-            await supabase
-                .from('scan_resi')
-                .update({ status: 'Terjual' })
-                .eq('id', log.id);
+            if (insertError) continue; 
+            await supabase.from('scan_resi').update({ status: 'Terjual' }).eq('id', log.id);
         }
-
         return { success: true };
-
     } catch (error) {
         console.error("Error processing shipment:", error);
         return { success: false, message: "Terjadi kesalahan sistem saat memproses data." };

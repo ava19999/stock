@@ -5,7 +5,8 @@ import {
   Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, 
   ShoppingBag, Tag, Search, X, Store, Save, Loader, FileText, 
   AlertCircle, ChevronLeft, ChevronRight, ScanBarcode, CheckSquare, 
-  FileSpreadsheet, Upload, Send, Square, ChevronDown, Check, Loader2, Edit2, XCircle, Camera
+  FileSpreadsheet, Upload, Send, Square, ChevronDown, Check, Loader2, Edit2, XCircle, Camera,
+  Plus, Trash2 // IMPORT ICON BARU
 } from 'lucide-react';
 import { formatRupiah, compressImage } from '../utils';
 import { analyzeResiImage } from '../services/geminiService';
@@ -23,7 +24,9 @@ import {
   importScanResiFromExcel, 
   processShipmentToOrders, 
   fetchInventory, 
-  updateScanResiLogField
+  updateScanResiLogField,
+  duplicateScanResiLog, // IMPORT FUNGSI BARU
+  deleteScanResiLog     // IMPORT FUNGSI BARU
 } from '../services/supabaseService';
 
 // --- KONSTANTA SCAN RESI ---
@@ -85,6 +88,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [isProcessingShipment, setIsProcessingShipment] = useState(false);
   const [scanLogs, setScanLogs] = useState<ScanResiLog[]>([]);
   const [selectedResis, setSelectedResis] = useState<string[]>([]);
+  const [isDuplicating, setIsDuplicating] = useState<number | null>(null); // State loading duplikat
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -167,15 +171,12 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       return parseFloat(strVal) || 0;
   };
 
-  // --- MODIFIKASI: LOGIKA VALIDASI KETAT PADA UPLOAD CSV ---
-  // Status dipaksa 'Pending' agar terhitung "Belum Scan" sampai scan fisik
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsUploading(true);
     
-    // Persiapan data inventory untuk pencocokan Part Number
     let inventoryMap = new Map<string, string>(); 
     let allPartNumbers: string[] = [];
 
@@ -207,7 +208,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     return null;
                 };
 
-                // Ambil data mentah dari Excel
                 const resiRaw = getVal(['No. Resi', 'No. Pesanan', 'Resi', 'Order ID']);
                 const usernameRaw = getVal(['Username (Pembeli)', 'Username Pembeli', 'Username', 'Pembeli', 'Nama Penerima']);
                 let partNoRaw = getVal(['No. Referensi', 'Part Number', 'Part No', 'Kode Barang']);
@@ -215,7 +215,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 const qtyRaw = getVal(['Jumlah', 'Qty', 'Quantity']);
                 const hargaRaw = getVal(['Harga Awal', 'Harga Satuan', 'Price', 'Harga', 'Harga Variasi']);
 
-                // Logika Pencarian Part Number (Auto-Detect)
                 const produkNameClean = String(produkRaw || '').trim();
                 const produkLower = produkNameClean.toLowerCase();
 
@@ -235,8 +234,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
                 if (resiRaw) {
                     const finalResi = String(resiRaw).trim();
-                    
-                    // Bersihkan dan format data
                     const finalCustomer = usernameRaw ? String(usernameRaw).trim() : '-';
                     const finalPartNo = (partNoRaw && partNoRaw !== '-') ? String(partNoRaw).trim() : null; 
                     const finalBarang = produkRaw ? String(produkRaw).trim() : '-';
@@ -244,15 +241,12 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     const finalHargaSatuan = parseIndonesianNumber(hargaRaw);
                     const finalHargaTotal = finalQty * finalHargaSatuan;
 
-                    // --- PERUBAHAN UTAMA ---
-                    // Status SELALU 'Pending' saat upload CSV.
-                    // Toko & Via diambil dari Pilihan Dropdown di Aplikasi.
                     const statusFinal = 'Pending';
 
                     return {
                         resi: finalResi,
-                        toko: selectedStore,          // Dari Dropdown
-                        ecommerce: selectedMarketplace, // Dari Dropdown
+                        toko: selectedStore,          
+                        ecommerce: selectedMarketplace, 
                         customer: finalCustomer,
                         part_number: finalPartNo, 
                         nama_barang: finalBarang,
@@ -265,7 +259,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 return null;
             }).filter(item => item !== null);
 
-            // Proses simpan ke database
             if (updates.length > 0) {
                 const result = await importScanResiFromExcel(updates);
                 if (result.success) {
@@ -294,11 +287,9 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   const handleProcessKirim = async () => {
       if (selectedResis.length === 0) return;
-      
       setIsProcessingShipment(true);
       const logsToProcess = scanLogs.filter(log => selectedResis.includes(log.resi));
       const result = await processShipmentToOrders(logsToProcess);
-      
       if (result.success) {
           showToast("Berhasil diproses! Stok terupdate.", 'success');
           await loadScanLogs();
@@ -308,6 +299,29 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           showToast(result.message || "Terjadi kesalahan.", 'error');
       }
       setIsProcessingShipment(false);
+  };
+
+  // --- FUNGSI DUPLIKASI & DELETE (NEW) ---
+  const handleDuplicate = async (id: number) => {
+      setIsDuplicating(id);
+      if (await duplicateScanResiLog(id)) {
+          showToast("Item diduplikasi & harga dibagi.", 'success');
+          await loadScanLogs();
+      } else {
+          showToast("Gagal menduplikasi.", 'error');
+      }
+      setIsDuplicating(null);
+  };
+
+  const handleDeleteLog = async (id: number) => {
+      if (window.confirm("Yakin ingin menghapus item ini?")) {
+          if (await deleteScanResiLog(id)) {
+              showToast("Item dihapus.", 'success');
+              await loadScanLogs();
+          } else {
+              showToast("Gagal menghapus.", 'error');
+          }
+      }
   };
 
   const toggleSelect = (resi: string) => {
@@ -483,14 +497,13 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   return (
     <div className="bg-gray-800 rounded-2xl shadow-sm border border-gray-700 min-h-[80vh] flex flex-col overflow-hidden relative text-gray-100">
-      {/* TOAST LOCAL */}
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
 
-      {/* MODALS (Retur & Note) */}
+      {/* MODALS */}
       {isNoteModalOpen && editingNoteData && ( <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in"><div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col border border-gray-700"><div className="bg-purple-900/30 px-4 py-3 border-b border-purple-800 flex justify-between items-center"><h3 className="text-base font-bold text-purple-300 flex items-center gap-2"><FileText size={18}/> Edit Keterangan</h3><button onClick={() => setIsNoteModalOpen(false)}><X size={18} className="text-gray-400 hover:text-gray-200"/></button></div><div className="p-4"><textarea className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl focus:ring-2 focus:ring-purple-900/50 outline-none text-sm min-h-[100px] text-gray-100 placeholder-gray-500" placeholder="Masukkan alasan atau catatan..." value={noteText} onChange={(e) => setNoteText(e.target.value)} /></div><div className="p-3 border-t border-gray-700 bg-gray-900/50 flex justify-end gap-2"><button onClick={() => setIsNoteModalOpen(false)} className="px-3 py-1.5 text-xs font-bold text-gray-400 hover:bg-gray-700 rounded-lg">Batal</button><button onClick={handleSaveNote} disabled={isSavingNote} className="px-4 py-1.5 text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 rounded-lg shadow flex items-center gap-2">{isSavingNote ? <Loader size={14} className="animate-spin"/> : <Save size={14}/>} Simpan</button></div></div></div> )}
       {isReturnModalOpen && selectedOrderForReturn && ( <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in"><div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90%] border border-gray-700"><div className="bg-orange-900/30 px-4 py-3 border-b border-orange-800 flex justify-between items-center"><h3 className="text-base font-bold text-orange-300 flex items-center gap-2"><RotateCcw size={18}/> Retur Barang</h3><button onClick={() => setIsReturnModalOpen(false)}><X size={18} className="text-orange-400 hover:text-orange-200"/></button></div><div className="p-4 overflow-y-auto text-sm"><div className="space-y-2">{selectedOrderForReturn.items.map((item) => (<div key={item.id} className="flex items-center justify-between p-2 border border-gray-700 rounded-lg hover:border-orange-700/50"><div className="flex-1"><div className="font-bold text-gray-200 text-xs">{item.name}</div><div className="text-[10px] text-gray-500 font-mono">{item.partNumber}</div></div><div className="flex items-center gap-2 bg-gray-900 p-1 rounded-lg border border-gray-700"><button onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.max(0, (prev[item.id] || 0) - 1)}))} className="w-6 h-6 flex items-center justify-center bg-gray-700 rounded shadow-sm hover:bg-red-900/50 text-gray-300 font-bold">-</button><div className="w-6 text-center font-bold text-sm text-gray-200">{returnQuantities[item.id] || 0}</div><button onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.min(item.cartQuantity || 0, (prev[item.id] || 0) + 1)}))} className="w-6 h-6 flex items-center justify-center bg-gray-700 rounded shadow-sm hover:bg-green-900/50 text-gray-300 font-bold">+</button></div></div>))}</div></div><div className="p-3 border-t border-gray-700 bg-gray-900/50 flex justify-end gap-2"><button onClick={() => setIsReturnModalOpen(false)} className="px-3 py-1.5 text-xs font-bold text-gray-400 hover:bg-gray-700 rounded-lg">Batal</button><button onClick={handleProcessReturn} disabled={isLoading} className="px-4 py-1.5 text-xs font-bold bg-orange-600 text-white hover:bg-orange-700 rounded-lg shadow flex items-center gap-2">{isLoading ? <Loader size={14} className="animate-spin"/> : <Save size={14}/>} Proses</button></div></div></div> )}
 
-      {/* HEADER UTAMA */}
+      {/* HEADER */}
       <div className="px-4 py-3 border-b border-gray-700 bg-gray-800 flex justify-between items-center"><div><h2 className="text-lg font-bold text-gray-100 flex items-center gap-2"><ClipboardList className="text-purple-400" size={20} /> Manajemen Pesanan</h2></div></div>
 
       {/* TABS */}
@@ -500,7 +513,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           ))}
       </div>
 
-      {/* SEARCH BAR (ALL TABS) */}
+      {/* SEARCH BAR */}
       <div className="px-4 py-2 bg-gray-900 border-b border-gray-700">
           <div className="relative max-w-sm w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
@@ -509,13 +522,11 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           </div>
       </div>
 
-      {/* MAIN CONTENT */}
+      {/* CONTENT */}
       {activeTab === 'scan' ? (
         <div className="flex-1 flex flex-col overflow-hidden bg-gray-900">
-            {/* AREA INPUT SCAN (RESPONSIVE) */}
             <div className="bg-gray-800 p-3 shadow-sm border-b border-gray-700 z-20">
                 <div className="flex flex-col gap-3">
-                    {/* Top Row: Store & Marketplace Select */}
                     <div className="grid grid-cols-2 gap-2">
                         <select value={selectedStore} onChange={(e) => { setSelectedStore(e.target.value); barcodeInputRef.current?.focus(); }} className="bg-gray-700 border border-gray-600 text-gray-200 text-xs font-bold rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2 outline-none">
                             {STORE_LIST.map(store => <option key={store} value={store}>{store}</option>)}
@@ -538,7 +549,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                         </div>
                     </div>
 
-                    {/* Middle Row: Barcode Input & Upload */}
                     <div className="flex gap-2">
                         <div className="relative flex-grow">
                             <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
@@ -556,7 +566,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                         <input type="file" ref={cameraInputRef} accept="image/*" capture="environment" className="hidden" onChange={handleCameraCapture} />
                     </div>
 
-                    {/* Bottom Row: Process Button (Full Width on Mobile) */}
                     {readyToSendCount > 0 && (
                         <button onClick={handleProcessKirim} disabled={isProcessingShipment} className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-4 py-2.5 rounded-lg shadow-sm transition-all animate-in fade-in slide-in-from-top-2">
                             {isProcessingShipment ? <Loader2 size={16} className="animate-spin"/> : <Send size={16} />}
@@ -566,7 +575,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 </div>
             </div>
 
-            {/* LIST / TABLE VIEW */}
             <div className="flex-1 overflow-auto p-2">
                 {scanCurrentItems.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-48 text-gray-500 gap-2">
@@ -575,7 +583,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     </div>
                 ) : (
                     <>
-                        {/* MOBILE CARD VIEW */}
                         <div className="md:hidden space-y-3 pb-20">
                             {scanCurrentItems.map((log) => {
                                 const isReady = log.status === 'Siap Kirim';
@@ -597,16 +604,26 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                     <div className="text-[10px] text-gray-500">{new Date(log.tanggal).toLocaleString('id-ID')}</div>
                                                 </div>
                                             </div>
-                                            {/* STATUS BADGE RESPONSIVE */}
-                                            {isSold ? (
-                                                <span className="bg-gray-700 text-gray-400 text-[10px] font-bold px-2 py-1 rounded-full">Terjual</span>
-                                            ) : isReady ? (
-                                                <span className="bg-green-900/30 text-green-400 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><Check size={10}/> Siap</span>
-                                            ) : isComplete ? (
-                                                <span className="bg-red-900/30 text-red-400 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><XCircle size={10}/> Belum Scan</span>
-                                            ) : (
-                                                <span className="bg-red-900/30 text-red-400 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><XCircle size={10}/> Belum Upload</span>
-                                            )}
+                                            <div className="flex gap-1">
+                                                {/* ACTION BUTTONS MOBILE */}
+                                                {!isSold && (
+                                                    <>
+                                                    <button onClick={() => handleDuplicate(log.id!)} className="p-1 bg-gray-700 rounded hover:bg-gray-600 text-blue-400">
+                                                        {isDuplicating === log.id ? <Loader2 size={14} className="animate-spin"/> : <Plus size={14}/>}
+                                                    </button>
+                                                    <button onClick={() => handleDeleteLog(log.id!)} className="p-1 bg-gray-700 rounded hover:bg-red-900/50 text-red-400">
+                                                        <Trash2 size={14}/>
+                                                    </button>
+                                                    </>
+                                                )}
+                                                {isSold ? (
+                                                    <span className="bg-gray-700 text-gray-400 text-[10px] font-bold px-2 py-1 rounded-full">Terjual</span>
+                                                ) : isReady ? (
+                                                    <span className="bg-green-900/30 text-green-400 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><Check size={10}/> Siap</span>
+                                                ) : (
+                                                    <span className="bg-red-900/30 text-red-400 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><XCircle size={10}/> Pending</span>
+                                                )}
+                                            </div>
                                         </div>
                                         
                                         <div className="grid grid-cols-2 gap-2 text-xs mb-2">
@@ -661,6 +678,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                         <th className="px-4 py-3 border-b border-gray-700 text-center">Qty</th>
                                         <th className="px-4 py-3 border-b border-gray-700 text-right">Total</th>
                                         <th className="px-4 py-3 border-b border-gray-700 text-center">Status</th>
+                                        <th className="px-4 py-3 border-b border-gray-700 text-center w-10">+</th>
+                                        <th className="px-4 py-3 border-b border-gray-700 text-center w-10">Hapus</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-700 text-xs">
@@ -704,9 +723,23 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                     ) : isReady ? (
                                                         <span className="inline-flex items-center gap-1 text-green-400 font-bold bg-green-900/30 px-2 py-0.5 rounded-full border border-green-800 text-[10px]"><Check size={10}/> Siap Kirim</span>
                                                     ) : isComplete ? (
-                                                        <span className="inline-flex items-center gap-1 text-red-400 font-bold bg-red-900/30 px-2 py-0.5 rounded-full border border-red-800 text-[10px]"><XCircle size={10}/> Belum Scan</span>
+                                                        <span className="inline-flex items-center gap-1 text-red-400 font-bold bg-red-900/30 px-2 py-0.5 rounded-full border border-red-800 text-[10px]"><XCircle size={10}/> Pending</span>
                                                     ) : (
-                                                        <span className="inline-flex items-center gap-1 text-red-400 font-bold bg-red-900/30 px-2 py-0.5 rounded-full border border-red-800 text-[10px]"><XCircle size={10}/> Belum Upload</span>
+                                                        <span className="inline-flex items-center gap-1 text-red-400 font-bold bg-red-900/30 px-2 py-0.5 rounded-full border border-red-800 text-[10px]"><XCircle size={10}/> Pending</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    {!isSold && (
+                                                        <button onClick={() => handleDuplicate(log.id!)} className="p-1 hover:bg-gray-600 rounded text-blue-400 transition-colors" title="Duplikat Item">
+                                                            {isDuplicating === log.id ? <Loader2 size={16} className="animate-spin"/> : <Plus size={16}/>}
+                                                        </button>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    {!isSold && (
+                                                        <button onClick={() => handleDeleteLog(log.id!)} className="p-1 hover:bg-red-900/50 rounded text-red-400 transition-colors" title="Hapus Item">
+                                                            <Trash2 size={16}/>
+                                                        </button>
                                                     )}
                                                 </td>
                                             </tr>
@@ -719,7 +752,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 )}
             </div>
 
-            {/* PAGINATION FOOTER (SCAN TAB) */}
             <div className="px-4 py-3 bg-gray-800 border-t border-gray-700 flex items-center justify-between text-xs text-gray-500 sticky bottom-0 z-30">
                 <div>Menampilkan {scanStartIndex + 1}-{Math.min(scanStartIndex + itemsPerPage, scanTotalItems)} dari {scanTotalItems} data</div>
                 <div className="flex items-center gap-2">
@@ -730,9 +762,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             </div>
         </div>
       ) : (
-        // =======================
-        // TAMPILAN ORDER LIST (Baru/Terjual/Retur)
-        // =======================
         <>
             <div className="flex-1 overflow-x-auto p-2 bg-gray-900"><div className="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden min-w-[1000px]"><table className="w-full text-left border-collapse"><thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700"><tr><th className="px-3 py-2 w-28">Tanggal</th><th className="px-3 py-2 w-32">Resi / Toko</th><th className="px-3 py-2 w-24">Via</th> <th className="px-3 py-2 w-32">Pelanggan</th><th className="px-3 py-2 w-28">Part No.</th><th className="px-3 py-2">Barang</th><th className="px-3 py-2 text-right w-16">Qty</th><th className="px-3 py-2 text-right w-24">Satuan</th><th className="px-3 py-2 text-right w-24">Total</th>{activeTab === 'history' ? (<><th className="px-3 py-2 w-24 bg-red-900/20 text-red-400 border-l border-red-800">Tgl Retur</th><th className="px-3 py-2 text-center w-24 bg-red-900/20 text-red-400">Status</th></>) : (<th className="px-3 py-2 text-center w-24">Status</th>)}<th className="px-3 py-2 text-center w-32">{activeTab === 'history' ? 'Ket' : 'Aksi'}</th></tr></thead><tbody className="divide-y divide-gray-700 text-xs">{currentItems.length === 0 ? (<tr><td colSpan={13} className="p-8 text-center text-gray-500"><ClipboardList size={32} className="opacity-20 mx-auto mb-2" /><p>Belum ada data</p></td></tr>) : (activeTab==='history' ? (currentItems as ReturRecord[]).map(retur => { const dtOrder = formatDate(retur.tanggal_pemesanan||''); const dtRetur = formatDate(retur.tanggal_retur); return (<tr key={`retur-${retur.id}`} className="hover:bg-red-900/10 transition-colors"><td className="px-3 py-2 align-top border-r border-gray-700"><div className="font-bold text-gray-200">{dtOrder.date}</div></td><td className="px-3 py-2 align-top font-mono text-[10px] text-gray-400"><div className="flex flex-col gap-1"><span className="font-bold text-blue-400 bg-blue-900/30 px-1.5 py-0.5 rounded border border-blue-800 w-fit">{retur.resi || '-'}</span>{retur.toko && <span className="uppercase text-gray-400 bg-gray-700 px-1 py-0.5 rounded w-fit">{retur.toko}</span>}</div></td><td className="px-3 py-2 align-top">{retur.ecommerce ? <span className="px-1.5 py-0.5 bg-orange-900/30 text-orange-400 text-[9px] font-bold rounded border border-orange-800">{retur.ecommerce}</span> : '-'}</td><td className="px-3 py-2 align-top font-medium text-gray-200 truncate max-w-[120px]" title={retur.customer}>{retur.customer||'Guest'}</td><td className="px-3 py-2 align-top font-mono text-[10px] text-gray-500">{retur.part_number||'-'}</td><td className="px-3 py-2 align-top text-gray-300 font-medium truncate max-w-[200px]" title={retur.nama_barang}>{retur.nama_barang}</td><td className="px-3 py-2 align-top text-right font-bold text-red-400">-{retur.quantity}</td><td className="px-3 py-2 align-top text-right font-mono text-[10px] text-gray-500">{formatRupiah(retur.harga_satuan)}</td><td className="px-3 py-2 align-top text-right font-mono text-[10px] font-bold text-gray-300">{formatRupiah(retur.harga_total)}</td><td className="px-3 py-2 align-top border-l border-red-800 bg-red-900/10"><div className="font-bold text-red-400 text-[10px]">{dtRetur.date}</div></td><td className="px-3 py-2 align-top text-center bg-red-900/10"><span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase ${retur.status==='Full Retur'?'bg-red-900/30 text-red-400 border-red-800':'bg-orange-900/30 text-orange-400 border-orange-800'}`}>{retur.status||'Retur'}</span></td><td className="px-3 py-2 align-top"><div className="flex items-start justify-between gap-1 group/edit"><div className="text-[10px] text-gray-500 italic truncate max-w-[100px]">{retur.keterangan||'-'}</div><button onClick={()=>openNoteModal(retur)} className="text-blue-400 hover:bg-blue-900/50 p-1 rounded opacity-0 group-hover/edit:opacity-100"><Edit3 size={12}/></button></div></td></tr>); }) : (currentItems as Order[]).map(order => { if(!order) return null; const {cleanName, resiText, ecommerce, shopName} = getOrderDetails(order); const isResi = !resiText.startsWith('#'); const dt = formatDate(order.timestamp); const items = Array.isArray(order.items) ? order.items : []; if(items.length===0) return null; return items.map((item, index) => { const dealPrice = item.customPrice ?? item.price ?? 0; const dealTotal = dealPrice * (item.cartQuantity || 0); const hasCustomPrice = item.customPrice !== undefined && item.customPrice !== item.price; return (<tr key={`${order.id}-${index}`} className="hover:bg-blue-900/10 transition-colors group">{index===0 && (<><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-700 bg-gray-800 group-hover:bg-blue-900/10"><div className="font-bold text-gray-200">{dt.date}</div><div className="text-[9px] text-gray-500 font-mono">{dt.time}</div></td><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px] bg-gray-800 group-hover:bg-blue-900/10"><div className="flex flex-col gap-1"><span className={`px-1.5 py-0.5 rounded w-fit font-bold border ${isResi ? 'bg-blue-900/30 text-blue-400 border-blue-800' : 'text-gray-500 bg-gray-700 border-gray-600'}`}>{resiText}</span>{shopName!=='-' && <div className="flex items-center gap-1 text-gray-400 bg-gray-700 px-1.5 py-0.5 rounded w-fit border border-gray-600"><Store size={8}/><span className="uppercase truncate max-w-[80px]">{shopName}</span></div>}</div></td><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-700 bg-gray-800 group-hover:bg-blue-900/10">{ecommerce!=='-'?<div className="px-1.5 py-0.5 rounded bg-orange-900/30 text-orange-400 border border-orange-800 w-fit text-[9px] font-bold">{ecommerce}</div>:<span className="text-gray-600">-</span>}</td><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-700 font-medium text-gray-200 bg-gray-800 group-hover:bg-blue-900/10 truncate max-w-[120px]" title={cleanName}>{cleanName}</td></>)}<td className="px-3 py-2 align-top font-mono text-[10px] text-gray-500">{item.partNumber||'-'}</td><td className="px-3 py-2 align-top text-gray-300 font-medium truncate max-w-[180px]" title={item.name}>{item.name}</td><td className="px-3 py-2 align-top text-right font-bold text-gray-300">{item.cartQuantity||0}</td><td className="px-3 py-2 align-top text-right text-gray-500 font-mono text-[10px]"><div className={hasCustomPrice?"text-orange-400 font-bold":""}>{formatRupiah(dealPrice)}</div></td><td className="px-3 py-2 align-top text-right font-bold text-gray-200 font-mono text-[10px]">{formatRupiah(dealTotal)}</td>{index===0 && (<><td rowSpan={items.length} className="px-3 py-2 align-top text-center border-l border-gray-700 bg-gray-800 group-hover:bg-blue-900/10"><div className={`inline-block px-2 py-0.5 rounded text-[9px] font-extrabold border uppercase mb-1 shadow-sm ${getStatusColor(order.status)}`}>{getStatusLabel(order.status)}</div><div className="text-[10px] font-extrabold text-purple-400">{formatRupiah(order.totalAmount||0)}</div></td><td rowSpan={items.length} className="px-3 py-2 align-top text-center border-l border-gray-700 bg-gray-800 group-hover:bg-blue-900/10"><div className="flex flex-col gap-1 items-center">{order.status==='pending' && (<><button onClick={()=>onUpdateStatus(order.id, 'processing')} className="w-full py-1 bg-purple-700 text-white text-[9px] font-bold rounded hover:bg-purple-600 shadow-sm flex items-center justify-center gap-1">Proses</button><button onClick={()=>onUpdateStatus(order.id, 'cancelled')} className="w-full py-1 bg-gray-700 border border-gray-600 text-gray-400 text-[9px] font-bold rounded hover:bg-red-900/30 hover:text-red-400">Tolak</button></>)}{order.status==='processing' && (<button onClick={()=>openReturnModal(order)} className="w-full py-1 bg-orange-900/30 border border-orange-800 text-orange-400 text-[9px] font-bold rounded hover:bg-orange-800 flex items-center justify-center gap-1">Retur</button>)}</div></td></>)}</tr>); }); }))}</tbody></table></div></div>
             <div className="px-4 py-3 bg-gray-800 border-t border-gray-700 flex items-center justify-between text-xs text-gray-500"><div>Menampilkan {startIndex + 1}-{Math.min(startIndex + itemsPerPage, totalItems)} dari {totalItems} data</div><div className="flex items-center gap-2"><button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16}/></button><span className="font-bold text-gray-200">Halaman {currentPage}</span><button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16}/></button></div></div>
