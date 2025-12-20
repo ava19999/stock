@@ -50,6 +50,23 @@ const formatDisplayTempo = (tempo: string | null | undefined): string => {
     return val;
 };
 
+// --- VALIDASI KELENGKAPAN DATA (Order Management) ---
+const checkIsComplete = (data: { 
+    customer?: string | null, 
+    part_number?: string | null, 
+    nama_barang?: string | null, 
+    quantity?: number | null, 
+    harga_total?: number | null 
+}): boolean => {
+    const isCustomerValid = data.customer && data.customer !== '-' && data.customer.trim() !== '';
+    const isPartNoValid = data.part_number && data.part_number !== '-' && data.part_number.trim() !== '';
+    const isBarangValid = data.nama_barang && data.nama_barang !== '-' && data.nama_barang.trim() !== '';
+    const isQtyValid = Number(data.quantity) > 0;
+    const isTotalValid = Number(data.harga_total) > 0;
+
+    return !!(isCustomerValid && isPartNoValid && isBarangValid && isQtyValid && isTotalValid);
+};
+
 const mapBaseItem = (item: any): InventoryItem => ({
     id: item.id,
     partNumber: item.part_number,
@@ -544,7 +561,7 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
         customer: details.customer, 
         part_number: item.partNumber || '-', 
         nama_barang: item.name, 
-        quantity: item.cartQuantity,
+        quantity: item.cartQuantity, 
         harga_satuan: item.customPrice || item.price, 
         harga_total: (item.customPrice || item.price) * item.cartQuantity, 
         status: order.status
@@ -637,9 +654,15 @@ export const addScanResiLog = async (resi: string, ecommerce: string, toko: stri
         const { data: existing } = await supabase.from('scan_resi').select('*').eq('resi', resi).maybeSingle();
 
         if (existing) {
-            // Jika resi sudah ada (dari Excel), update status jadi 'Siap Kirim' jika data lengkap
-            // Karena sudah discan, kita anggap diverifikasi
-            const isComplete = existing.part_number && existing.nama_barang && existing.quantity;
+            // Validasi kelengkapan data sebelum update status
+            const isComplete = checkIsComplete({
+                customer: existing.customer,
+                part_number: existing.part_number,
+                nama_barang: existing.nama_barang,
+                quantity: existing.quantity,
+                harga_total: existing.harga_total
+            });
+
             const newStatus = isComplete ? 'Siap Kirim' : 'Pending'; 
             
             const { error } = await supabase.from('scan_resi').update({
@@ -664,7 +687,7 @@ export const addScanResiLog = async (resi: string, ecommerce: string, toko: stri
     }
 };
 
-// --- FUNGSI BARU: IMPORT DARI EXCEL (LOGIKA UPDATE & SKIP) ---
+// --- FUNGSI BARU: IMPORT DARI EXCEL (LOGIKA VALIDASI DI BACKEND) ---
 export const importScanResiFromExcel = async (updates: any[]): Promise<{ success: boolean, skippedCount: number, updatedCount: number }> => {
     try {
         const resiList = updates.map(u => u.resi).filter(Boolean);
@@ -687,11 +710,26 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
 
         updates.forEach(item => {
             const existing = existingMap.get(item.resi);
+            
+            // --- VALIDASI BACKEND YANG KETAT ---
+            // Kita hitung nilai final yang akan masuk ke DB, lalu cek kelengkapannya
+            // Ini mencegah data "Pending" terubah jadi "Siap Kirim" padahal kolom masih kosong
+            
+            const finalData = {
+                customer: item.customer || (existing ? existing.customer : '-'),
+                part_number: item.part_number || (existing ? existing.part_number : null),
+                nama_barang: item.nama_barang || (existing ? existing.nama_barang : '-'),
+                quantity: item.quantity || (existing ? existing.quantity : 0),
+                harga_total: item.harga_total || (existing ? existing.harga_total : 0)
+            };
+
+            const isDataComplete = checkIsComplete(finalData);
+            const statusToUse = isDataComplete ? 'Siap Kirim' : 'Pending';
 
             if (existing) {
-                // JIKA SUDAH ADA: Cek apakah data sebelumnya kosong/tidak lengkap?
-                // Logika: Jika data di DB belum punya part_number, berarti itu hasil scan raw. Kita lengkapi.
-                if (!existing.part_number) {
+                // JIKA SUDAH ADA: Update data jika perlu
+                // Kondisi: Jika part_number kosong, atau status masih Pending, kita coba update dan cek ulang statusnya
+                if (!existing.part_number || existing.status === 'Pending' || isDataComplete) {
                     updatePromises.push(
                         supabase.from('scan_resi').update({
                             toko: item.toko || existing.toko,
@@ -702,14 +740,12 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
                             quantity: item.quantity,
                             harga_satuan: item.harga_satuan,
                             harga_total: item.harga_total,
-                            // Jika update data dan sebelumnya sudah di-scan (exist), maka jadi Siap Kirim
-                            status: 'Siap Kirim' 
+                            status: statusToUse // Menggunakan validasi backend
                         }).eq('id', existing.id)
                     );
                 }
-                // Jika data sudah lengkap, SKIP (anggap duplikat)
             } else {
-                // JIKA BELUM ADA: Insert Baru (Status Pending / Belum Scan)
+                // JIKA BELUM ADA: Insert Baru
                 insertPayload.push({
                     tanggal: getWIBISOString(),
                     resi: item.resi,
@@ -721,7 +757,7 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
                     quantity: item.quantity || 0,
                     harga_satuan: item.harga_satuan || 0,
                     harga_total: item.harga_total || 0,
-                    status: 'Pending' // FORCE PENDING SAMPAI DI-SCAN
+                    status: statusToUse // Menggunakan validasi backend
                 });
             }
         });
@@ -748,7 +784,7 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
     }
 };
 
-// 2. Fungsi Update Single Field
+// 2. Fungsi Update Single Field (Validasi juga diterapkan di sini)
 export const updateScanResiLogField = async (id: number, field: string, value: any): Promise<boolean> => {
     // 1. Update Field Target
     const { data, error } = await supabase
@@ -763,9 +799,16 @@ export const updateScanResiLogField = async (id: number, field: string, value: a
         return false;
     }
 
-    // 2. Auto-Update Status
+    // 2. Auto-Update Status dengan Validasi Ketat
     if (data) {
-        const isComplete = data.part_number && data.nama_barang && data.quantity;
+        const isComplete = checkIsComplete({
+            customer: data.customer,
+            part_number: data.part_number,
+            nama_barang: data.nama_barang,
+            quantity: data.quantity,
+            harga_total: data.harga_total
+        });
+
         const newStatus = isComplete ? 'Siap Kirim' : 'Pending';
 
         if (data.status !== newStatus && data.status !== 'Terjual') {

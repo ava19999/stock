@@ -151,9 +151,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       setScanLogs(prev => prev.map(log => {
           if (log.id === id) {
               const updated = { ...log, part_number: value };
-              // PERBAIKAN: Jangan otomatis ubah status jadi 'Siap Kirim' saat edit manual.
-              // Status hanya berubah jika di-scan ulang atau logic lain.
-              // updated.status = (updated.part_number && updated.nama_barang && updated.quantity) ? 'Siap Kirim' : 'Pending'; 
               return updated;
           }
           return log;
@@ -170,12 +167,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       return parseFloat(strVal) || 0;
   };
 
+  // --- MODIFIKASI: LOGIKA VALIDASI KETAT PADA UPLOAD CSV ---
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsUploading(true);
     
+    // Persiapan data inventory untuk pencocokan Part Number
     let inventoryMap = new Map<string, string>(); 
     let allPartNumbers: string[] = [];
 
@@ -207,46 +206,73 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     return null;
                 };
 
-                const resi = getVal(['No. Resi', 'No. Pesanan', 'Resi', 'Order ID']);
-                const username = getVal(['Username (Pembeli)', 'Username Pembeli', 'Username', 'Pembeli', 'Nama Penerima']);
-                let partNo = getVal(['No. Referensi', 'Part Number', 'Part No', 'Kode Barang']);
-                const produk = getVal(['Nama Produk', 'Nama Barang', 'Product Name']);
-                const qty = getVal(['Jumlah', 'Qty', 'Quantity']);
-                const harga = getVal(['Harga Awal', 'Harga Satuan', 'Price', 'Harga', 'Harga Variasi']);
+                // Ambil data mentah dari Excel
+                const resiRaw = getVal(['No. Resi', 'No. Pesanan', 'Resi', 'Order ID']);
+                const usernameRaw = getVal(['Username (Pembeli)', 'Username Pembeli', 'Username', 'Pembeli', 'Nama Penerima']);
+                let partNoRaw = getVal(['No. Referensi', 'Part Number', 'Part No', 'Kode Barang']);
+                const produkRaw = getVal(['Nama Produk', 'Nama Barang', 'Product Name']);
+                const qtyRaw = getVal(['Jumlah', 'Qty', 'Quantity']);
+                const hargaRaw = getVal(['Harga Awal', 'Harga Satuan', 'Price', 'Harga', 'Harga Variasi']);
 
-                const produkNameClean = String(produk || '').trim();
+                // Logika Pencarian Part Number (Auto-Detect)
+                const produkNameClean = String(produkRaw || '').trim();
                 const produkLower = produkNameClean.toLowerCase();
 
-                if ((!partNo || partNo === '-' || partNo === '') && produkNameClean) {
+                if ((!partNoRaw || partNoRaw === '-' || partNoRaw === '') && produkNameClean) {
                     const foundByExactName = inventoryMap.get(produkLower);
-                    if (foundByExactName) partNo = foundByExactName;
+                    if (foundByExactName) partNoRaw = foundByExactName;
                     else {
                         const foundInText = allPartNumbers.find(pn => produkLower.includes(pn.toLowerCase()));
-                        if (foundInText) partNo = foundInText;
+                        if (foundInText) partNoRaw = foundInText;
                         else {
                             const regexPartNo = /\b[A-Z0-9]{5,}-[A-Z0-9]{4,}\b/i;
                             const match = produkNameClean.match(regexPartNo);
-                            if (match) partNo = match[0].toUpperCase();
+                            if (match) partNoRaw = match[0].toUpperCase();
                         }
                     }
                 }
 
-                if (resi) {
+                // --- VALIDASI KETAT STATUS SIAP KIRIM ---
+                if (resiRaw) {
+                    const finalResi = String(resiRaw).trim();
+                    
+                    // Bersihkan dan format data
+                    const finalCustomer = usernameRaw ? String(usernameRaw).trim() : '-';
+                    const finalPartNo = (partNoRaw && partNoRaw !== '-') ? String(partNoRaw).trim() : null; 
+                    const finalBarang = produkRaw ? String(produkRaw).trim() : '-';
+                    const finalQty = parseIndonesianNumber(qtyRaw);
+                    const finalHargaSatuan = parseIndonesianNumber(hargaRaw);
+                    const finalHargaTotal = finalQty * finalHargaSatuan;
+
+                    // SYARAT STATUS 'Siap Kirim': Semua kolom harus terisi valid
+                    const isCustomerFilled = finalCustomer !== '-' && finalCustomer !== '';
+                    const isPartNoFilled = finalPartNo !== null && finalPartNo !== '';
+                    const isBarangFilled = finalBarang !== '-' && finalBarang !== '';
+                    const isQtyValid = finalQty > 0;
+                    const isTotalValid = finalHargaTotal > 0;
+
+                    // Jika SEMUA syarat terpenuhi = Siap Kirim, jika TIDAK = Pending
+                    const statusFinal = (isCustomerFilled && isPartNoFilled && isBarangFilled && isQtyValid && isTotalValid) 
+                        ? 'Siap Kirim' 
+                        : 'Pending';
+
                     return {
-                        resi: String(resi).trim(),
+                        resi: finalResi,
                         toko: selectedStore,
                         ecommerce: selectedMarketplace,
-                        customer: username || '-', 
-                        part_number: partNo || null,
-                        nama_barang: produk || '-',
-                        quantity: parseIndonesianNumber(qty),
-                        harga_satuan: parseIndonesianNumber(harga),
-                        harga_total: parseIndonesianNumber(qty) * parseIndonesianNumber(harga) 
+                        customer: finalCustomer,
+                        part_number: finalPartNo, // Null jika tidak ketemu
+                        nama_barang: finalBarang,
+                        quantity: finalQty,
+                        harga_satuan: finalHargaSatuan,
+                        harga_total: finalHargaTotal,
+                        status: statusFinal
                     };
                 }
                 return null;
             }).filter(item => item !== null);
 
+            // Proses simpan ke database
             if (updates.length > 0) {
                 const result = await importScanResiFromExcel(updates);
                 if (result.success) {
@@ -272,6 +298,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     };
     reader.readAsBinaryString(file);
   };
+  // --- AKHIR MODIFIKASI ---
 
   const handleProcessKirim = async () => {
       if (selectedResis.length === 0) return;
