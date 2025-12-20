@@ -649,35 +649,51 @@ export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
     return data || [];
 };
 
+// --- UPDATE PENTING: SCAN FISIK 1X UPDATE SEMUA ITEM ---
 export const addScanResiLog = async (resi: string, ecommerce: string, toko: string): Promise<boolean> => {
     try {
-        const { data: existing } = await supabase.from('scan_resi').select('*').eq('resi', resi).maybeSingle();
+        // Ambil SEMUA baris dengan resi yang sama
+        const { data: existingItems } = await supabase
+            .from('scan_resi')
+            .select('*')
+            .eq('resi', resi);
 
-        if (existing) {
-            // Validasi kelengkapan data sebelum update status
-            const isComplete = checkIsComplete({
-                customer: existing.customer,
-                part_number: existing.part_number,
-                nama_barang: existing.nama_barang,
-                quantity: existing.quantity,
-                harga_total: existing.harga_total
+        if (existingItems && existingItems.length > 0) {
+            // JIKA DATA SUDAH ADA (Misal dari Upload CSV):
+            // Loop semua item dengan resi tersebut dan update statusnya jadi 'Siap Kirim'
+            
+            const updatePromises = existingItems.map(async (item) => {
+                // Cek kelengkapan data per item
+                const isComplete = checkIsComplete({
+                    customer: item.customer,
+                    part_number: item.part_number,
+                    nama_barang: item.nama_barang,
+                    quantity: item.quantity,
+                    harga_total: item.harga_total
+                });
+
+                // Syarat Siap Kirim: Data harus lengkap
+                const newStatus = isComplete ? 'Siap Kirim' : 'Pending';
+
+                // Update Status & Tanggal Scan
+                return supabase.from('scan_resi').update({
+                    status: newStatus,
+                    tanggal: getWIBISOString(), 
+                }).eq('id', item.id);
             });
 
-            const newStatus = isComplete ? 'Siap Kirim' : 'Pending'; 
-            
-            const { error } = await supabase.from('scan_resi').update({
-                status: newStatus,
-                tanggal: getWIBISOString(), // Update waktu scan
-            }).eq('id', existing.id);
-            
-            return !error;
+            await Promise.all(updatePromises);
+            return true;
+
         } else {
+            // JIKA DATA BELUM ADA SAMA SEKALI:
+            // Insert baru (Hanya 1 baris, karena kita belum tahu isinya apa)
             const { error } = await supabase.from('scan_resi').insert([{
                 tanggal: getWIBISOString(),
                 resi: resi,
                 ecommerce: ecommerce,
                 toko: toko,
-                status: 'Pending', 
+                status: 'Pending', // Tetap pending sampai diedit part numbernya
             }]);
             return !error;
         }
@@ -687,7 +703,7 @@ export const addScanResiLog = async (resi: string, ecommerce: string, toko: stri
     }
 };
 
-// --- FUNGSI BARU: IMPORT DARI EXCEL (DIPERBAIKI UNTUK MULTI-ITEM) ---
+// --- UPDATE PENTING: IMPORT EXCEL SUPPORT MULTI-ITEM ---
 export const importScanResiFromExcel = async (updates: any[]): Promise<{ success: boolean, skippedCount: number, updatedCount: number }> => {
     try {
         const resiList = updates.map(u => u.resi).filter(Boolean);
