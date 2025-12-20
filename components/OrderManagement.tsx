@@ -287,8 +287,20 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
   const handleProcessKirim = async () => {
       if (selectedResis.length === 0) return;
-      setIsProcessingShipment(true);
+
       const logsToProcess = scanLogs.filter(log => selectedResis.includes(log.resi));
+
+      // --- VALIDASI PART NUMBER ---
+      // Cegah proses jika ada item yang part numbernya kosong
+      const invalidItem = logsToProcess.find(log => !log.part_number || log.part_number.trim() === '' || log.part_number === '-');
+      if (invalidItem) {
+          showToast(`Gagal: Resi ${invalidItem.resi} belum ada Part Number!`, 'error');
+          return; // STOP DI SINI, data tetap di tab scan
+      }
+      // ----------------------------
+
+      setIsProcessingShipment(true);
+      
       const result = await processShipmentToOrders(logsToProcess);
       if (result.success) {
           showToast("Berhasil diproses! Stok terupdate.", 'success');
@@ -640,7 +652,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                         <div className="space-y-1 mb-2">
                                             <div className="flex items-center gap-2">
                                                 <span className="text-[10px] text-gray-500 w-12 flex-shrink-0">Produk</span>
-                                                <span className="text-xs font-medium text-gray-300 truncate flex-1">{log.nama_barang || '-'}</span>
+                                                {/* REMOVED TRUNCATE HERE */}
+                                                <span className="text-xs font-medium text-gray-300 flex-1">{log.nama_barang || '-'}</span>
                                             </div>
                                             <div className="flex items-center gap-2">
                                                 <span className="text-[10px] text-gray-500 w-12 flex-shrink-0">Part No</span>
@@ -714,7 +727,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                         {!!log.part_number && <Search size={10} className="text-blue-400 flex-shrink-0" title="Terdeteksi Otomatis"/>}
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3 text-gray-400 truncate max-w-[150px]" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td>
+                                                {/* REMOVED TRUNCATE AND MAX-W HERE */}
+                                                <td className="px-4 py-3 text-gray-400 whitespace-normal" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td>
                                                 <td className="px-4 py-3 text-gray-400 text-center">{log.quantity || '-'}</td>
                                                 <td className="px-4 py-3 text-gray-200 font-bold text-right">{log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}</td>
                                                 <td className="px-4 py-3 text-center whitespace-nowrap">
