@@ -1,12 +1,12 @@
 // FILE: src/components/OrderManagement.tsx
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Order, OrderStatus, ReturRecord, ScanResiLog } from '../types';
+import { Order, OrderStatus, ReturRecord, ScanResiLog, InventoryItem } from '../types';
 import { 
   Clock, CheckCircle, Package, ClipboardList, RotateCcw, Edit3, 
   ShoppingBag, Tag, Search, X, Store, Save, Loader, FileText, 
   AlertCircle, ChevronLeft, ChevronRight, ScanBarcode, CheckSquare, 
   FileSpreadsheet, Upload, Send, Square, ChevronDown, Check, Loader2, Edit2, XCircle, Camera,
-  Plus, Trash2 
+  Plus, Trash2, List
 } from 'lucide-react';
 import { formatRupiah, compressImage } from '../utils';
 import { analyzeResiImage } from '../services/geminiService';
@@ -90,6 +90,12 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [selectedResis, setSelectedResis] = useState<string[]>([]);
   const [isDuplicating, setIsDuplicating] = useState<number | null>(null);
 
+  // --- STATE AUTOCOMPLETE (NEW) ---
+  const [inventoryCache, setInventoryCache] = useState<InventoryItem[]>([]);
+  const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
+  const [activeSearchId, setActiveSearchId] = useState<number | null>(null); // ID log yang sedang diedit
+  const [suggestionPosition, setSuggestionPosition] = useState<'top' | 'bottom'>('bottom');
+
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -100,6 +106,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   useEffect(() => {
       if (activeTab === 'scan') {
           loadScanLogs();
+          // Load Inventory Cache untuk Autocomplete
+          fetchInventory().then(data => setInventoryCache(data));
           setTimeout(() => { barcodeInputRef.current?.focus(); }, 100);
       }
   }, [activeTab]);
@@ -151,15 +159,48 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     finally { setAnalyzing(false); if (cameraInputRef.current) cameraInputRef.current.value = ''; }
   };
 
-  const handlePartNumberChange = async (id: number, value: string) => {
-      setScanLogs(prev => prev.map(log => {
-          if (log.id === id) {
-              const updated = { ...log, part_number: value };
-              return updated;
+  // --- NEW: LOGIKA AUTOCOMPLETE ---
+  const handlePartNumberInput = (id: number, value: string) => {
+      // 1. Update nilai di input lokal (Scan Logs)
+      setScanLogs(prev => prev.map(log => log.id === id ? { ...log, part_number: value } : log));
+      
+      // 2. Logic Filtering
+      if (value && value.length >= 2) { // Mulai mencari setelah 2 karakter
+          const lowerVal = value.toLowerCase();
+          const matches = inventoryCache.filter(item => 
+              item.partNumber.toLowerCase().includes(lowerVal) || 
+              item.name.toLowerCase().includes(lowerVal)
+          ).slice(0, 10); // Batasi 10 hasil
+          
+          setSuggestions(matches);
+          setActiveSearchId(id);
+      } else {
+          setSuggestions([]);
+          setActiveSearchId(null);
+      }
+  };
+
+  const selectSuggestion = async (id: number, item: InventoryItem) => {
+      // Update UI dengan Part Number yang dipilih
+      setScanLogs(prev => prev.map(log => log.id === id ? { ...log, part_number: item.partNumber } : log));
+      
+      // Simpan ke database
+      await updateScanResiLogField(id, 'part_number', item.partNumber);
+      
+      // Reset suggestion
+      setSuggestions([]);
+      setActiveSearchId(null);
+  };
+
+  const handleBlurInput = async (id: number, currentValue: string) => {
+      // Delay sedikit agar klik pada suggestion bisa tereksekusi sebelum suggestion hilang
+      setTimeout(async () => {
+          if (activeSearchId === id) {
+              setActiveSearchId(null);
           }
-          return log;
-      }));
-      if (id) await updateScanResiLogField(id, 'part_number', value);
+          // Simpan value terakhir (jika user mengetik manual dan tidak klik suggestion)
+          await updateScanResiLogField(id, 'part_number', currentValue);
+      }, 200);
   };
 
   const parseIndonesianNumber = (val: any): number => {
@@ -593,6 +634,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     </div>
                 ) : (
                     <>
+                        {/* MOBILE VIEW */}
                         <div className="md:hidden space-y-3 pb-20">
                             {scanCurrentItems.map((log) => {
                                 const isReady = log.status === 'Siap Kirim';
@@ -653,11 +695,28 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                 <span className="text-[10px] text-gray-500 w-12 flex-shrink-0">Produk</span>
                                                 <span className="text-xs font-medium text-gray-300 flex-1">{log.nama_barang || '-'}</span>
                                             </div>
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2 relative">
                                                 <span className="text-[10px] text-gray-500 w-12 flex-shrink-0">Part No</span>
-                                                <div className="flex-1">
+                                                <div className="flex-1 relative">
                                                     {!isSold ? (
-                                                        <input className="w-full bg-gray-700 border-b border-gray-600 focus:border-blue-500 text-xs py-0.5 px-1 font-mono outline-none text-gray-200" placeholder="Isi Part Number" value={log.part_number || ''} onChange={(e) => handlePartNumberChange(log.id!, e.target.value)} />
+                                                        <>
+                                                        <input className="w-full bg-gray-700 border-b border-gray-600 focus:border-blue-500 text-xs py-0.5 px-1 font-mono outline-none text-gray-200" 
+                                                            placeholder="Isi Part Number" 
+                                                            value={log.part_number || ''} 
+                                                            onChange={(e) => handlePartNumberInput(log.id!, e.target.value)}
+                                                            onBlur={(e) => handleBlurInput(log.id!, e.target.value)}
+                                                        />
+                                                        {activeSearchId === log.id && suggestions.length > 0 && (
+                                                            <div className="absolute top-full left-0 z-50 w-full bg-gray-800 border border-gray-600 rounded-lg shadow-xl mt-1 max-h-40 overflow-y-auto">
+                                                                {suggestions.map((item, idx) => (
+                                                                    <div key={idx} onClick={() => selectSuggestion(log.id!, item)} className="px-3 py-2 text-xs hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0">
+                                                                        <div className="font-bold text-white font-mono">{item.partNumber}</div>
+                                                                        <div className="text-gray-400 truncate text-[10px]">{item.name}</div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                        </>
                                                     ) : (
                                                         <span className="text-xs font-mono text-gray-400">{log.part_number || '-'}</span>
                                                     )}
@@ -718,14 +777,34 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                 <td className="px-4 py-3 text-gray-400 font-semibold">{log.toko || '-'}</td>
                                                 <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-gray-700 text-gray-300 border-gray-600">{log.ecommerce}</span></td>
                                                 <td className="px-4 py-3 text-gray-300 font-medium">{log.customer || '-'}</td>
-                                                <td className="px-4 py-3">
-                                                    <div className="flex items-center gap-1">
+                                                <td className="px-4 py-3 relative">
+                                                    <div className="flex items-center gap-1 relative">
                                                         {!isSold ? (
-                                                            <input className="bg-transparent border-b border-transparent focus:border-blue-500 outline-none w-full font-mono text-gray-300 placeholder-red-900/50" placeholder="Part Number" value={log.part_number || ''} onChange={(e) => handlePartNumberChange(log.id!, e.target.value)} />
+                                                            <>
+                                                                <input 
+                                                                    className="bg-transparent border-b border-transparent focus:border-blue-500 outline-none w-full font-mono text-gray-300 placeholder-red-900/50" 
+                                                                    placeholder="Part Number" 
+                                                                    value={log.part_number || ''} 
+                                                                    onChange={(e) => handlePartNumberInput(log.id!, e.target.value)} 
+                                                                    onBlur={(e) => handleBlurInput(log.id!, e.target.value)}
+                                                                />
+                                                                {/* POPUP REKOMENDASI DESKTOP */}
+                                                                {activeSearchId === log.id && suggestions.length > 0 && (
+                                                                    <div className="absolute top-8 left-0 z-50 w-64 bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                                                                        {suggestions.map((item, idx) => (
+                                                                            <div key={idx} onClick={() => selectSuggestion(log.id!, item)} className="px-3 py-2 text-xs hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0">
+                                                                                <div className="font-bold text-white font-mono">{item.partNumber}</div>
+                                                                                <div className="text-gray-400 truncate">{item.name}</div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </>
                                                         ) : (<span className="font-mono text-gray-400 break-all">{log.part_number}</span>)}
                                                         {!!log.part_number && <Search size={10} className="text-blue-400 flex-shrink-0" title="Terdeteksi Otomatis"/>}
                                                     </div>
                                                 </td>
+                                                {/* REMOVED TRUNCATE AND MAX-W HERE */}
                                                 <td className="px-4 py-3 text-gray-400 whitespace-normal" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td>
                                                 <td className="px-4 py-3 text-gray-400 text-center">{log.quantity || '-'}</td>
                                                 <td className="px-4 py-3 text-gray-200 font-bold text-right">{log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}</td>
