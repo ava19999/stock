@@ -142,13 +142,27 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
       formData.quantity
   ) : formData.quantity;
 
+  // --- LOGIKA WARNA MODAL BERDASARKAN STOK ---
+  let modalBorderClass = "border-gray-700";
+  let modalHeaderClass = "bg-gray-900/80 border-gray-700";
+  
+  // Gunakan quantity dari formData agar reaktif, atau initialData jika ingin statis.
+  // Biasanya status stok dilihat dari data saat ini.
+  if (formData.quantity === 0) {
+      modalBorderClass = "border-red-600";
+      modalHeaderClass = "bg-red-900/90 border-red-700";
+  } else if (formData.quantity < 4) {
+      modalBorderClass = "border-orange-600";
+      modalHeaderClass = "bg-orange-900/90 border-orange-700";
+  }
+
   return (
     <div className="fixed inset-0 z-[80] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
       {/* Container Responsif: Full di HP, Modal di PC */}
-      <div className="bg-gray-800 w-full h-[95vh] md:h-auto md:max-h-[90vh] md:max-w-4xl rounded-t-3xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700">
+      <div className={`bg-gray-800 w-full h-[95vh] md:h-auto md:max-h-[90vh] md:max-w-4xl rounded-t-3xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden border ${modalBorderClass} transition-colors duration-300`}>
         
         {/* HEADER */}
-        <div className="px-5 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/80 backdrop-blur-md sticky top-0 z-10">
+        <div className={`px-5 py-4 border-b flex justify-between items-center backdrop-blur-md sticky top-0 z-10 ${modalHeaderClass} transition-colors duration-300`}>
           <div className="flex items-center gap-3">
              <button onClick={onCancel} className="md:hidden p-2 -ml-2 hover:bg-gray-700 rounded-full text-gray-300">
                 <ArrowLeft size={22} />
@@ -157,10 +171,10 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                 <h2 className="text-lg font-extrabold text-gray-100 flex items-center gap-2">
                 {initialData ? 'Edit Barang' : 'Tambah Baru'}
                 </h2>
-                <p className="text-xs text-gray-400 hidden md:block">{initialData ? formData.name : 'Isi detail barang baru'}</p>
+                <p className="text-xs text-gray-200 hidden md:block">{initialData ? formData.name : 'Isi detail barang baru'}</p>
              </div>
           </div>
-          <button onClick={onCancel} className="hidden md:block p-2 hover:bg-gray-700 rounded-full text-gray-400 hover:text-gray-200">
+          <button onClick={onCancel} className="hidden md:block p-2 hover:bg-gray-700 rounded-full text-gray-200 hover:text-white">
             <X size={20} />
           </button>
         </div>

@@ -289,7 +289,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <div className="p-3 flex-1 flex flex-col">
                                 <div className="mb-2">
                                     <div className="flex justify-between items-start mb-1">
-                                         <span className="text-[9px] font-mono text-gray-400 bg-gray-700 px-1 rounded truncate max-w-[80px] border border-gray-600">{item.partNumber}</span>
+                                         {/* PART NUMBER DI GUDANG DIPERBESAR */}
+                                         <span className="text-xs font-bold text-white bg-black px-1.5 py-0.5 rounded border border-black">{item.partNumber}</span>
                                          <span className="text-[9px] font-bold text-gray-500 flex items-center gap-0.5"><MapPin size={8}/> {item.shelf}</span>
                                     </div>
                                     <h3 className="font-bold text-gray-200 text-xs leading-snug line-clamp-2 min-h-[2.5em]">{item.name}</h3>
@@ -322,7 +323,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             </div>
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-0.5">
-                                    <span className="text-[10px] font-mono bg-gray-700 px-1.5 rounded text-gray-300 border border-gray-600">{item.partNumber}</span>
+                                    {/* PART NUMBER DI LIST DIPERBESAR */}
+                                    <span className="text-xs font-bold text-white bg-black px-1.5 py-0.5 rounded border border-black">{item.partNumber}</span>
                                     <span className={`text-[9px] font-bold px-1.5 rounded ${item.quantity === 0 ? 'bg-red-900/40 text-red-400 border border-red-900/50' : 'bg-green-900/30 text-green-400 border border-green-900/50'}`}>{item.quantity} Unit</span>
                                 </div>
                                 <h3 className="font-bold text-sm text-gray-200 truncate">{item.name}</h3>
@@ -356,209 +358,118 @@ export const Dashboard: React.FC<DashboardProps> = ({
         )}
       </div>
 
-      {/* --- MODAL DETAIL RIWAYAT (RESPONSIVE HP & PC) --- */}
+      {/* --- HISTORY LOGS MODAL (GLOBAL) --- */}
       {showHistoryDetail && (
-        <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm p-0 md:p-4 animate-in fade-in">
-            <div className="bg-gray-800 w-full md:max-w-7xl h-[95vh] md:h-auto md:max-h-[90vh] rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-gray-700">
-                <div className="px-4 py-3 border-b border-gray-700 flex justify-between items-center bg-gray-800">
-                    <h3 className="text-base font-bold text-gray-200 flex items-center gap-2">
-                        {showHistoryDetail === 'in' ? <TrendingUp size={18} className="text-green-500"/> : <TrendingDown size={18} className="text-red-500"/>}
-                        Riwayat {showHistoryDetail === 'in' ? 'Barang Masuk' : 'Barang Keluar'}
-                    </h3>
-                    <button onClick={() => setShowHistoryDetail(null)} className="text-gray-400 hover:text-white text-xs font-bold bg-gray-700 border border-gray-600 px-3 py-1 rounded-lg hover:bg-gray-600">Tutup</button>
-                </div>
-                
-                <div className="px-4 py-2 bg-gray-800 border-b border-gray-700 flex gap-3 justify-between items-center">
-                    <div className="relative flex-1 max-w-sm">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-                        <input 
-                            type="text" 
-                            placeholder="Cari Resi, Toko, Barang..." 
-                            className="w-full pl-9 pr-4 py-1.5 bg-gray-700 border border-gray-600 rounded-lg text-xs focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none text-white placeholder-gray-500" 
-                            value={historyDetailSearch} 
-                            onChange={(e) => { setHistoryDetailSearch(e.target.value); setHistoryDetailPage(1); }} 
-                        />
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <button onClick={() => setHistoryDetailPage(p => Math.max(1, p - 1))} disabled={historyDetailPage === 1} className="p-1.5 border border-gray-600 rounded-lg hover:bg-gray-700 text-gray-300 disabled:opacity-30"><ChevronLeft size={14}/></button>
-                        <span className="text-[10px] font-bold text-gray-400 min-w-[50px] text-center">Hal {historyDetailPage}/{historyDetailTotalPages}</span>
-                        <button onClick={() => setHistoryDetailPage(p => Math.min(historyDetailTotalPages, p + 1))} disabled={historyDetailPage === historyDetailTotalPages || historyDetailTotalPages === 0} className="p-1.5 border border-gray-600 rounded-lg hover:bg-gray-700 text-gray-300 disabled:opacity-30"><ChevronRightIcon size={14}/></button>
-                    </div>
-                </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
+             <div className="bg-gray-800 rounded-2xl w-full max-w-2xl h-[80vh] flex flex-col border border-gray-700 shadow-2xl m-4">
+                 <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50 rounded-t-2xl">
+                     <h3 className="font-bold text-gray-100 flex items-center gap-2">
+                         {showHistoryDetail === 'in' ? <TrendingUp className="text-green-500" size={20}/> : <TrendingDown className="text-red-500" size={20}/>}
+                         Detail Barang {showHistoryDetail === 'in' ? 'Masuk' : 'Keluar'}
+                     </h3>
+                     <button onClick={() => setShowHistoryDetail(null)} className="p-1 hover:bg-gray-700 rounded-full"><X size={20}/></button>
+                 </div>
+                 
+                 <div className="p-3 border-b border-gray-700 bg-gray-800">
+                     <input type="text" placeholder="Cari Resi / Nama Barang..." className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-blue-500 outline-none" value={historyDetailSearch} onChange={(e) => setHistoryDetailSearch(e.target.value)} />
+                 </div>
 
-                <div className="overflow-auto flex-1 p-0 bg-gray-900/50">
-                    {historyDetailLoading ? (
-                        <div className="flex flex-col items-center justify-center h-64 text-blue-500"><Loader2 size={24} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat...</p></div>
-                    ) : historyDetailData.length === 0 ? (
-                        <div className="p-12 text-center text-gray-500 text-xs flex flex-col items-center gap-2"><History size={32} className="opacity-20"/><p>Belum ada riwayat ditemukan.</p></div>
-                    ) : (
-                        <div className="min-w-[1000px]">
-                            <table className="w-full text-left border-collapse">
-                                <thead className="bg-gray-800 text-gray-400 text-[10px] font-bold uppercase tracking-wider sticky top-0 z-10 border-b border-gray-700">
-                                    <tr>
-                                        <th className="px-3 py-2 w-28 bg-gray-800">Tanggal</th>
-                                        <th className="px-3 py-2 w-36 bg-gray-800">Resi / Tempo</th>
-                                        <th className="px-3 py-2 w-24 bg-gray-800">E-Commerce</th>
-                                        <th className="px-3 py-2 w-28 bg-gray-800">No. Part</th>
-                                        <th className="px-3 py-2 bg-gray-800">Nama Barang</th>
-                                        <th className="px-3 py-2 text-right w-16 bg-gray-800">Qty</th>
-                                        <th className="px-3 py-2 text-right w-24 bg-gray-800">Harga</th>
-                                        <th className="px-3 py-2 text-right w-24 bg-gray-800">Total</th>
-                                        <th className="px-3 py-2 w-48 bg-gray-800">Ket / Pelanggan</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-700 text-xs bg-gray-800 text-gray-300">
-                                    {historyDetailData.map((h) => { 
-                                        const price = h.price || 0; 
-                                        const total = h.totalPrice || (price * (Number(h.quantity) || 0)); 
-                                        const { ecommerce, customer, keterangan, resi } = parseHistoryReason(h.reason); 
-                                        
-                                        let displayResi = '-';
-                                        let displayShop = '-';
-                                        
-                                        if (h.type === 'in') {
-                                            if (h.tempo && h.tempo.includes(' / ')) {
-                                                const parts = h.tempo.split(' / ');
-                                                displayResi = parts[0] !== '-' ? parts[0] : '-';
-                                                displayShop = parts[1] !== '-' ? parts[1] : '-';
-                                            } else {
-                                                displayShop = h.tempo || '-';
-                                            }
-                                        } else {
-                                            displayResi = resi !== '-' ? resi : (h.resi || '-');
-                                            displayShop = h.tempo || '-';
-                                        }
+                 <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-gray-900/30">
+                     {historyDetailLoading ? (
+                         <div className="flex justify-center py-10"><Loader2 className="animate-spin text-blue-500" size={30}/></div>
+                     ) : historyDetailData.length === 0 ? (
+                         <div className="text-center py-10 text-gray-500">Tidak ada data history</div>
+                     ) : (
+                         <div className="space-y-3">
+                             {historyDetailData.map(h => {
+                                 const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
+                                 return (
+                                     <div key={h.id} className="bg-gray-800 p-3 rounded-xl border border-gray-700 shadow-sm flex gap-3">
+                                         <div className={`w-1 shrink-0 rounded-full ${h.type === 'in' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                         <div className="flex-1">
+                                             <div className="flex justify-between mb-1">
+                                                 <span className="font-bold text-sm text-gray-200">{h.name}</span>
+                                                 <span className="text-[10px] text-gray-500">{new Date(h.timestamp||0).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</span>
+                                             </div>
+                                             <div className="flex justify-between items-end">
+                                                  <div className="text-xs text-gray-400 space-y-0.5">
+                                                      <div className="flex items-center gap-1"><span className="text-gray-500 w-12">Ket:</span> <span className="text-gray-300 font-medium">{keterangan}</span></div>
+                                                      {resi !== '-' && <div className="flex items-center gap-1"><span className="text-gray-500 w-12">Resi:</span> <span className="bg-gray-700 px-1 rounded text-blue-300 font-mono text-[10px]">{resi}</span></div>}
+                                                      {customer !== '-' && <div className="flex items-center gap-1"><span className="text-gray-500 w-12">Oleh:</span> <span className="text-gray-300">{customer}</span></div>}
+                                                  </div>
+                                                  <div className={`font-extrabold text-lg ${h.type === 'in' ? 'text-green-400' : 'text-red-400'}`}>
+                                                      {h.type === 'in' ? '+' : '-'}{h.quantity}
+                                                  </div>
+                                             </div>
+                                         </div>
+                                     </div>
+                                 );
+                             })}
+                         </div>
+                     )}
+                 </div>
 
-                                        let ketContent = h.type === 'in' ? h.reason.replace(/\(Via:.*?\)/, '').trim() : (customer !== '-' ? customer : keterangan);
-                                        const isRetur = ketContent.toUpperCase().includes('(RETUR)');
-                                        const cleanName = ketContent.replace(/\(RETUR\)/i, '').trim();
-
-                                        return (
-                                        <tr key={h.id} className="hover:bg-blue-900/10 transition-colors border-gray-700">
-                                            <td className="px-3 py-2 align-top text-gray-400 whitespace-nowrap">
-                                                {h.timestamp ? <><div className="font-bold text-gray-300">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-[9px] text-gray-500 font-mono">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div></> : '-'}
-                                            </td>
-                                            
-                                            <td className="px-3 py-2 align-top font-mono text-[10px]">
-                                                <div className="flex flex-col gap-1 items-start">
-                                                    {displayResi !== '-' && displayResi !== '' && (
-                                                        <span className="inline-block px-1.5 py-0.5 rounded font-bold bg-blue-900/40 text-blue-300 border border-blue-800/50 truncate max-w-[120px]">
-                                                            {displayResi}
-                                                        </span>
-                                                    )}
-                                                    {displayShop !== '-' && displayShop !== '' && (
-                                                        <div className="flex items-center gap-1 text-gray-400 bg-gray-700 px-1.5 py-0.5 rounded border border-gray-600 shadow-sm">
-                                                            <Store size={8} className="text-gray-500" />
-                                                            <span className="font-bold text-[9px] uppercase truncate max-w-[100px]">{displayShop}</span>
-                                                        </div>
-                                                    )}
-                                                    {displayResi === '-' && displayShop === '-' && <span className="text-gray-600">-</span>}
-                                                </div>
-                                            </td>
-                                            
-                                            <td className="px-3 py-2 align-top">
-                                                {ecommerce !== '-' ? <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-900/30 text-orange-400 border border-orange-900/50">{ecommerce}</span> : <span className="text-gray-600">-</span>}
-                                            </td>
-                                            <td className="px-3 py-2 font-mono text-gray-400 text-[10px] align-top">{h.partNumber || '-'}</td>
-                                            <td className="px-3 py-2 font-medium text-gray-300 max-w-[200px] align-top truncate" title={h.name}>{h.name}</td>
-                                            <td className={`px-3 py-2 text-right font-bold align-top ${showHistoryDetail==='in'?'text-green-400':'text-red-400'}`}>{showHistoryDetail==='in' ? '+' : '-'}{h.quantity}</td>
-                                            <td className="px-3 py-2 text-right text-gray-400 font-mono align-top text-[10px]">{formatRupiah(price)}</td>
-                                            <td className="px-3 py-2 text-right text-gray-200 font-bold font-mono align-top text-[10px]">{formatRupiah(total)}</td>
-                                            
-                                            <td className="px-3 py-2 align-top text-gray-300 font-medium text-[10px]">
-                                                <div className="flex flex-col items-start gap-1">
-                                                    <span className="font-bold text-gray-200 truncate max-w-[150px]" title={cleanName}>{cleanName}</span>
-                                                    {isRetur && (
-                                                        <span className="bg-red-900/30 text-red-400 px-1 py-0.5 rounded text-[8px] font-bold border border-red-900/50 flex items-center gap-1">
-                                                            <TrendingDown size={8} /> RETUR
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                        </tr>); 
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </div>
-            </div>
+                 <div className="p-3 border-t border-gray-700 flex justify-between items-center bg-gray-800 rounded-b-2xl">
+                     <button onClick={() => setHistoryDetailPage(p => Math.max(1, p - 1))} disabled={historyDetailPage === 1} className="p-1 bg-gray-700 rounded disabled:opacity-30"><ChevronLeft size={18}/></button>
+                     <span className="text-xs text-gray-400">Hal {historyDetailPage} / {historyDetailTotalPages}</span>
+                     <button onClick={() => setHistoryDetailPage(p => Math.min(historyDetailTotalPages, p + 1))} disabled={historyDetailPage === historyDetailTotalPages} className="p-1 bg-gray-700 rounded disabled:opacity-30"><ChevronRightIcon size={18}/></button>
+                 </div>
+             </div>
         </div>
       )}
 
-      {/* --- MODAL RIWAYAT PER ITEM (RESPONSIVE HP & PC) --- */}
+      {/* --- HISTORY PER ITEM MODAL --- */}
       {selectedItemHistory && (
-        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm p-0 md:p-4 animate-in fade-in">
-            <div className="bg-gray-800 w-full md:max-w-4xl h-[90vh] md:h-auto md:max-h-[85vh] rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-gray-700">
-                <div className="px-4 py-3 border-b border-gray-700 flex justify-between items-start bg-gray-800">
-                    <div className="flex-1">
-                        <h3 className="font-bold text-gray-100 text-base flex items-center gap-2">
-                            <History size={18} className="text-blue-400"/> Riwayat: {selectedItemHistory.name}
-                        </h3>
-                        <p className="text-[10px] text-gray-400 mt-0.5 font-mono">{selectedItemHistory.partNumber}</p>
-                    </div>
-                    <button onClick={() => setSelectedItemHistory(null)} className="p-1 hover:bg-gray-700 rounded-full transition-colors ml-4"><X size={18} className="text-gray-400"/></button>
-                </div>
-                
-                <div className="px-4 py-2 bg-gray-800 border-b border-gray-700">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-                        <input autoFocus type="text" placeholder="Cari..." className="w-full pl-9 pr-4 py-1.5 bg-gray-700 border border-gray-600 rounded-lg text-xs outline-none focus:ring-1 focus:ring-blue-500 text-white placeholder-gray-500" value={itemHistorySearch} onChange={(e) => setItemHistorySearch(e.target.value)} />
-                    </div>
-                </div>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-gray-800 rounded-2xl w-full max-w-md max-h-[85vh] flex flex-col border border-gray-700 shadow-2xl m-4 overflow-hidden">
+                   <div className="p-4 border-b border-gray-700 bg-gray-900/50 flex justify-between items-center">
+                       <div>
+                           <h3 className="font-bold text-gray-100 flex items-center gap-2"><History size={16} className="text-blue-400"/> Riwayat Item</h3>
+                           <p className="text-xs text-gray-400 truncate max-w-[200px]">{selectedItemHistory.name}</p>
+                       </div>
+                       <button onClick={() => setSelectedItemHistory(null)} className="p-1 bg-gray-700 hover:bg-gray-600 rounded-full"><X size={18}/></button>
+                   </div>
+                   
+                   <div className="p-3 bg-gray-800 border-b border-gray-700">
+                       <input type="text" placeholder="Cari Resi / Nama Customer..." className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 focus:border-blue-500 outline-none" value={itemHistorySearch} onChange={(e) => setItemHistorySearch(e.target.value)} />
+                   </div>
 
-                <div className="overflow-auto flex-1 p-0 bg-gray-900/50">
-                    {loadingItemHistory ? (
-                        <div className="flex flex-col items-center justify-center h-48 text-blue-500"><Loader2 size={24} className="animate-spin mb-2"/><p className="text-xs font-medium">Memuat...</p></div>
-                    ) : filteredItemHistory.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-48 text-gray-500"><History size={32} className="opacity-20 mb-2"/><p className="text-xs">Tidak ada riwayat.</p></div>
-                    ) : (
-                        <div className="min-w-[700px]">
-                            <table className="w-full text-left border-collapse">
-                                <thead className="bg-gray-800 text-gray-400 text-[10px] font-bold uppercase sticky top-0 z-10 border-b border-gray-700">
-                                    <tr>
-                                        <th className="px-3 py-2 w-28 bg-gray-800">Tanggal</th>
-                                        <th className="px-3 py-2 w-20 text-center bg-gray-800">Tipe</th>
-                                        <th className="px-3 py-2 w-16 text-right bg-gray-800">Qty</th>
-                                        <th className="px-3 py-2 w-24 text-right bg-gray-800">Harga</th>
-                                        <th className="px-3 py-2 w-24 text-right bg-gray-800">Total</th>
-                                        <th className="px-3 py-2 bg-gray-800">Keterangan</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-700 text-xs bg-gray-800 text-gray-300">
-                                    {filteredItemHistory.map(h => { 
-                                        const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason); 
-                                        return (
-                                        <tr key={h.id} className="hover:bg-blue-900/10 transition-colors border-gray-700">
-                                            <td className="px-3 py-2 align-top text-gray-300">
-                                                {h.timestamp ? <><div className="font-bold">{new Date(h.timestamp).toLocaleDateString('id-ID')}</div><div className="text-[9px] text-gray-500 font-mono">{new Date(h.timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div></> : '-'}
-                                            </td>
-                                            <td className="px-3 py-2 align-top text-center">
-                                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border ${h.type === 'in' ? 'bg-green-900/30 text-green-400 border-green-900/50' : 'bg-red-900/30 text-red-400 border-red-900/50'}`}>
-                                                    {h.type === 'in' ? 'Masuk' : 'Keluar'}
-                                                </span>
-                                            </td>
-                                            <td className={`px-3 py-2 align-top text-right font-bold ${h.type === 'in' ? 'text-green-400' : 'text-red-400'}`}>
-                                                {h.type === 'in' ? '+' : '-'}{h.quantity}
-                                            </td>
-                                            <td className="px-3 py-2 align-top text-right font-mono text-gray-400 text-[10px]">{formatRupiah(h.price)}</td>
-                                            <td className="px-3 py-2 align-top text-right font-bold font-mono text-gray-200 text-[10px]">{formatRupiah(h.totalPrice)}</td>
-                                            <td className="px-3 py-2 align-top text-gray-300">
-                                                <div className="font-bold text-gray-100 text-[10px] mb-1">{h.type === 'in' ? h.reason.replace(/\(Via:.*?\)/, '').trim() : (customer !== '-' ? customer : keterangan)}</div>
-                                                <div className="flex flex-wrap gap-1">
-                                                    {resi !== '-' && <div className="bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded text-[9px] border border-blue-900/50 font-mono">{resi}</div>}
-                                                    {ecommerce !== '-' && <div className="bg-orange-900/30 text-orange-400 px-1.5 py-0.5 rounded text-[9px] border border-orange-900/50">{ecommerce}</div>}
-                                                </div>
-                                            </td>
-                                        </tr>); 
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </div>
-            </div>
-        </div>
+                   <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-gray-900/30">
+                       {loadingItemHistory ? (
+                            <div className="flex justify-center py-8"><Loader2 className="animate-spin text-blue-500" size={24}/></div>
+                       ) : filteredItemHistory.length === 0 ? (
+                            <div className="text-center py-8 text-gray-500 text-xs">Belum ada riwayat transaksi.</div>
+                       ) : (
+                           <div className="relative border-l-2 border-gray-700 ml-3 space-y-6 pl-6 py-2">
+                               {filteredItemHistory.map((h, idx) => {
+                                   const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason);
+                                   return (
+                                       <div key={idx} className="relative">
+                                           <div className={`absolute -left-[31px] top-1 w-4 h-4 rounded-full border-2 border-gray-800 ${h.type === 'in' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                           <div className="flex justify-between items-start">
+                                               <div>
+                                                   <div className="text-xs font-bold text-gray-300">{keterangan}</div>
+                                                   <div className="text-[10px] text-gray-500 mt-0.5">{new Date(h.timestamp||0).toLocaleDateString('id-ID', {day: 'numeric', month: 'short', year: 'numeric'})} • {new Date(h.timestamp||0).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div>
+                                                   {(resi !== '-' || customer !== '-') && (
+                                                       <div className="mt-1 flex flex-wrap gap-1">
+                                                           {resi !== '-' && <span className="px-1.5 py-0.5 bg-gray-700 rounded text-[9px] font-mono text-blue-300">{resi}</span>}
+                                                           {ecommerce !== '-' && <span className="px-1.5 py-0.5 bg-gray-700 rounded text-[9px] text-orange-300">{ecommerce}</span>}
+                                                           {customer !== '-' && <span className="px-1.5 py-0.5 bg-gray-700 rounded text-[9px] text-gray-300">{customer}</span>}
+                                                       </div>
+                                                   )}
+                                               </div>
+                                               <div className={`font-bold text-sm ${h.type === 'in' ? 'text-green-400' : 'text-red-400'}`}>
+                                                   {h.type === 'in' ? '+' : '-'}{h.quantity}
+                                               </div>
+                                           </div>
+                                       </div>
+                                   );
+                               })}
+                           </div>
+                       )}
+                   </div>
+              </div>
+          </div>
       )}
     </div>
   );
