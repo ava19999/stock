@@ -291,11 +291,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       const logsToProcess = scanLogs.filter(log => selectedResis.includes(log.resi));
 
       // --- VALIDASI PART NUMBER ---
-      // Cegah proses jika ada item yang part numbernya kosong
       const invalidItem = logsToProcess.find(log => !log.part_number || log.part_number.trim() === '' || log.part_number === '-');
       if (invalidItem) {
           showToast(`Gagal: Resi ${invalidItem.resi} belum ada Part Number!`, 'error');
-          return; // STOP DI SINI, data tetap di tab scan
+          return; // STOP DI SINI
       }
       // ----------------------------
 
@@ -652,7 +651,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                         <div className="space-y-1 mb-2">
                                             <div className="flex items-center gap-2">
                                                 <span className="text-[10px] text-gray-500 w-12 flex-shrink-0">Produk</span>
-                                                {/* REMOVED TRUNCATE HERE */}
                                                 <span className="text-xs font-medium text-gray-300 flex-1">{log.nama_barang || '-'}</span>
                                             </div>
                                             <div className="flex items-center gap-2">
@@ -686,7 +684,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                         <th className="px-4 py-3 border-b border-gray-700">Toko</th>
                                         <th className="px-4 py-3 border-b border-gray-700">Via</th>
                                         <th className="px-4 py-3 border-b border-gray-700">Pelanggan</th>
-                                        <th className="px-4 py-3 border-b border-gray-700">Part.No (Edit)</th>
+                                        {/* Added min-w to prevent shrinking */}
+                                        <th className="px-4 py-3 border-b border-gray-700 min-w-[150px]">Part.No (Edit)</th>
                                         <th className="px-4 py-3 border-b border-gray-700">Barang</th>
                                         <th className="px-4 py-3 border-b border-gray-700 text-center">Qty</th>
                                         <th className="px-4 py-3 border-b border-gray-700 text-right">Total</th>
@@ -723,11 +722,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                     <div className="flex items-center gap-1">
                                                         {!isSold ? (
                                                             <input className="bg-transparent border-b border-transparent focus:border-blue-500 outline-none w-full font-mono text-gray-300 placeholder-red-900/50" placeholder="Part Number" value={log.part_number || ''} onChange={(e) => handlePartNumberChange(log.id!, e.target.value)} />
-                                                        ) : (<span className="font-mono text-gray-400">{log.part_number}</span>)}
+                                                        ) : (<span className="font-mono text-gray-400 break-all">{log.part_number}</span>)}
                                                         {!!log.part_number && <Search size={10} className="text-blue-400 flex-shrink-0" title="Terdeteksi Otomatis"/>}
                                                     </div>
                                                 </td>
-                                                {/* REMOVED TRUNCATE AND MAX-W HERE */}
                                                 <td className="px-4 py-3 text-gray-400 whitespace-normal" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td>
                                                 <td className="px-4 py-3 text-gray-400 text-center">{log.quantity || '-'}</td>
                                                 <td className="px-4 py-3 text-gray-200 font-bold text-right">{log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}</td>
