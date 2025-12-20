@@ -687,14 +687,13 @@ export const addScanResiLog = async (resi: string, ecommerce: string, toko: stri
     }
 };
 
-// --- FUNGSI BARU: IMPORT DARI EXCEL (LOGIKA MODIFIKASI) ---
-// Status default: Pending, kecuali data existing sudah Siap Kirim/Terjual
+// --- FUNGSI BARU: IMPORT DARI EXCEL (DIPERBAIKI UNTUK MULTI-ITEM) ---
 export const importScanResiFromExcel = async (updates: any[]): Promise<{ success: boolean, skippedCount: number, updatedCount: number }> => {
     try {
         const resiList = updates.map(u => u.resi).filter(Boolean);
         if (resiList.length === 0) return { success: false, skippedCount: 0, updatedCount: 0 };
 
-        // 1. Ambil data existing
+        // 1. Ambil SEMUA data existing yang cocok dengan daftar resi
         const { data: existingData, error: checkError } = await supabase
             .from('scan_resi')
             .select('*') 
@@ -705,31 +704,46 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
             return { success: false, skippedCount: 0, updatedCount: 0 };
         }
 
-        const existingMap = new Map(existingData?.map(item => [item.resi, item]));
+        // 2. Grouping existing data berdasarkan Resi
+        // (Satu Resi bisa punya banyak item/baris)
+        const existingGrouped = new Map<string, any[]>();
+        existingData?.forEach(item => {
+            if (!existingGrouped.has(item.resi)) existingGrouped.set(item.resi, []);
+            existingGrouped.get(item.resi)?.push(item);
+        });
+
         const insertPayload: any[] = [];
         const updatePromises: any[] = [];
+        
+        // 3. Track ID yang sudah diupdate agar tidak double update
+        const updatedIds = new Set<number>();
 
         updates.forEach(item => {
-            const existing = existingMap.get(item.resi);
+            const candidates = existingGrouped.get(item.resi) || [];
             
-            // LOGIKA UTAMA:
-            // Import CSV tidak boleh auto-promote ke 'Siap Kirim'.
-            // Harus tetap 'Pending' (Belum Scan) sampai di-scan fisik.
-            // KECUALI: Data sudah ada dan statusnya sudah 'Siap Kirim'/'Terjual'.
+            // LOGIKA PENCARIAN ITEM YANG SPESIFIK:
+            // Kita cari baris di database yang memiliki PART NUMBER atau NAMA BARANG yang sama.
+            // Jika ketemu -> Update baris tersebut.
+            // Jika tidak ketemu -> Insert sebagai item baru dalam resi yang sama.
             
+            let existing = candidates.find(c => 
+                !updatedIds.has(c.id) && (
+                    (item.part_number && c.part_number === item.part_number) || 
+                    (item.nama_barang && c.nama_barang === item.nama_barang)
+                )
+            );
+
+            // Default status: Pending (Belum Scan Fisik)
             let statusToUse = 'Pending';
-            
             if (existing) {
-                if (existing.status === 'Siap Kirim' || existing.status === 'Terjual') {
+                 if (existing.status === 'Siap Kirim' || existing.status === 'Terjual') {
                     statusToUse = existing.status;
                 }
             }
 
             if (existing) {
-                // JIKA SUDAH ADA: Update detailnya
-                // Jika status lama Pending, tetap Pending.
-                // Update toko & via sesuai input aplikasi (item.toko)
-                
+                // UPDATE ITEM YANG ADA
+                updatedIds.add(existing.id); // Tandai agar tidak dipakai lagi oleh baris CSV lain
                 updatePromises.push(
                     supabase.from('scan_resi').update({
                         toko: item.toko,
@@ -744,7 +758,7 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
                     }).eq('id', existing.id)
                 );
             } else {
-                // JIKA BELUM ADA: Insert Baru dengan status Pending
+                // INSERT ITEM BARU (Beda Barang)
                 insertPayload.push({
                     tanggal: getWIBISOString(),
                     resi: item.resi,
