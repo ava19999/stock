@@ -6,7 +6,7 @@ import {
   ShoppingBag, Tag, Search, X, Store, Save, Loader, FileText, 
   AlertCircle, ChevronLeft, ChevronRight, ScanBarcode, CheckSquare, 
   FileSpreadsheet, Upload, Send, Square, ChevronDown, Check, Loader2, Edit2, XCircle, Camera,
-  Plus, Trash2 // IMPORT ICON BARU
+  Plus, Trash2 
 } from 'lucide-react';
 import { formatRupiah, compressImage } from '../utils';
 import { analyzeResiImage } from '../services/geminiService';
@@ -25,8 +25,8 @@ import {
   processShipmentToOrders, 
   fetchInventory, 
   updateScanResiLogField,
-  duplicateScanResiLog, // IMPORT FUNGSI BARU
-  deleteScanResiLog     // IMPORT FUNGSI BARU
+  duplicateScanResiLog, 
+  deleteScanResiLog     
 } from '../services/supabaseService';
 
 // --- KONSTANTA SCAN RESI ---
@@ -88,7 +88,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [isProcessingShipment, setIsProcessingShipment] = useState(false);
   const [scanLogs, setScanLogs] = useState<ScanResiLog[]>([]);
   const [selectedResis, setSelectedResis] = useState<string[]>([]);
-  const [isDuplicating, setIsDuplicating] = useState<number | null>(null); // State loading duplikat
+  const [isDuplicating, setIsDuplicating] = useState<number | null>(null);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -301,7 +301,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
       setIsProcessingShipment(false);
   };
 
-  // --- FUNGSI DUPLIKASI & DELETE (NEW) ---
   const handleDuplicate = async (id: number) => {
       setIsDuplicating(id);
       if (await duplicateScanResiLog(id)) {
@@ -605,7 +604,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                 </div>
                                             </div>
                                             <div className="flex gap-1">
-                                                {/* ACTION BUTTONS MOBILE */}
                                                 {!isSold && (
                                                     <>
                                                     <button onClick={() => handleDuplicate(log.id!)} className="p-1 bg-gray-700 rounded hover:bg-gray-600 text-blue-400">
@@ -620,8 +618,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                     <span className="bg-gray-700 text-gray-400 text-[10px] font-bold px-2 py-1 rounded-full">Terjual</span>
                                                 ) : isReady ? (
                                                     <span className="bg-green-900/30 text-green-400 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><Check size={10}/> Siap</span>
+                                                ) : isComplete ? (
+                                                    <span className="bg-red-900/30 text-red-400 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><XCircle size={10}/> Belum Scan</span>
                                                 ) : (
-                                                    <span className="bg-red-900/30 text-red-400 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><XCircle size={10}/> Pending</span>
+                                                    <span className="bg-red-900/30 text-red-400 text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"><XCircle size={10}/> Belum Upload</span>
                                                 )}
                                             </div>
                                         </div>
@@ -723,9 +723,9 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                     ) : isReady ? (
                                                         <span className="inline-flex items-center gap-1 text-green-400 font-bold bg-green-900/30 px-2 py-0.5 rounded-full border border-green-800 text-[10px]"><Check size={10}/> Siap Kirim</span>
                                                     ) : isComplete ? (
-                                                        <span className="inline-flex items-center gap-1 text-red-400 font-bold bg-red-900/30 px-2 py-0.5 rounded-full border border-red-800 text-[10px]"><XCircle size={10}/> Pending</span>
+                                                        <span className="inline-flex items-center gap-1 text-red-400 font-bold bg-red-900/30 px-2 py-0.5 rounded-full border border-red-800 text-[10px]"><XCircle size={10}/> Belum Scan</span>
                                                     ) : (
-                                                        <span className="inline-flex items-center gap-1 text-red-400 font-bold bg-red-900/30 px-2 py-0.5 rounded-full border border-red-800 text-[10px]"><XCircle size={10}/> Pending</span>
+                                                        <span className="inline-flex items-center gap-1 text-red-400 font-bold bg-red-900/30 px-2 py-0.5 rounded-full border border-red-800 text-[10px]"><XCircle size={10}/> Belum Upload</span>
                                                     )}
                                                 </td>
                                                 <td className="px-4 py-3 text-center">
