@@ -838,15 +838,18 @@ export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
 
         if (!siblings) return false;
 
+        // Hitung total harga dan total quantity dari semua siblings
         const totalPoolPrice = siblings.reduce((sum, item) => sum + (Number(item.harga_total) || 0), 0);
+        const totalQuantity = siblings.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
         
-        const newCount = siblings.length + 1;
-        const newPricePerItem = Math.floor(totalPoolPrice / newCount);
-
+        // Hitung harga per unit
+        const pricePerUnit = totalQuantity > 0 ? Math.floor(totalPoolPrice / totalQuantity) : 0;
+        
+        // Perbarui semua siblings dengan harga per unit yang baru
         const updatePromises = siblings.map(item => 
             supabase.from('scan_resi').update({ 
-                harga_total: newPricePerItem,
-                harga_satuan: newPricePerItem 
+                harga_satuan: pricePerUnit,
+                harga_total: pricePerUnit * (Number(item.quantity) || 0)
             }).eq('id', item.id)
         );
         await Promise.all(updatePromises);
@@ -856,8 +859,8 @@ export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
         const { error: insertError } = await supabase.from('scan_resi').insert([{
             ...cleanItemData,
             tanggal: getWIBISOString(),
-            harga_total: newPricePerItem,
-            harga_satuan: newPricePerItem,
+            harga_satuan: pricePerUnit,
+            harga_total: pricePerUnit * (Number(cleanItemData.quantity) || 0),
             status: 'Pending'
         }]);
 
@@ -917,6 +920,10 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                     });
                 }
             }
+            
+            // Hitung harga_total yang benar berdasarkan harga_satuan dan quantity
+            const harga_total = (log.harga_satuan || 0) * (log.quantity || 0);
+            
             const { error: insertError } = await supabase.from('orders').insert([{
                 tanggal: getWIBISOString(), 
                 resi: log.resi,
@@ -927,7 +934,7 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                 nama_barang: realItemName, 
                 quantity: log.quantity,
                 harga_satuan: log.harga_satuan,
-                harga_total: log.harga_total,
+                harga_total: harga_total,
                 status: 'processing' 
             }]);
 
