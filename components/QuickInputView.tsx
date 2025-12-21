@@ -27,20 +27,8 @@ interface QuickInputViewProps {
 }
 
 export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh, showToast }) => {
-  const [rows, setRows] = useState<QuickInputRow[]>([
-    {
-      id: 1,
-      partNumber: '',
-      namaBarang: '',
-      hargaModal: 0,
-      hargaJual: 0,
-      quantity: 1,
-      operation: 'out',
-      via: '',
-      customer: '',
-      resiTempo: ''
-    }
-  ]);
+  // --- 1. TABEL AWALNYA KOSONG ---
+  const [rows, setRows] = useState<QuickInputRow[]>([]);
   
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
@@ -51,30 +39,31 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const searchTimeoutRef = useRef<NodeJS.Timeout>();
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Auto-focus pertama
+  // Auto-focus jika ada baris baru ditambahkan
   useEffect(() => {
-    if (inputRefs.current[0]) {
-      setTimeout(() => inputRefs.current[0]?.focus(), 100);
+    if (rows.length > 0) {
+        const lastIndex = (rows.length - 1) * 6;
+        // Fokus ke input part number baris terakhir jika baru ditambah
+        // (Logika sederhana, bisa disesuaikan)
     }
-  }, []);
+  }, [rows.length]);
 
-  // Handle Part Number input dengan autocomplete
+  // --- 4. LOGIKA AUTOCOMPLETE (SAMAKAN DENGAN SCAN RESI) ---
   const handlePartNumberChange = (id: number, value: string) => {
     setRows(prev => prev.map(row => 
       row.id === id ? { ...row, partNumber: value.toUpperCase() } : row
     ));
 
-    // Cari item
     const rowIndex = rows.findIndex(r => r.id === id);
+    
+    // Logika pencarian disamakan: Min 2 karakter, Filter by PartNumber only, Limit 10
     if (value.length >= 2) {
       clearTimeout(searchTimeoutRef.current);
       searchTimeoutRef.current = setTimeout(() => {
+        const lowerVal = value.toLowerCase();
         const matches = items
-          .filter(item => 
-            item.partNumber?.toLowerCase().includes(value.toLowerCase()) ||
-            item.name?.toLowerCase().includes(value.toLowerCase())
-          )
-          .slice(0, 5);
+          .filter(item => item.partNumber && item.partNumber.toLowerCase().includes(lowerVal))
+          .slice(0, 10);
         
         setSuggestions(matches);
         setActiveSearchIndex(rowIndex);
@@ -85,7 +74,6 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     }
   };
 
-  // Pilih item dari autocomplete
   const handleSelectItem = (id: number, item: InventoryItem) => {
     setRows(prev => prev.map(row => 
       row.id === id ? {
@@ -106,7 +94,6 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     nextInput?.focus();
   };
 
-  // Tambah baris baru
   const addNewRow = () => {
     const newId = Math.max(0, ...rows.map(r => r.id)) + 1;
     setRows(prev => [...prev, {
@@ -121,36 +108,24 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       customer: '',
       resiTempo: ''
     }]);
+    
+    // Focus logic setelah render
+    setTimeout(() => {
+        const newIndex = rows.length; // index baru
+        inputRefs.current[newIndex * 6]?.focus();
+    }, 100);
   };
 
-  // Hapus baris
   const removeRow = (id: number) => {
-    if (rows.length === 1) {
-      setRows([{
-        id: 1,
-        partNumber: '',
-        namaBarang: '',
-        hargaModal: 0,
-        hargaJual: 0,
-        quantity: 1,
-        operation: 'out',
-        via: '',
-        customer: '',
-        resiTempo: ''
-      }]);
-    } else {
       setRows(prev => prev.filter(row => row.id !== id));
-    }
   };
 
-  // Update nilai baris
   const updateRow = (id: number, field: keyof QuickInputRow, value: any) => {
     setRows(prev => prev.map(row => 
       row.id === id ? { ...row, [field]: value, error: undefined } : row
     ));
   };
 
-  // Simpan satu baris
   const saveRow = async (row: QuickInputRow) => {
     if (!row.partNumber.trim()) {
       updateRow(row.id, 'error', 'Part Number wajib diisi');
@@ -158,7 +133,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     }
 
     if (row.quantity <= 0) {
-      updateRow(row.id, 'error', 'Quantity harus lebih dari 0');
+      updateRow(row.id, 'error', 'Quantity harus > 0');
       return false;
     }
 
@@ -168,17 +143,9 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       const existingItem = await getItemByPartNumber(row.partNumber);
       
       if (!existingItem) {
-        updateRow(row.id, 'error', `Item ${row.partNumber} tidak ditemukan`);
+        updateRow(row.id, 'error', `Item tidak ditemukan`);
         updateRow(row.id, 'isLoading', false);
         return false;
-      }
-
-      let resi = '';
-      let tempo = '';
-      if (row.resiTempo) {
-        const parts = row.resiTempo.split('/').map(p => p.trim());
-        resi = parts[0] || '';
-        tempo = parts.slice(1).join(' / ') || '';
       }
 
       const transactionData = {
@@ -201,64 +168,44 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       }, transactionData);
 
       if (updatedItem) {
-        updateRow(row.id, 'error', undefined);
-        if (showToast) showToast(`Item ${row.partNumber} berhasil diupdate`, 'success');
+        // Hapus baris yang berhasil disimpan agar bersih
+        setRows(prev => prev.filter(r => r.id !== row.id));
+        if (showToast) showToast(`Item ${row.partNumber} updated`, 'success');
         return true;
       } else {
-        updateRow(row.id, 'error', 'Gagal menyimpan ke database');
+        updateRow(row.id, 'error', 'Gagal simpan');
         return false;
       }
 
     } catch (error: any) {
       console.error('Error saving row:', error);
-      updateRow(row.id, 'error', error.message || 'Gagal menyimpan');
+      updateRow(row.id, 'error', 'Error');
       return false;
     } finally {
-      updateRow(row.id, 'isLoading', false);
+      // Loading state di-handle oleh penghapusan baris jika sukses
+      // Jika gagal, matikan loading
+      setRows(prev => prev.map(r => r.id === row.id ? { ...r, isLoading: false } : r));
     }
   };
 
-  // Simpan semua baris
   const saveAllRows = async () => {
     setIsSavingAll(true);
-    const results = await Promise.all(rows.map(row => saveRow(row)));
+    // Copy rows untuk iterasi karena state akan berubah saat saveRow menghapus baris sukses
+    const currentRowsToSave = [...rows]; 
+    const results = await Promise.all(currentRowsToSave.map(row => saveRow(row)));
     
     const successCount = results.filter(r => r).length;
-    const failCount = results.filter(r => !r).length;
     
-    if (showToast) {
-      if (failCount === 0) {
-        showToast(`Semua ${successCount} item berhasil disimpan`, 'success');
-      } else {
-        showToast(`${successCount} berhasil, ${failCount} gagal`, failCount > 0 ? 'error' : 'success');
-      }
+    if (showToast && successCount > 0) {
+      showToast(`${successCount} item berhasil disimpan`, 'success');
     }
     
-    if (failCount === 0) {
-      if (onRefresh) onRefresh();
-      setTimeout(() => {
-        setRows([{
-          id: 1,
-          partNumber: '',
-          namaBarang: '',
-          hargaModal: 0,
-          hargaJual: 0,
-          quantity: 1,
-          operation: 'out',
-          via: '',
-          customer: '',
-          resiTempo: ''
-        }]);
-      }, 1000);
-    }
-    
+    if (successCount > 0 && onRefresh) onRefresh();
     setIsSavingAll(false);
   };
 
-  // Validasi baris yang terisi
   const filledRows = rows.filter(row => row.partNumber.trim() && row.quantity > 0);
   
-  // Pagination
   const startIndex = (currentPage - 1) * itemsPerPage;
   const currentRows = rows.slice(startIndex, startIndex + itemsPerPage);
   const totalPages = Math.ceil(rows.length / itemsPerPage);
@@ -266,107 +213,90 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   return (
     <div className="bg-gray-800 min-h-[80vh] flex flex-col overflow-hidden text-gray-100">
       {/* Header */}
-      <div className="px-4 py-3 bg-gray-800 flex justify-between items-center">
+      <div className="px-4 py-3 bg-gray-800 flex justify-between items-center border-b border-gray-700">
         <div>
           <h2 className="text-lg font-bold text-gray-100 flex items-center gap-2">
-            <Package className="text-green-400" size={20} /> Input Cepat Barang
+            <Package className="text-green-400" size={20} /> Input Cepat
           </h2>
-          <p className="text-xs text-gray-500 mt-1">
-            Input massal barang masuk/keluar. Sistem otomatis sync dengan database.
-          </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={addNewRow}
             className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs font-bold rounded-lg flex items-center gap-2"
           >
-            <Plus size={14} /> Tambah Baris
+            <Plus size={14} /> Baris Baru
           </button>
           <button
             onClick={saveAllRows}
             disabled={isSavingAll || filledRows.length === 0}
             className="px-4 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg shadow flex items-center gap-2 disabled:opacity-50"
           >
-            {isSavingAll ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Save size={14} />
-            )}
-            Simpan Semua ({filledRows.length})
+            {isSavingAll ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            Simpan ({filledRows.length})
           </button>
         </div>
       </div>
 
-      {/* Tabel Input - TANPA BORDER SAMA SEKALI */}
+      {/* Tabel Input */}
       <div className="flex-1 overflow-auto p-2">
-        <div className="overflow-x-auto min-w-[1200px]">
+        <div className="overflow-x-auto min-w-[1000px]">
           <table className="w-full text-left">
-            <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+            <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700 sticky top-0 z-10">
               <tr>
-                <th className="px-3 py-2 w-8 text-center">#</th>
-                <th className="px-3 py-2 w-32">Part Number</th>
-                <th className="px-3 py-2 w-72">Nama Barang</th> {/* DILEBARKAN */}
-                <th className="px-3 py-2 w-40 text-center">Tipe</th> {/* DILEBARKAN */}
-                <th className="px-3 py-2 w-20 text-right">Qty</th>
-                <th className="px-3 py-2 w-32 text-right">Harga Modal</th>
-                <th className="px-3 py-2 w-32 text-right">Harga Jual</th>
-                <th className="px-3 py-2 w-24">Via</th>
-                <th className="px-3 py-2 w-48">Customer</th> {/* DILEBARKAN */}
-                <th className="px-3 py-2 w-56">Resi/Tempo</th> {/* DILEBARKAN */}
-                <th className="px-3 py-2 w-24 text-center">Status</th>
-                <th className="px-3 py-2 w-10 text-center">Aksi</th>
+                <th className="px-2 py-2 w-8 text-center">#</th>
+                {/* --- 3. PART NUMBER LEBIH LEBAR (w-48) --- */}
+                <th className="px-2 py-2 w-48">Part Number</th>
+                <th className="px-2 py-2">Nama Barang</th>
+                <th className="px-2 py-2 w-28 text-center">Tipe</th>
+                <th className="px-2 py-2 w-16 text-right">Qty</th>
+                <th className="px-2 py-2 w-28 text-right">Modal</th>
+                <th className="px-2 py-2 w-28 text-right">Jual</th>
+                <th className="px-2 py-2 w-24">Via</th>
+                <th className="px-2 py-2 w-32">Customer</th>
+                <th className="px-2 py-2 w-32">Resi/Tempo</th>
+                <th className="px-2 py-2 w-16 text-center">Status</th>
+                <th className="px-2 py-2 w-8 text-center"></th>
               </tr>
             </thead>
             <tbody className="text-xs">
-              {currentRows.length === 0 ? (
-                <tr>
-                  <td colSpan={12} className="p-8 text-center text-gray-500">
-                    <Package size={32} className="opacity-20 mx-auto mb-2" />
-                    <p>Belum ada data input</p>
-                  </td>
-                </tr>
-              ) : (
-                currentRows.map((row, index) => (
+              {/* --- 5. TIDAK ADA TULISAN/PLACEHOLDER JIKA KOSONG --- */}
+              {currentRows.map((row, index) => (
                   <tr 
                     key={row.id} 
-                    className={`hover:bg-gray-700/20 ${
+                    className={`hover:bg-gray-700/20 border-b border-gray-700/50 ${
                       row.error ? 'bg-red-900/10' : ''
                     }`}
                   >
-                    {/* Nomor */}
-                    <td className="px-3 py-2 text-gray-500 font-mono text-center">
+                    <td className="px-2 py-1.5 text-gray-500 font-mono text-center text-[10px]">
                       {startIndex + index + 1}
                     </td>
 
-                    {/* Part Number dengan Autocomplete */}
-                    <td className="px-3 py-2 relative">
+                    <td className="px-2 py-1.5 relative">
                       <div className="relative">
+                        {/* --- 2. FONT LEBIH KECIL (text-xs) --- */}
                         <input
                           ref={el => inputRefs.current[index * 6] = el}
                           type="text"
-                          className={`w-full bg-transparent px-2 py-1.5 text-sm font-mono text-gray-200 focus:outline-none focus:text-blue-400 ${
+                          className={`w-full bg-transparent px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:text-blue-400 font-bold placeholder-gray-600 ${
                             row.error ? 'text-red-400' : ''
                           }`}
                           value={row.partNumber}
                           onChange={(e) => handlePartNumberChange(row.id, e.target.value)}
-                          placeholder="PN-XXXX"
+                          placeholder="Cari..."
                         />
                         {activeSearchIndex === index && suggestions.length > 0 && (
-                          <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 rounded-lg shadow-xl z-20 max-h-60 overflow-y-auto">
+                          <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto border border-gray-600">
                             {suggestions.map((item, idx) => (
                               <div
                                 key={idx}
-                                className="px-3 py-2 hover:bg-gray-700 cursor-pointer"
+                                className="px-3 py-2 hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0"
                                 onClick={() => handleSelectItem(row.id, item)}
                               >
-                                <div className="font-bold text-orange-400 font-mono text-sm">
+                                <div className="font-bold text-orange-400 font-mono text-xs">
                                   {item.partNumber}
                                 </div>
-                                <div className="text-gray-400 text-xs truncate">
+                                <div className="text-gray-400 text-[10px] truncate">
                                   {item.name}
-                                </div>
-                                <div className="text-gray-500 text-[10px] mt-1">
-                                  Stok: {item.quantity} | Rp{item.price?.toLocaleString()}
                                 </div>
                               </div>
                             ))}
@@ -375,35 +305,31 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                       </div>
                     </td>
 
-                    {/* Nama Barang */}
-                    <td className="px-3 py-2">
-                      <div className="text-gray-300 font-medium text-sm max-w-[280px] truncate">
+                    <td className="px-2 py-1.5">
+                      <div className="text-gray-300 font-medium text-xs max-w-[200px] truncate">
                         {row.namaBarang || '-'}
                       </div>
                     </td>
 
-                    {/* Tipe Operasi */}
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-2 py-1.5 text-center">
                       <select
-                        className={`w-full bg-transparent px-2 py-1.5 text-xs focus:outline-none ${
-                          row.operation === 'in' ? 'text-green-400 font-bold' : 'text-red-400 font-bold'
+                        className={`w-full bg-transparent px-1 py-1 text-[10px] font-bold focus:outline-none cursor-pointer ${
+                          row.operation === 'in' ? 'text-green-400' : 'text-red-400'
                         }`}
                         value={row.operation}
                         onChange={(e) => updateRow(row.id, 'operation', e.target.value as 'in' | 'out')}
                       >
-                        <option value="out" className="text-red-400">KELUAR</option>
-                        <option value="in" className="text-green-400">MASUK</option>
+                        <option value="out" className="bg-gray-800 text-red-400">KELUAR</option>
+                        <option value="in" className="bg-gray-800 text-green-400">MASUK</option>
                       </select>
                     </td>
 
-                    {/* Quantity */}
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-1.5">
                       <input
                         ref={el => inputRefs.current[(index * 6) + 2] = el}
                         type="number"
                         min="0"
-                        step="1"
-                        className={`w-full bg-transparent px-2 py-1.5 text-sm font-bold text-right font-mono focus:outline-none ${
+                        className={`w-full bg-transparent px-1 py-1 text-xs font-bold text-right font-mono focus:outline-none ${
                           row.operation === 'in' ? 'text-green-400' : 'text-red-400'
                         } ${row.error ? 'text-red-400' : ''}`}
                         value={row.quantity}
@@ -411,165 +337,112 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                       />
                     </td>
 
-                    {/* Harga Modal */}
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-1">
-                        <span className="text-gray-500 text-[10px]">Rp</span>
-                        <input
-                          type="number"
-                          className="w-full bg-transparent px-2 py-1.5 text-sm font-mono text-right text-orange-300 focus:outline-none focus:text-orange-400"
-                          value={row.hargaModal}
-                          onChange={(e) => updateRow(row.id, 'hargaModal', parseInt(e.target.value) || 0)}
-                        />
-                      </div>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="number"
+                        className="w-full bg-transparent px-1 py-1 text-xs font-mono text-right text-orange-300 focus:outline-none focus:text-orange-400 placeholder-gray-600"
+                        value={row.hargaModal || ''}
+                        onChange={(e) => updateRow(row.id, 'hargaModal', parseInt(e.target.value) || 0)}
+                        placeholder="0"
+                      />
                     </td>
 
-                    {/* Harga Jual */}
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-1">
-                        <span className="text-gray-500 text-[10px]">Rp</span>
-                        <input
-                          type="number"
-                          className="w-full bg-transparent px-2 py-1.5 text-sm font-mono text-right text-blue-300 focus:outline-none focus:text-blue-400"
-                          value={row.hargaJual}
-                          onChange={(e) => updateRow(row.id, 'hargaJual', parseInt(e.target.value) || 0)}
-                        />
-                      </div>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="number"
+                        className="w-full bg-transparent px-1 py-1 text-xs font-mono text-right text-blue-300 focus:outline-none focus:text-blue-400 placeholder-gray-600"
+                        value={row.hargaJual || ''}
+                        onChange={(e) => updateRow(row.id, 'hargaJual', parseInt(e.target.value) || 0)}
+                        placeholder="0"
+                      />
                     </td>
 
-                    {/* Via */}
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-1.5">
                       <input
                         type="text"
-                        className="w-full bg-transparent px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:text-blue-400"
+                        className="w-full bg-transparent px-1 py-1 text-xs text-gray-300 focus:outline-none focus:text-blue-400 placeholder-gray-600"
                         value={row.via}
                         onChange={(e) => updateRow(row.id, 'via', e.target.value)}
-                        placeholder="Shopee/Tokopedia"
+                        placeholder="Via"
                       />
                     </td>
 
-                    {/* Customer */}
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-1.5">
                       <input
                         type="text"
-                        className="w-full bg-transparent px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:text-blue-400"
+                        className="w-full bg-transparent px-1 py-1 text-xs text-gray-300 focus:outline-none focus:text-blue-400 placeholder-gray-600"
                         value={row.customer}
                         onChange={(e) => updateRow(row.id, 'customer', e.target.value)}
-                        placeholder="Nama customer"
+                        placeholder="Customer"
                       />
                     </td>
 
-                    {/* Resi/Tempo */}
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-1.5">
                       <input
                         type="text"
-                        className="w-full bg-transparent px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:text-blue-400"
+                        className="w-full bg-transparent px-1 py-1 text-xs text-gray-300 focus:outline-none focus:text-blue-400 placeholder-gray-600"
                         value={row.resiTempo}
                         onChange={(e) => updateRow(row.id, 'resiTempo', e.target.value)}
-                        placeholder="RESI123 / 30 hari"
-                        title="Format: RESI / TEMPO"
+                        placeholder="Ket..."
                       />
                     </td>
 
-                    {/* Status */}
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-2 py-1.5 text-center">
                       <div className="flex items-center justify-center">
                         {row.isLoading ? (
-                          <Loader2 size={14} className="animate-spin text-blue-400" />
+                          <Loader2 size={12} className="animate-spin text-blue-400" />
                         ) : row.error ? (
                           <div className="relative group">
-                            <AlertCircle size={14} className="text-red-400 cursor-help" />
-                            <div className="absolute left-full top-0 ml-2 w-48 p-2 bg-red-900 text-red-100 text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+                            <AlertCircle size={12} className="text-red-400 cursor-help" />
+                            <div className="absolute right-full top-0 mr-2 w-32 p-1.5 bg-red-900 text-red-100 text-[9px] rounded shadow-lg z-50 hidden group-hover:block">
                               {row.error}
                             </div>
                           </div>
                         ) : row.partNumber ? (
-                          <div className="flex flex-col items-center">
-                            <Check size={14} className="text-green-400" />
-                            <span className="text-[9px] text-green-400 mt-0.5">Siap</span>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col items-center">
-                            <div className="w-2 h-2 rounded-full bg-gray-600"></div>
-                            <span className="text-[9px] text-gray-500 mt-0.5">Kosong</span>
-                          </div>
-                        )}
+                          <Check size={12} className="text-green-400" />
+                        ) : null}
                       </div>
                     </td>
 
-                    {/* Aksi */}
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-2 py-1.5 text-center">
                       <button
                         onClick={() => removeRow(row.id)}
-                        className="p-1 hover:text-red-300 text-red-400 transition-colors"
-                        title="Hapus baris"
+                        className="p-1 hover:text-red-300 text-red-400 transition-colors opacity-50 hover:opacity-100"
                       >
-                        <Trash2 size={14} />
+                        <Trash2 size={12} />
                       </button>
                     </td>
                   </tr>
                 ))
-              )}
+              }
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Footer dengan Pagination */}
-      <div className="px-4 py-3 bg-gray-800 flex items-center justify-between text-xs text-gray-500">
-        <div className="flex items-center gap-4">
-          <span className="text-gray-400">
-            Menampilkan <span className="font-bold text-gray-200">{startIndex + 1}</span> - <span className="font-bold text-gray-200">{Math.min(startIndex + itemsPerPage, rows.length)}</span> dari <span className="font-bold text-gray-200">{rows.length}</span> baris
-          </span>
-          
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 bg-green-400/30 rounded"></div>
-              <span className="text-gray-400 text-[10px]">Stok Masuk</span>
+      {/* Footer */}
+      {rows.length > 0 && (
+        <div className="px-4 py-2 bg-gray-800 flex items-center justify-between text-[10px] text-gray-500 border-t border-gray-700 sticky bottom-0">
+            <div>{rows.length} Baris Data</div>
+            <div className="flex items-center gap-2">
+                <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="p-1 hover:bg-gray-700 rounded disabled:opacity-30"
+                >
+                <ChevronLeft size={14} />
+                </button>
+                <span>Hal {currentPage}</span>
+                <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="p-1 hover:bg-gray-700 rounded disabled:opacity-30"
+                >
+                <ChevronRight size={14} />
+                </button>
             </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 bg-red-400/30 rounded"></div>
-              <span className="text-gray-400 text-[10px]">Stok Keluar</span>
-            </div>
-          </div>
         </div>
-        
-        {/* Pagination */}
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="p-1 hover:bg-gray-700/50 rounded text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <span className="font-bold text-gray-200">
-              Halaman {currentPage}
-            </span>
-            <button
-              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-              disabled={currentPage >= totalPages}
-              className="p-1 hover:bg-gray-700/50 rounded text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ChevronRight size={16} />
-            </button>
-          </div>
-          
-          <button
-            onClick={saveAllRows}
-            disabled={isSavingAll || filledRows.length === 0}
-            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-bold rounded-lg shadow flex items-center gap-2 disabled:opacity-50"
-          >
-            {isSavingAll ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Save size={16} />
-            )}
-            Simpan Semua Data
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 };
