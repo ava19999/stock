@@ -90,7 +90,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [selectedResis, setSelectedResis] = useState<string[]>([]);
   const [isDuplicating, setIsDuplicating] = useState<number | null>(null);
 
-  // --- STATE AUTOCOMPLETE (FIXED POPUP) ---
+  // --- STATE AUTOCOMPLETE (NEW FIX) ---
   const [inventoryCache, setInventoryCache] = useState<InventoryItem[]>([]);
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
   const [activeSearchId, setActiveSearchId] = useState<number | null>(null); 
@@ -106,8 +106,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   useEffect(() => {
       if (activeTab === 'scan') {
           loadScanLogs();
-          // Load Inventory Cache untuk Autocomplete
-          fetchInventory().then(data => setInventoryCache(data));
+          // Load Inventory Cache sekali saja saat tab scan dibuka
+          if (inventoryCache.length === 0) {
+              fetchInventory().then(data => setInventoryCache(data));
+          }
           setTimeout(() => { barcodeInputRef.current?.focus(); }, 100);
       }
   }, [activeTab]);
@@ -159,55 +161,70 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     finally { setAnalyzing(false); if (cameraInputRef.current) cameraInputRef.current.value = ''; }
   };
 
-  // --- NEW: LOGIKA AUTOCOMPLETE (REVISI) ---
-  const handleInputFocus = (e: React.ChangeEvent<HTMLInputElement>, id: number) => {
-      const rect = e.target.getBoundingClientRect();
-      setPopupPos({ top: rect.bottom, left: rect.left, width: rect.width });
-      // Trigger search ulang saat fokus
-      handlePartNumberInput(id, e.target.value, e.target);
-  };
+  // --- LOGIKA AUTOCOMPLETE & REKOMENDASI ---
+  
+  // Fungsi Helper untuk Update Suggestion & Posisi Popup
+  const updateAutocompleteState = (id: number, value: string, element?: HTMLElement) => {
+      // 1. Simpan ID yang sedang aktif
+      setActiveSearchId(id);
 
-  const handlePartNumberInput = (id: number, value: string, target?: EventTarget & HTMLInputElement) => {
-      // 1. Update nilai lokal
-      setScanLogs(prev => prev.map(log => log.id === id ? { ...log, part_number: value } : log));
-      
-      // 2. Update posisi popup (real-time tracking)
-      if (target) {
-          const rect = target.getBoundingClientRect();
-          setPopupPos({ top: rect.bottom, left: rect.left, width: rect.width });
+      // 2. Update Posisi Popup (jika ada elemen target)
+      if (element) {
+          const rect = element.getBoundingClientRect();
+          setPopupPos({
+              top: rect.bottom, // Muncul di bawah input
+              left: rect.left,
+              width: Math.max(rect.width, 250) // Min width 250px agar enak dibaca
+          });
       }
 
-      // 3. Filtering
-      if (value && value.length >= 2) { 
+      // 3. Filter Data Inventory
+      if (value && value.length >= 2) {
           const lowerVal = value.toLowerCase();
-          const matches = inventoryCache.filter(item => 
-              item.partNumber.toLowerCase().includes(lowerVal) || 
-              item.name.toLowerCase().includes(lowerVal)
-          ).slice(0, 10); // Ambil 10 hasil teratas
+          // Cari berdasarkan Part Number (prioritas)
+          const matches = inventoryCache
+              .filter(item => item.partNumber && item.partNumber.toLowerCase().includes(lowerVal))
+              .slice(0, 10); // Ambil 10 teratas
           
           setSuggestions(matches);
-          setActiveSearchId(id);
       } else {
           setSuggestions([]);
-          setActiveSearchId(null);
       }
   };
 
-  const selectSuggestion = async (id: number, item: InventoryItem) => {
+  const handlePartNumberInput = (id: number, value: string, e: React.ChangeEvent<HTMLInputElement>) => {
+      // Update nilai lokal di state log
+      setScanLogs(prev => prev.map(log => log.id === id ? { ...log, part_number: value } : log));
+      // Jalankan logika autocomplete
+      updateAutocompleteState(id, value, e.target);
+  };
+
+  const handleInputFocus = (id: number, e: React.FocusEvent<HTMLInputElement>) => {
+      // Saat input diklik/fokus, langsung cari suggestion berdasarkan nilai yang ada
+      updateAutocompleteState(id, e.target.value, e.target);
+  };
+
+  const handleSuggestionClick = async (id: number, item: InventoryItem) => {
+      // 1. Isi input dengan Part Number yang dipilih
       setScanLogs(prev => prev.map(log => log.id === id ? { ...log, part_number: item.partNumber } : log));
+      
+      // 2. Simpan ke database
       await updateScanResiLogField(id, 'part_number', item.partNumber);
-      setSuggestions([]);
+      
+      // 3. Reset UI
       setActiveSearchId(null);
+      setSuggestions([]);
   };
 
   const handleBlurInput = async (id: number, currentValue: string) => {
-      // Delay agar klik pada popup sempat tereksekusi sebelum state di-reset
+      // Beri jeda agar klik pada suggestion bisa tereksekusi sebelum suggestion hilang
       setTimeout(async () => {
           if (activeSearchId === id) {
               setActiveSearchId(null);
           }
+          // Simpan nilai manual jika user tidak memilih suggestion
           await updateScanResiLogField(id, 'part_number', currentValue);
-      }, 250);
+      }, 200);
   };
 
   const parseIndonesianNumber = (val: any): number => {
@@ -709,8 +726,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                         <input className="w-full bg-gray-700 border-b border-gray-600 focus:border-blue-500 text-xs py-0.5 px-1 font-mono outline-none text-gray-200" 
                                                             placeholder="Isi Part Number" 
                                                             value={log.part_number || ''} 
-                                                            onChange={(e) => handlePartNumberInput(log.id!, e.target.value, e.target)}
-                                                            onFocus={(e) => handleInputFocus(e, log.id!)}
+                                                            onChange={(e) => handlePartNumberInput(log.id!, e.target.value, e)}
+                                                            onFocus={(e) => handleInputFocus(log.id!, e)}
                                                             onBlur={(e) => handleBlurInput(log.id!, e.target.value)}
                                                         />
                                                     ) : (
@@ -729,7 +746,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                         </div>
 
                         {/* DESKTOP TABLE VIEW */}
-                        <div className="hidden md:block bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-visible min-w-[1000px]">
+                        <div className="hidden md:block bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden min-w-[1000px]">
                             <table className="w-full text-left border-collapse">
                                 <thead className="bg-gray-800 sticky top-0 z-10 shadow-sm text-[10px] font-bold text-gray-400 uppercase tracking-wider">
                                     <tr>
@@ -779,8 +796,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                                 className="bg-transparent border-b border-transparent focus:border-blue-500 outline-none w-full font-mono text-gray-300 placeholder-red-900/50" 
                                                                 placeholder="Part Number" 
                                                                 value={log.part_number || ''} 
-                                                                onChange={(e) => handlePartNumberInput(log.id!, e.target.value, e.target)} 
-                                                                onFocus={(e) => handleInputFocus(e, log.id!)}
+                                                                onChange={(e) => handlePartNumberInput(log.id!, e.target.value, e)} 
+                                                                onFocus={(e) => handleInputFocus(log.id!, e)}
                                                                 onBlur={(e) => handleBlurInput(log.id!, e.target.value)}
                                                             />
                                                         ) : (<span className="font-mono text-gray-400 break-all">{log.part_number}</span>)}
@@ -830,7 +847,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                 <div className="flex items-center gap-2">
                     <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16}/></button>
                     <span className="font-bold text-gray-200">Halaman {currentPage}</span>
-                    <button onClick={() => setCurrentPage(p => Math.min(scanTotalPages, p + 1))} disabled={currentPage >= scanTotalPages} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16}/></button>
+                    <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16}/></button>
                 </div>
             </div>
         </div>
@@ -841,24 +858,34 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
         </>
       )}
 
-      {/* --- GLOBAL AUTOCOMPLETE POPUP (FIXED) --- */}
+      {/* --- GLOBAL AUTOCOMPLETE POPUP (FIXED POSITION) --- */}
+      {/* Dirender di luar tabel agar tidak terpotong oleh overflow */}
       {activeSearchId !== null && suggestions.length > 0 && popupPos && (
           <div 
               className="fixed z-[9999] bg-gray-800 border border-gray-600 rounded-lg shadow-2xl max-h-48 overflow-y-auto ring-1 ring-black/50"
               style={{ 
                   top: `${popupPos.top}px`, 
                   left: `${popupPos.left}px`, 
-                  width: `${Math.max(popupPos.width, 250)}px` 
+                  width: `${popupPos.width}px` 
               }}
           >
               {suggestions.map((item, idx) => (
                   <div 
                     key={idx} 
-                    onMouseDown={(e) => { e.preventDefault(); selectSuggestion(activeSearchId, item); }} 
-                    className="px-3 py-2 text-xs hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0 group"
+                    onMouseDown={(e) => { 
+                        // Gunakan onMouseDown agar tereksekusi sebelum onBlur input
+                        e.preventDefault(); 
+                        handleSuggestionClick(activeSearchId, item); 
+                    }} 
+                    className="px-3 py-2 text-xs hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0 group transition-colors"
                   >
-                      <div className="font-bold text-white font-mono group-hover:text-blue-300 text-sm">{item.partNumber}</div>
-                      <div className="text-gray-400 truncate group-hover:text-gray-300 text-[10px]">{item.name}</div>
+                      {/* Tampilan Fokus ke Part Number */}
+                      <div className="font-bold text-orange-400 font-mono text-sm group-hover:text-orange-300">
+                          {item.partNumber}
+                      </div>
+                      <div className="text-gray-500 truncate group-hover:text-gray-300 text-[10px]">
+                          {item.name}
+                      </div>
                   </div>
               ))}
           </div>
