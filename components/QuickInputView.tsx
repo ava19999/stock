@@ -27,7 +27,6 @@ interface QuickInputViewProps {
 }
 
 export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh, showToast }) => {
-  // --- 1. TABEL AWALNYA KOSONG ---
   const [rows, setRows] = useState<QuickInputRow[]>([]);
   
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
@@ -39,16 +38,12 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const searchTimeoutRef = useRef<NodeJS.Timeout>();
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Auto-focus jika ada baris baru ditambahkan
   useEffect(() => {
     if (rows.length > 0) {
         const lastIndex = (rows.length - 1) * 6;
-        // Fokus ke input part number baris terakhir jika baru ditambah
-        // (Logika sederhana, bisa disesuaikan)
     }
   }, [rows.length]);
 
-  // --- 4. LOGIKA AUTOCOMPLETE (SAMAKAN DENGAN SCAN RESI) ---
   const handlePartNumberChange = (id: number, value: string) => {
     setRows(prev => prev.map(row => 
       row.id === id ? { ...row, partNumber: value.toUpperCase() } : row
@@ -56,7 +51,6 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
     const rowIndex = rows.findIndex(r => r.id === id);
     
-    // Logika pencarian disamakan: Min 2 karakter, Filter by PartNumber only, Limit 10
     if (value.length >= 2) {
       clearTimeout(searchTimeoutRef.current);
       searchTimeoutRef.current = setTimeout(() => {
@@ -88,10 +82,9 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     setSuggestions([]);
     setActiveSearchIndex(null);
     
-    // Focus ke kolom quantity
     const rowIndex = rows.findIndex(r => r.id === id);
-    const nextInput = inputRefs.current[(rowIndex * 6) + 2];
-    nextInput?.focus();
+    const qtyInput = inputRefs.current[(rowIndex * 6) + 2]; 
+    qtyInput?.focus();
   };
 
   const addNewRow = () => {
@@ -109,9 +102,8 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       resiTempo: ''
     }]);
     
-    // Focus logic setelah render
     setTimeout(() => {
-        const newIndex = rows.length; // index baru
+        const newIndex = rows.length; 
         inputRefs.current[newIndex * 6]?.focus();
     }, 100);
   };
@@ -126,14 +118,22 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     ));
   };
 
-  const saveRow = async (row: QuickInputRow) => {
-    if (!row.partNumber.trim()) {
-      updateRow(row.id, 'error', 'Part Number wajib diisi');
-      return false;
-    }
+  // --- FUNGSI CEK KELENGKAPAN DATA ---
+  const checkIsRowComplete = (row: QuickInputRow) => {
+      return (
+          !!row.partNumber && 
+          !!row.namaBarang && 
+          row.quantity > 0 && 
+          row.via.trim().length > 0 && 
+          row.customer.trim().length > 0 && 
+          row.resiTempo.trim().length > 0
+      );
+  };
 
-    if (row.quantity <= 0) {
-      updateRow(row.id, 'error', 'Quantity harus > 0');
+  const saveRow = async (row: QuickInputRow) => {
+    // Validasi ketat sebelum save
+    if (!checkIsRowComplete(row)) {
+      updateRow(row.id, 'error', 'Lengkapi semua kolom!');
       return false;
     }
 
@@ -168,7 +168,6 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       }, transactionData);
 
       if (updatedItem) {
-        // Hapus baris yang berhasil disimpan agar bersih
         setRows(prev => prev.filter(r => r.id !== row.id));
         if (showToast) showToast(`Item ${row.partNumber} updated`, 'success');
         return true;
@@ -182,18 +181,22 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       updateRow(row.id, 'error', 'Error');
       return false;
     } finally {
-      // Loading state di-handle oleh penghapusan baris jika sukses
-      // Jika gagal, matikan loading
       setRows(prev => prev.map(r => r.id === row.id ? { ...r, isLoading: false } : r));
     }
   };
 
   const saveAllRows = async () => {
     setIsSavingAll(true);
-    // Copy rows untuk iterasi karena state akan berubah saat saveRow menghapus baris sukses
-    const currentRowsToSave = [...rows]; 
-    const results = await Promise.all(currentRowsToSave.map(row => saveRow(row)));
+    // Hanya simpan yang lengkap datanya
+    const rowsToSave = rows.filter(row => checkIsRowComplete(row));
     
+    if (rowsToSave.length === 0) {
+        setIsSavingAll(false);
+        if (showToast) showToast('Isi lengkap data sebelum menyimpan!', 'error');
+        return;
+    }
+
+    const results = await Promise.all(rowsToSave.map(row => saveRow(row)));
     const successCount = results.filter(r => r).length;
     
     if (showToast && successCount > 0) {
@@ -204,7 +207,8 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     setIsSavingAll(false);
   };
 
-  const filledRows = rows.filter(row => row.partNumber.trim() && row.quantity > 0);
+  // Validasi tombol "Simpan Semua" menggunakan checkIsRowComplete
+  const validRowsCount = rows.filter(r => checkIsRowComplete(r)).length;
   
   const startIndex = (currentPage - 1) * itemsPerPage;
   const currentRows = rows.slice(startIndex, startIndex + itemsPerPage);
@@ -228,11 +232,11 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
           </button>
           <button
             onClick={saveAllRows}
-            disabled={isSavingAll || filledRows.length === 0}
+            disabled={isSavingAll || validRowsCount === 0}
             className="px-4 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg shadow flex items-center gap-2 disabled:opacity-50"
           >
             {isSavingAll ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Simpan ({filledRows.length})
+            Simpan ({validRowsCount})
           </button>
         </div>
       </div>
@@ -244,7 +248,6 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
             <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700 sticky top-0 z-10">
               <tr>
                 <th className="px-2 py-2 w-8 text-center">#</th>
-                {/* --- 3. PART NUMBER LEBIH LEBAR (w-48) --- */}
                 <th className="px-2 py-2 w-48">Part Number</th>
                 <th className="px-2 py-2">Nama Barang</th>
                 <th className="px-2 py-2 w-28 text-center">Tipe</th>
@@ -259,8 +262,11 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
               </tr>
             </thead>
             <tbody className="text-xs">
-              {/* --- 5. TIDAK ADA TULISAN/PLACEHOLDER JIKA KOSONG --- */}
-              {currentRows.map((row, index) => (
+              {currentRows.map((row, index) => {
+                  // LOGIKA CEKLIS: Harus SEMUA terisi
+                  const isComplete = checkIsRowComplete(row);
+
+                  return (
                   <tr 
                     key={row.id} 
                     className={`hover:bg-gray-700/20 border-b border-gray-700/50 ${
@@ -273,7 +279,6 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
                     <td className="px-2 py-1.5 relative">
                       <div className="relative">
-                        {/* --- 2. FONT LEBIH KECIL (text-xs) --- */}
                         <input
                           ref={el => inputRefs.current[index * 6] = el}
                           type="text"
@@ -398,9 +403,12 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                               {row.error}
                             </div>
                           </div>
-                        ) : row.partNumber ? (
+                        ) : isComplete ? (
                           <Check size={12} className="text-green-400" />
-                        ) : null}
+                        ) : (
+                          // Tampilkan titik abu-abu jika belum semua kolom terisi
+                          <div className="w-1.5 h-1.5 rounded-full bg-gray-700" title="Belum Lengkap"></div>
+                        )}
                       </div>
                     </td>
 
@@ -413,8 +421,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                       </button>
                     </td>
                   </tr>
-                ))
-              }
+                )})}
             </tbody>
           </table>
         </div>
