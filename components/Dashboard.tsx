@@ -160,9 +160,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
           if (text.toLowerCase().includes('retur') || text.toLowerCase().includes('cancel')) {
               isRetur = true;
               keterangan = 'RETUR';
-              if (text.includes('(RETUR)')) {
-                  customer = text.replace('(RETUR)', '').trim();
-              }
+              
+              // LOGIKA BARU: Jika retur, nama pelanggan diambil dari text
+              // Hapus kata "(RETUR)" (case insensitive) dari nama pelanggan
+              customer = text.replace(/\(RETUR\)/i, '').trim();
+
           } else {
               // UBAH "Manual Restock" JADI "Restock"
               keterangan = text.replace('Manual Restock', 'Restock'); 
