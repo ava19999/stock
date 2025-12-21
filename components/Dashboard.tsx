@@ -13,7 +13,6 @@ interface DashboardProps {
   items: InventoryItem[]; 
   orders: Order[];
   history: StockHistory[];
-  refreshTrigger: number; // <--- PROP PENTING UNTUK REFRESH
   onViewOrders: () => void;
   onAddNew: () => void;
   onEdit: (item: InventoryItem) => void;
@@ -21,14 +20,16 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
-  items, orders, history, refreshTrigger, onViewOrders, onAddNew, onEdit, onDelete 
+  items, orders, history, onViewOrders, onAddNew, onEdit, onDelete 
 }) => {
   const [localItems, setLocalItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState(''); // State untuk debounce
   
   const [filterType, setFilterType] = useState<'all' | 'low' | 'empty'>('all');
   
@@ -55,14 +56,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
+  // --- OPTIMASI: DEBOUNCE EFFECT ---
+  // Hanya update debouncedSearch jika user berhenti mengetik selama 500ms
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
   const loadData = useCallback(async () => {
     setLoading(true);
-    const { data, count } = await fetchInventoryPaginated(page, 50, searchTerm, filterType);
+    // Gunakan debouncedSearch di sini alih-alih searchTerm langsung
+    const { data, count } = await fetchInventoryPaginated(page, 50, debouncedSearch, filterType);
     setLocalItems(data);
     setTotalCount(count);
     setTotalPages(Math.ceil(count / 50));
     setLoading(false);
-  }, [page, searchTerm, filterType]);
+  }, [page, debouncedSearch, filterType]); // Dependency berubah ke debouncedSearch
 
   const loadStats = useCallback(async () => {
     const invStats = await fetchInventoryStats();
@@ -78,9 +90,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setStats({ ...invStats, todayIn, todayOut });
   }, [history]);
 
-  // --- REFRESH TRIGGER DITAMBAHKAN DI SINI ---
-  useEffect(() => { loadData(); }, [loadData, refreshTrigger]); 
-  useEffect(() => { loadStats(); }, [loadStats, refreshTrigger]);
+  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { loadStats(); }, [loadStats]);
 
   const handleEditClick = (item: InventoryItem) => {
       setEditingItem(item);
