@@ -224,7 +224,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   return data ? data.id : null;
 };
 
-// --- UPDATE INVENTORY (UPDATED) ---
+// --- UPDATE INVENTORY (UPDATED LOGIC FOR SPLIT RESI/TEMPO) ---
 export const updateInventory = async (
     item: InventoryItem, 
     transaction?: { 
@@ -281,13 +281,13 @@ export const updateInventory = async (
       const txTotal = txPrice * txQty;
 
       if (transaction.type === 'in') {
+          // --- LOGIKA BARANG MASUK ---
           let ketText = 'Manual Restock';
           if (transaction.isReturn) {
               const custName = transaction.customer || 'Customer';
               ketText = `${custName} (RETUR)`; 
           }
 
-          // KITA SIMPAN CUSTOMER DI KOLOM BARU JUGA
           await addBarangMasuk({
               created_at: wibNow,
               tempo: transaction.resiTempo || '-', 
@@ -299,16 +299,29 @@ export const updateInventory = async (
               customer: transaction.customer // KIRIM DATA CUSTOMER KE DB
           });
       } else {
+          // --- LOGIKA BARANG KELUAR ---
+          let finalResi = transaction.resiTempo || '-';
+          let finalTempo = transaction.store || ''; 
+
+          // PERUBAHAN DI SINI: Deteksi tanda "/" pada input Resi
+          if (finalResi.includes('/')) {
+              const parts = finalResi.split('/');
+              finalResi = parts[0].trim(); // Bagian depan masuk ke RESI
+              if (parts.length > 1) {
+                  finalTempo = parts[1].trim(); // Bagian belakang masuk ke TEMPO
+              }
+          }
+
           await addBarangKeluar({
               created_at: wibNow,
               kodeToko: 'MANUAL', 
-              tempo: transaction.store || '', 
+              tempo: finalTempo, 
               ecommerce: sourceName,
               customer: transaction.customer || '', 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
               rak: item.shelf, stockAhir: finalQty, qtyKeluar: txQty,
               hargaSatuan: txPrice, hargaTotal: txTotal,
-              resi: transaction.resiTempo || '-'
+              resi: finalResi 
           });
       }
   }
@@ -331,7 +344,7 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
   return true;
 };
 
-// --- HISTORY & TRANSAKSI (UPDATED) ---
+// --- HISTORY & TRANSAKSI ---
 export const fetchHistory = async (): Promise<StockHistory[]> => {
     // Select semua kolom (termasuk customer)
     const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
@@ -347,7 +360,7 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             currentStock: Number(m.stock_ahir), price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
             timestamp: parseTimestamp(m.created_at || m.date), 
             reason: reasonText, resi: '-', tempo: m.tempo || '-',
-            customer: m.customer || '-' // MAP KOLOM CUSTOMER
+            customer: m.customer || '-' 
         });
     });
     
@@ -359,7 +372,7 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             timestamp: parseTimestamp(k.created_at || k.date), 
             reason: `${k.customer || ''} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, 
             resi: k.resi || '-', tempo: formatDisplayTempo(k.tempo),
-            customer: k.customer || '-' // MAP KOLOM CUSTOMER
+            customer: k.customer || '-' 
         });
     });
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -401,7 +414,7 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
             price: Number(item.harga_satuan), totalPrice: Number(item.harga_total),
             timestamp: parseTimestamp(item.created_at || item.date), 
             reason: reasonText, resi: item.resi || '-', tempo: displayTempo,
-            customer: item.customer || '-' // MAP KOLOM CUSTOMER
+            customer: item.customer || '-' 
         };
     });
     return { data: mappedData, count: count || 0 };
@@ -421,7 +434,7 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
             currentStock: Number(m.stock_ahir), price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
             timestamp: parseTimestamp(m.created_at || m.date), 
             reason: reasonText, resi: '-', tempo: m.tempo || '-',
-            customer: m.customer || '-' // MAP KOLOM CUSTOMER
+            customer: m.customer || '-' 
         });
     });
     
@@ -433,7 +446,7 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
             timestamp: parseTimestamp(k.created_at || k.date), 
             reason: `${k.customer || ''} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, 
             resi: k.resi || '-', tempo: formatDisplayTempo(k.tempo),
-            customer: k.customer || '-' // MAP KOLOM CUSTOMER
+            customer: k.customer || '-' 
         });
     });
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -449,7 +462,7 @@ export const addBarangMasuk = async (data: any) => {
         part_number: data.partNumber || data.part_number, name: data.name, brand: data.brand, application: data.application, rak: data.rak, 
         stock_ahir: data.stockAhir || data.stock_ahir, qty_masuk: data.qtyMasuk || data.qty_masuk, 
         harga_satuan: data.hargaSatuan || data.harga_satuan, harga_total: data.hargaTotal || data.harga_total,
-        customer: data.customer || '-' // SIMPAN KOLOM CUSTOMER
+        customer: data.customer || '-' 
     }]); 
     if(error) console.error("addBarangMasuk Error", error);
     return !error; 
@@ -466,9 +479,6 @@ export const addBarangKeluar = async (data: any) => {
     if(error) console.error("addBarangKeluar Error", error);
     return !error; 
 };
-
-// ... sisa kode lainnya tetap sama ...
-// (addHistoryLog, updateOrderData, fetchOrders, saveOrder, updateOrderStatusService, dll tidak perlu diubah)
 
 export const addHistoryLog = async (h: StockHistory) => { 
     const now = getWIBISOString(); 
@@ -490,7 +500,6 @@ export const addHistoryLog = async (h: StockHistory) => {
     }
 };
 
-// ... (sisa file sama)
 export const updateOrderData = async (orderId: string, newItems: any[], newTotal: number, newStatus: string): Promise<boolean> => {
     const { data: oldData } = await supabase.from('orders').select('*').eq('resi', orderId).limit(1).single();
     if (!oldData) return false;
@@ -793,7 +802,6 @@ export const updateScanResiLogField = async (id: number, field: string, value: a
     return true;
 };
 
-// --- FUNGSI BARU: DUPLICATE & SPLIT PRICE ---
 export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
     try {
         const { data: sourceItem, error: fetchError } = await supabase
