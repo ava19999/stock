@@ -6,7 +6,7 @@ import {
   ShoppingBag, Tag, Search, X, Store, Save, Loader, FileText, 
   AlertCircle, ChevronLeft, ChevronRight, ScanBarcode, CheckSquare, 
   FileSpreadsheet, Upload, Send, Square, ChevronDown, Check, Loader2, Edit2, XCircle, Camera,
-  Plus, Trash2, List
+  Plus, Trash2, List, RefreshCw
 } from 'lucide-react';
 import { formatRupiah, compressImage } from '../utils';
 import { analyzeResiImage } from '../services/geminiService';
@@ -46,12 +46,13 @@ const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 
 
 interface OrderManagementProps {
   orders: Order[];
+  isLoading?: boolean; // <--- TAMBAHAN PROP LOADING
   onUpdateStatus: (orderId: string, status: OrderStatus) => void;
   onProcessReturn: (orderId: string, returnedItems: { itemId: string, qty: number }[]) => void;
   onRefresh?: () => void;
 }
 
-export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], onUpdateStatus, onProcessReturn, onRefresh }) => {
+export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], isLoading = false, onUpdateStatus, onProcessReturn, onRefresh }) => {
   // --- STATE UTAMA (TABS) ---
   const [activeTab, setActiveTab] = useState<'pending' | 'scan' | 'processing' | 'history'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
@@ -70,7 +71,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
   const [selectedOrderForReturn, setSelectedOrderForReturn] = useState<Order | null>(null);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
-  const [isLoading, setIsLoading] = useState(false);
+  const [isProcessingReturn, setIsProcessingReturn] = useState(false);
 
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
   const [editingNoteData, setEditingNoteData] = useState<{ id: string, resi: string, currentText: string } | null>(null);
@@ -90,11 +91,11 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [selectedResis, setSelectedResis] = useState<string[]>([]);
   const [isDuplicating, setIsDuplicating] = useState<number | null>(null);
 
-  // --- STATE AUTOCOMPLETE (NEW FIX) ---
+  // --- STATE AUTOCOMPLETE (FIXED & AUTO-FLIP) ---
   const [inventoryCache, setInventoryCache] = useState<InventoryItem[]>([]);
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
   const [activeSearchId, setActiveSearchId] = useState<number | null>(null); 
-  const [popupPos, setPopupPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [popupPos, setPopupPos] = useState<{ top?: number; bottom?: number; left: number; width: number } | null>(null);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -106,7 +107,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   useEffect(() => {
       if (activeTab === 'scan') {
           loadScanLogs();
-          // Load Inventory Cache sekali saja saat tab scan dibuka
           if (inventoryCache.length === 0) {
               fetchInventory().then(data => setInventoryCache(data));
           }
@@ -161,31 +161,36 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     finally { setAnalyzing(false); if (cameraInputRef.current) cameraInputRef.current.value = ''; }
   };
 
-  // --- LOGIKA AUTOCOMPLETE & REKOMENDASI ---
+  // --- LOGIKA AUTOCOMPLETE (AUTO-FLIP) ---
   
-  // Fungsi Helper untuk Update Suggestion & Posisi Popup
   const updateAutocompleteState = (id: number, value: string, element?: HTMLElement) => {
-      // 1. Simpan ID yang sedang aktif
       setActiveSearchId(id);
 
-      // 2. Update Posisi Popup (jika ada elemen target)
       if (element) {
           const rect = element.getBoundingClientRect();
-          setPopupPos({
-              top: rect.bottom, // Muncul di bawah input
+          const viewportHeight = window.innerHeight;
+          const spaceBelow = viewportHeight - rect.bottom;
+          const requiredSpace = 220; 
+
+          let newPos: { top?: number; bottom?: number; left: number; width: number } = {
               left: rect.left,
-              width: Math.max(rect.width, 250) // Min width 250px agar enak dibaca
-          });
+              width: Math.max(rect.width, 250) 
+          };
+
+          if (spaceBelow < requiredSpace && rect.top > requiredSpace) {
+              newPos.bottom = viewportHeight - rect.top; 
+          } else {
+              newPos.top = rect.bottom; 
+          }
+          
+          setPopupPos(newPos);
       }
 
-      // 3. Filter Data Inventory
       if (value && value.length >= 2) {
           const lowerVal = value.toLowerCase();
-          // Cari berdasarkan Part Number (prioritas)
           const matches = inventoryCache
               .filter(item => item.partNumber && item.partNumber.toLowerCase().includes(lowerVal))
-              .slice(0, 10); // Ambil 10 teratas
-          
+              .slice(0, 10);
           setSuggestions(matches);
       } else {
           setSuggestions([]);
@@ -193,36 +198,26 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   };
 
   const handlePartNumberInput = (id: number, value: string, e: React.ChangeEvent<HTMLInputElement>) => {
-      // Update nilai lokal di state log
       setScanLogs(prev => prev.map(log => log.id === id ? { ...log, part_number: value } : log));
-      // Jalankan logika autocomplete
       updateAutocompleteState(id, value, e.target);
   };
 
   const handleInputFocus = (id: number, e: React.FocusEvent<HTMLInputElement>) => {
-      // Saat input diklik/fokus, langsung cari suggestion berdasarkan nilai yang ada
       updateAutocompleteState(id, e.target.value, e.target);
   };
 
   const handleSuggestionClick = async (id: number, item: InventoryItem) => {
-      // 1. Isi input dengan Part Number yang dipilih
       setScanLogs(prev => prev.map(log => log.id === id ? { ...log, part_number: item.partNumber } : log));
-      
-      // 2. Simpan ke database
       await updateScanResiLogField(id, 'part_number', item.partNumber);
-      
-      // 3. Reset UI
       setActiveSearchId(null);
       setSuggestions([]);
   };
 
   const handleBlurInput = async (id: number, currentValue: string) => {
-      // Beri jeda agar klik pada suggestion bisa tereksekusi sebelum suggestion hilang
       setTimeout(async () => {
           if (activeSearchId === id) {
               setActiveSearchId(null);
           }
-          // Simpan nilai manual jika user tidak memilih suggestion
           await updateScanResiLogField(id, 'part_number', currentValue);
       }, 200);
   };
@@ -355,13 +350,11 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
       const logsToProcess = scanLogs.filter(log => selectedResis.includes(log.resi));
 
-      // --- VALIDASI PART NUMBER ---
       const invalidItem = logsToProcess.find(log => !log.part_number || log.part_number.trim() === '' || log.part_number === '-');
       if (invalidItem) {
           showToast(`Gagal: Resi ${invalidItem.resi} belum ada Part Number!`, 'error');
-          return; // STOP DI SINI
+          return;
       }
-      // ----------------------------
 
       setIsProcessingShipment(true);
       
@@ -466,7 +459,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
         }).filter(Boolean) as any[];
 
       if (itemsToReturnData.length === 0) return;
-      setIsLoading(true);
+      setIsProcessingReturn(true); // Ubah loading lokal
 
       try {
         const { resiText, shopName, ecommerce, cleanName } = getOrderDetails(selectedOrderForReturn);
@@ -527,7 +520,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
         setIsReturnModalOpen(false); setSelectedOrderForReturn(null); setActiveTab('history');
         if (onRefresh) onRefresh();
       } catch (error) { console.error("Error processing return:", error); } 
-      finally { setIsLoading(false); }
+      finally { setIsProcessingReturn(false); }
   };
 
   // --- RENDER ---
@@ -576,10 +569,22 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
       {/* MODALS */}
       {isNoteModalOpen && editingNoteData && ( <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in"><div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col border border-gray-700"><div className="bg-purple-900/30 px-4 py-3 border-b border-purple-800 flex justify-between items-center"><h3 className="text-base font-bold text-purple-300 flex items-center gap-2"><FileText size={18}/> Edit Keterangan</h3><button onClick={() => setIsNoteModalOpen(false)}><X size={18} className="text-gray-400 hover:text-gray-200"/></button></div><div className="p-4"><textarea className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl focus:ring-2 focus:ring-purple-900/50 outline-none text-sm min-h-[100px] text-gray-100 placeholder-gray-500" placeholder="Masukkan alasan atau catatan..." value={noteText} onChange={(e) => setNoteText(e.target.value)} /></div><div className="p-3 border-t border-gray-700 bg-gray-900/50 flex justify-end gap-2"><button onClick={() => setIsNoteModalOpen(false)} className="px-3 py-1.5 text-xs font-bold text-gray-400 hover:bg-gray-700 rounded-lg">Batal</button><button onClick={handleSaveNote} disabled={isSavingNote} className="px-4 py-1.5 text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 rounded-lg shadow flex items-center gap-2">{isSavingNote ? <Loader size={14} className="animate-spin"/> : <Save size={14}/>} Simpan</button></div></div></div> )}
-      {isReturnModalOpen && selectedOrderForReturn && ( <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in"><div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90%] border border-gray-700"><div className="bg-orange-900/30 px-4 py-3 border-b border-orange-800 flex justify-between items-center"><h3 className="text-base font-bold text-orange-300 flex items-center gap-2"><RotateCcw size={18}/> Retur Barang</h3><button onClick={() => setIsReturnModalOpen(false)}><X size={18} className="text-orange-400 hover:text-orange-200"/></button></div><div className="p-4 overflow-y-auto text-sm"><div className="space-y-2">{selectedOrderForReturn.items.map((item) => (<div key={item.id} className="flex items-center justify-between p-2 border border-gray-700 rounded-lg hover:border-orange-700/50"><div className="flex-1"><div className="font-bold text-gray-200 text-xs">{item.name}</div><div className="text-[10px] text-gray-500 font-mono">{item.partNumber}</div></div><div className="flex items-center gap-2 bg-gray-900 p-1 rounded-lg border border-gray-700"><button onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.max(0, (prev[item.id] || 0) - 1)}))} className="w-6 h-6 flex items-center justify-center bg-gray-700 rounded shadow-sm hover:bg-red-900/50 text-gray-300 font-bold">-</button><div className="w-6 text-center font-bold text-sm text-gray-200">{returnQuantities[item.id] || 0}</div><button onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.min(item.cartQuantity || 0, (prev[item.id] || 0) + 1)}))} className="w-6 h-6 flex items-center justify-center bg-gray-700 rounded shadow-sm hover:bg-green-900/50 text-gray-300 font-bold">+</button></div></div>))}</div></div><div className="p-3 border-t border-gray-700 bg-gray-900/50 flex justify-end gap-2"><button onClick={() => setIsReturnModalOpen(false)} className="px-3 py-1.5 text-xs font-bold text-gray-400 hover:bg-gray-700 rounded-lg">Batal</button><button onClick={handleProcessReturn} disabled={isLoading} className="px-4 py-1.5 text-xs font-bold bg-orange-600 text-white hover:bg-orange-700 rounded-lg shadow flex items-center gap-2">{isLoading ? <Loader size={14} className="animate-spin"/> : <Save size={14}/>} Proses</button></div></div></div> )}
+      {isReturnModalOpen && selectedOrderForReturn && ( <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in"><div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90%] border border-gray-700"><div className="bg-orange-900/30 px-4 py-3 border-b border-orange-800 flex justify-between items-center"><h3 className="text-base font-bold text-orange-300 flex items-center gap-2"><RotateCcw size={18}/> Retur Barang</h3><button onClick={() => setIsReturnModalOpen(false)}><X size={18} className="text-orange-400 hover:text-orange-200"/></button></div><div className="p-4 overflow-y-auto text-sm"><div className="space-y-2">{selectedOrderForReturn.items.map((item) => (<div key={item.id} className="flex items-center justify-between p-2 border border-gray-700 rounded-lg hover:border-orange-700/50"><div className="flex-1"><div className="font-bold text-gray-200 text-xs">{item.name}</div><div className="text-[10px] text-gray-500 font-mono">{item.partNumber}</div></div><div className="flex items-center gap-2 bg-gray-900 p-1 rounded-lg border border-gray-700"><button onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.max(0, (prev[item.id] || 0) - 1)}))} className="w-6 h-6 flex items-center justify-center bg-gray-700 rounded shadow-sm hover:bg-red-900/50 text-gray-300 font-bold">-</button><div className="w-6 text-center font-bold text-sm text-gray-200">{returnQuantities[item.id] || 0}</div><button onClick={() => setReturnQuantities(prev => ({...prev, [item.id]: Math.min(item.cartQuantity || 0, (prev[item.id] || 0) + 1)}))} className="w-6 h-6 flex items-center justify-center bg-gray-700 rounded shadow-sm hover:bg-green-900/50 text-gray-300 font-bold">+</button></div></div>))}</div></div><div className="p-3 border-t border-gray-700 bg-gray-900/50 flex justify-end gap-2"><button onClick={() => setIsReturnModalOpen(false)} className="px-3 py-1.5 text-xs font-bold text-gray-400 hover:bg-gray-700 rounded-lg">Batal</button><button onClick={handleProcessReturn} disabled={isProcessingReturn} className="px-4 py-1.5 text-xs font-bold bg-orange-600 text-white hover:bg-orange-700 rounded-lg shadow flex items-center gap-2">{isProcessingReturn ? <Loader size={14} className="animate-spin"/> : <Save size={14}/>} Proses</button></div></div></div> )}
 
       {/* HEADER */}
-      <div className="px-4 py-3 border-b border-gray-700 bg-gray-800 flex justify-between items-center"><div><h2 className="text-lg font-bold text-gray-100 flex items-center gap-2"><ClipboardList className="text-purple-400" size={20} /> Manajemen Pesanan</h2></div></div>
+      <div className="px-4 py-3 border-b border-gray-700 bg-gray-800 flex justify-between items-center">
+          <div><h2 className="text-lg font-bold text-gray-100 flex items-center gap-2"><ClipboardList className="text-purple-400" size={20} /> Manajemen Pesanan</h2></div>
+          
+          {/* INDIKATOR LOADING/REFRESH */}
+          <div className="flex items-center gap-3">
+              {isLoading && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-900/20 text-blue-400 rounded-full border border-blue-900/50 animate-pulse">
+                      <Loader2 size={14} className="animate-spin" />
+                      <span className="text-xs font-medium">Sinkronisasi Data...</span>
+                  </div>
+              )}
+          </div>
+      </div>
 
       {/* TABS */}
       <div className="flex border-b border-gray-700 bg-gray-900/50">
@@ -597,9 +602,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
           </div>
       </div>
 
-      {/* CONTENT */}
+      {/* CONTENT (BAGIAN INI TIDAK DIUBAH DARI ASLINYA) */}
       {activeTab === 'scan' ? (
         <div className="flex-1 flex flex-col overflow-hidden bg-gray-900">
+            {/* ... KODE SCAN RESI ASLI ANDA ... */}
             <div className="bg-gray-800 p-3 shadow-sm border-b border-gray-700 z-20">
                 <div className="flex flex-col gap-3">
                     <div className="grid grid-cols-2 gap-2">
@@ -658,7 +664,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                     </div>
                 ) : (
                     <>
-                        {/* MOBILE VIEW */}
                         <div className="md:hidden space-y-3 pb-20">
                             {scanCurrentItems.map((log) => {
                                 const isReady = log.status === 'Siap Kirim';
@@ -745,8 +750,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                             })}
                         </div>
 
-                        {/* DESKTOP TABLE VIEW */}
-                        <div className="hidden md:block bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden min-w-[1000px]">
+                        <div className="hidden md:block bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-visible min-w-[1000px]">
                             <table className="w-full text-left border-collapse">
                                 <thead className="bg-gray-800 sticky top-0 z-10 shadow-sm text-[10px] font-bold text-gray-400 uppercase tracking-wider">
                                     <tr>
@@ -844,12 +848,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
 
             <div className="px-4 py-3 bg-gray-800 border-t border-gray-700 flex items-center justify-between text-xs text-gray-500 sticky bottom-0 z-30">
                 <div>Menampilkan {scanStartIndex + 1}-{Math.min(scanStartIndex + itemsPerPage, scanTotalItems)} dari {scanTotalItems} data</div>
-                <div className="flex items-center gap-2">
-                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16}/></button>
-                    <span className="font-bold text-gray-200">Halaman {currentPage}</span>
-                    <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16}/></button>
-                </div>
-            </div>
+                <div className="flex items-center gap-2"><button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16}/></button><span className="font-bold text-gray-200">Halaman {currentPage}</span><button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16}/></button></div></div>
         </div>
       ) : (
         <>
@@ -858,13 +857,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
         </>
       )}
 
-      {/* --- GLOBAL AUTOCOMPLETE POPUP (FIXED POSITION) --- */}
-      {/* Dirender di luar tabel agar tidak terpotong oleh overflow */}
+      {/* --- GLOBAL AUTOCOMPLETE POPUP (FIXED & FLIPPABLE) --- */}
+      {/* Dirender paling bawah (di luar tabel) agar tidak terpotong (clipping) */}
       {activeSearchId !== null && suggestions.length > 0 && popupPos && (
           <div 
               className="fixed z-[9999] bg-gray-800 border border-gray-600 rounded-lg shadow-2xl max-h-48 overflow-y-auto ring-1 ring-black/50"
               style={{ 
-                  top: `${popupPos.top}px`, 
+                  top: popupPos.top !== undefined ? `${popupPos.top}px` : 'auto', 
+                  bottom: popupPos.bottom !== undefined ? `${popupPos.bottom}px` : 'auto',
                   left: `${popupPos.left}px`, 
                   width: `${popupPos.width}px` 
               }}
