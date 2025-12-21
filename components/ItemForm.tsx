@@ -19,7 +19,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     partNumber: '', name: '', brand: '', application: '',
     quantity: 0, shelf: '', price: 0, costPrice: 0,
     ecommerce: '', imageUrl: '', initialStock: 0,
-    qtyIn: 0, qtyOut: 0, kingFanoPrice: 0
+    qtyIn: 0, qtyOut: 0
   });
 
   // Stock Adjustment State
@@ -45,7 +45,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         application: initialData.application, quantity: initialData.quantity, shelf: initialData.shelf,
         price: initialData.price, costPrice: initialData.costPrice, ecommerce: initialData.ecommerce || '',
         imageUrl: initialData.imageUrl, initialStock: initialData.initialStock,
-        qtyIn: initialData.qtyIn, qtyOut: initialData.qtyOut, kingFanoPrice: initialData.kingFanoPrice
+        qtyIn: initialData.qtyIn, qtyOut: initialData.qtyOut
       });
       setImagePreview(initialData.imageUrl);
     }
@@ -55,7 +55,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: (name === 'price' || name === 'costPrice' || name === 'kingFanoPrice' || name === 'quantity') 
+      [name]: (name === 'price' || name === 'costPrice' || name === 'quantity') 
         ? parseFloat(value) || 0 
         : value
     }));
@@ -167,7 +167,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
              </button>
              <div>
                 <h2 className="text-lg font-extrabold text-gray-100 flex items-center gap-2">
-                {initialData ? 'Edit Barang' : 'Tambah Baru'}
+                {initialData ? 'Edit Barang' : 'Tambah Barang Baru'}
                 </h2>
                 <p className="text-xs text-gray-200 hidden md:block">{initialData ? formData.name : 'Isi detail barang baru'}</p>
              </div>
@@ -334,15 +334,9 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                         </div>
                       )}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Harga Jual</label>
-                        <input type="number" name="price" value={formData.price} onChange={handleChange} className="w-full mt-1 px-3 py-2 bg-blue-900/20 text-blue-300 font-mono font-bold text-sm rounded-lg border border-blue-900/50 focus:ring-2 focus:ring-blue-800 outline-none" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-purple-400 uppercase ml-1">Hrg King Fano</label>
-                        <input type="number" name="kingFanoPrice" value={formData.kingFanoPrice} onChange={handleChange} className="w-full mt-1 px-3 py-2 bg-purple-900/20 text-purple-300 font-mono font-bold text-sm rounded-lg border border-purple-900/50 focus:ring-2 focus:ring-purple-800 outline-none" />
-                      </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Harga Jual</label>
+                    <input type="number" name="price" value={formData.price} onChange={handleChange} className="w-full mt-1 px-3 py-2 bg-blue-900/20 text-blue-300 font-mono font-bold text-sm rounded-lg border border-blue-900/50 focus:ring-2 focus:ring-blue-800 outline-none" />
                   </div>
                </div>
             </div>

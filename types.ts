@@ -9,7 +9,6 @@ export interface InventoryItem {
   quantity: number; 
   shelf: string;
   price: number;           
-  kingFanoPrice: number;   
   costPrice: number;       
   ecommerce: string;
   imageUrl: string;
