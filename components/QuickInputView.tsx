@@ -33,10 +33,43 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
   const [isSavingAll, setIsSavingAll] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  
+  // --- UBAH DISINI: MENJADI 100 ITEM PER HALAMAN ---
+  const itemsPerPage = 100;
   
   const searchTimeoutRef = useRef<NodeJS.Timeout>();
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // --- HELPER UNTUK MEMBUAT BARIS KOSONG ---
+  const createEmptyRow = (id: number): QuickInputRow => ({
+    id,
+    partNumber: '',
+    namaBarang: '',
+    hargaModal: 0,
+    hargaJual: 0,
+    quantity: 1,
+    operation: 'out',
+    via: '',
+    customer: '',
+    resiTempo: '',
+  });
+
+  // --- EFFECT: INISIALISASI 10 BARIS KOSONG (DEFAULT) ---
+  useEffect(() => {
+    // Hanya jalankan jika rows masih kosong (saat pertama kali load)
+    if (rows.length === 0) {
+      // Tetap 10 baris awal agar ringan, tapi bisa tambah sampai 100 dalam 1 halaman
+      const initialRows = Array.from({ length: 10 }).map((_, index) => 
+        createEmptyRow(index + 1)
+      );
+      setRows(initialRows);
+      
+      // Focus ke input pertama baris pertama setelah render
+      setTimeout(() => {
+        inputRefs.current[0]?.focus();
+      }, 100);
+    }
+  }, []); // Dependency kosong array = run once on mount
 
   useEffect(() => {
     if (rows.length > 0) {
@@ -88,19 +121,17 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   };
 
   const addNewRow = () => {
-    const newId = Math.max(0, ...rows.map(r => r.id)) + 1;
-    setRows(prev => [...prev, {
-      id: newId,
-      partNumber: '',
-      namaBarang: '',
-      hargaModal: 0,
-      hargaJual: 0,
-      quantity: 1,
-      operation: 'out',
-      via: '',
-      customer: '',
-      resiTempo: ''
-    }]);
+    // Cari ID terbesar untuk menghindari duplikat ID
+    const maxId = rows.length > 0 ? Math.max(...rows.map(r => r.id)) : 0;
+    const newId = maxId + 1;
+    
+    setRows(prev => [...prev, createEmptyRow(newId)]);
+    
+    // Pindah ke halaman terakhir jika baris baru ada di halaman baru
+    const newTotalPages = Math.ceil((rows.length + 1) / itemsPerPage);
+    if (newTotalPages > currentPage) {
+        setCurrentPage(newTotalPages);
+    }
     
     setTimeout(() => {
         const newIndex = rows.length; 
@@ -168,6 +199,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       }, transactionData);
 
       if (updatedItem) {
+        // Hapus baris yang berhasil disimpan dari tampilan
         setRows(prev => prev.filter(r => r.id !== row.id));
         if (showToast) showToast(`Item ${row.partNumber} updated`, 'success');
         return true;
@@ -181,6 +213,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       updateRow(row.id, 'error', 'Error');
       return false;
     } finally {
+      // Pastikan loading dimatikan jika baris masih ada (kasus error)
       setRows(prev => prev.map(r => r.id === row.id ? { ...r, isLoading: false } : r));
     }
   };
@@ -203,7 +236,17 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       showToast(`${successCount} item berhasil disimpan`, 'success');
     }
     
+    // Jika semua berhasil disimpan (baris habis), isi ulang dengan 10 baris kosong baru
+    const remainingRows = rows.length - successCount;
+    
     if (successCount > 0 && onRefresh) onRefresh();
+    
+    // Jika tabel jadi kosong setelah save, otomatis isi 10 baris baru agar tidak blank
+    if (remainingRows === 0) {
+       const initialRows = Array.from({ length: 10 }).map((_, index) => createEmptyRow(index + 1));
+       setRows(initialRows);
+    }
+
     setIsSavingAll(false);
   };
 
@@ -228,7 +271,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
             onClick={addNewRow}
             className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs font-bold rounded-lg flex items-center gap-2"
           >
-            <Plus size={14} /> Baris Baru
+            <Plus size={14} /> Tambah Baris
           </button>
           <button
             onClick={saveAllRows}
@@ -265,6 +308,8 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
               {currentRows.map((row, index) => {
                   // LOGIKA CEKLIS: Harus SEMUA terisi
                   const isComplete = checkIsRowComplete(row);
+                  // Hitung index global untuk inputRefs (karena ada pagination)
+                  const globalIndex = startIndex + index;
 
                   return (
                   <tr 
@@ -274,13 +319,13 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                     }`}
                   >
                     <td className="px-2 py-1.5 text-gray-500 font-mono text-center text-[10px]">
-                      {startIndex + index + 1}
+                      {globalIndex + 1}
                     </td>
 
                     <td className="px-2 py-1.5 relative">
                       <div className="relative">
                         <input
-                          ref={el => inputRefs.current[index * 6] = el}
+                          ref={el => inputRefs.current[globalIndex * 6] = el}
                           type="text"
                           className={`w-full bg-transparent px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:text-blue-400 font-bold placeholder-gray-600 ${
                             row.error ? 'text-red-400' : ''
@@ -331,7 +376,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
                     <td className="px-2 py-1.5">
                       <input
-                        ref={el => inputRefs.current[(index * 6) + 2] = el}
+                        ref={el => inputRefs.current[(globalIndex * 6) + 2] = el}
                         type="number"
                         min="0"
                         className={`w-full bg-transparent px-1 py-1 text-xs font-bold text-right font-mono focus:outline-none ${
