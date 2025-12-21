@@ -108,7 +108,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => { if (showHistoryDetail) { setHistoryDetailLoading(true); const timer = setTimeout(async () => { const { data, count } = await fetchHistoryLogsPaginated(showHistoryDetail, historyDetailPage, 50, historyDetailSearch); setHistoryDetailData(data); setHistoryDetailTotalPages(Math.ceil(count / 50)); setHistoryDetailLoading(false); }, 500); return () => clearTimeout(timer); } else { setHistoryDetailData([]); setHistoryDetailPage(1); setHistoryDetailSearch(''); } }, [showHistoryDetail, historyDetailPage, historyDetailSearch]);
   useEffect(() => { if (selectedItemHistory && selectedItemHistory.partNumber) { setLoadingItemHistory(true); setItemHistoryData([]); fetchItemHistory(selectedItemHistory.partNumber).then((data) => { setItemHistoryData(data); setLoadingItemHistory(false); }).catch(() => setLoadingItemHistory(false)); } }, [selectedItemHistory]);
   
-  // --- FUNGSI PARSING DATA YANG DIPERBAIKI ---
   const parseHistoryReason = (h: StockHistory) => { 
       let resi = h.resi || '-';
       let ecommerce = '-'; 
@@ -116,44 +115,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
       let text = h.reason || ''; 
       let tempo = h.tempo || '-'; 
 
-      // 1. Ambil Resi dari string reason jika ada
       const resiMatch = text.match(/\(Resi: (.*?)\)/); 
-      if (resiMatch && resiMatch[1]) { 
-          resi = resiMatch[1]; 
-          text = text.replace(/\s*\(Resi:.*?\)/, ''); 
-      } 
+      if (resiMatch && resiMatch[1]) { resi = resiMatch[1]; text = text.replace(/\s*\(Resi:.*?\)/, ''); } 
       
-      // 2. Ambil Via dari string reason jika ada
       const viaMatch = text.match(/\(Via: (.*?)\)/); 
-      if (viaMatch && viaMatch[1]) { 
-          ecommerce = viaMatch[1]; 
-          text = text.replace(/\s*\(Via:.*?\)/, ''); 
-      } 
+      if (viaMatch && viaMatch[1]) { ecommerce = viaMatch[1]; text = text.replace(/\s*\(Via:.*?\)/, ''); } 
       
-      // Bersihkan sisa text
       text = text.trim();
-
-      // 3. Logika pemisahan: Sisa teks adalah Customer (jika Keluar) atau Keterangan (jika Masuk)
       let keterangan = '';
 
       if (h.type === 'out') {
-          // Jika Barang Keluar, sisa teks biasanya adalah NAMA PELANGGAN
-          if (text) {
-              customer = text;
-          }
-          keterangan = 'Terjual'; // Keterangan default untuk barang keluar
+          if (text) customer = text;
+          keterangan = 'Terjual';
       } else {
-          // Jika Barang Masuk, sisa teks adalah KETERANGAN (misal: Restock, Stok Awal)
           keterangan = text;
-          
-          // Khusus jika ada kata RETUR, kemungkinan ada nama customernya
           if (text.includes('(RETUR)')) {
               customer = text.replace('(RETUR)', '').trim();
               keterangan = 'Retur Masuk';
           }
       }
 
-      // 4. Logika Sub Info (Tempo/Toko)
       let subInfo = tempo;
       if (subInfo === '-' || subInfo === '' || subInfo === 'AUTO') {
           if (ecommerce !== '-' && ecommerce !== 'Lainnya') subInfo = ecommerce;
@@ -182,10 +163,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <th className="px-3 py-2 border-r border-gray-700 w-24">Via</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-32">Pelanggan</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-28">Part No</th>
-                    <th className="px-3 py-2 border-r border-gray-700">Barang / Ket</th>
+                    <th className="px-3 py-2 border-r border-gray-700">Barang</th>
                     <th className="px-3 py-2 border-r border-gray-700 text-right w-16">Qty</th>
                     <th className="px-3 py-2 border-r border-gray-700 text-right w-24">Satuan</th>
-                    <th className="px-3 py-2 text-right w-24">Total</th>
+                    <th className="px-3 py-2 border-r border-gray-700 text-right w-24">Total</th>
+                    <th className="px-3 py-2 text-center w-28">Keterangan</th> {/* KOLOM BARU */}
                 </tr>
             </thead>
             <tbody className="divide-y divide-gray-700 text-xs bg-gray-900/30">
@@ -221,7 +203,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 ) : <span className="text-gray-600">-</span>}
                             </td>
 
-                            {/* PELANGGAN (Sekarang sudah benar terisi) */}
+                            {/* PELANGGAN */}
                             <td className="px-3 py-2 align-top border-r border-gray-700 text-gray-300 font-medium">
                                 {customer !== '-' ? customer : '-'}
                             </td>
@@ -231,10 +213,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 {h.partNumber}
                             </td>
 
-                            {/* BARANG / KETERANGAN */}
+                            {/* BARANG (Hanya Nama Barang) */}
                             <td className="px-3 py-2 align-top border-r border-gray-700">
-                                <div className="font-bold text-gray-200 text-xs mb-0.5">{h.name}</div>
-                                <div className="text-[10px] text-gray-500 italic">{keterangan}</div>
+                                <div className="font-bold text-gray-200 text-xs">{h.name}</div>
                             </td>
 
                             {/* QTY */}
@@ -248,8 +229,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             </td>
 
                             {/* TOTAL */}
-                            <td className="px-3 py-2 align-top text-right font-mono text-[10px] font-bold text-gray-200">
+                            <td className="px-3 py-2 align-top border-r border-gray-700 text-right font-mono text-[10px] font-bold text-gray-200">
                                 {formatRupiah(h.totalPrice || ((h.price||0) * h.quantity))}
+                            </td>
+
+                            {/* KETERANGAN (Kolom Baru) */}
+                            <td className="px-3 py-2 align-top text-center">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${h.type === 'in' ? 'bg-green-900/20 text-green-400 border-green-900/50' : 'bg-blue-900/20 text-blue-400 border-blue-900/50'}`}>
+                                    {keterangan}
+                                </span>
                             </td>
                         </tr>
                     )
