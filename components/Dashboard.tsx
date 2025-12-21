@@ -44,7 +44,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null);
   const [itemHistorySearch, setItemHistorySearch] = useState('');
   const [itemHistoryData, setItemHistoryData] = useState<StockHistory[]>([]);
-  const [itemHistoryPage, setItemHistoryPage] = useState(1); // State halaman untuk riwayat item
+  const [itemHistoryPage, setItemHistoryPage] = useState(1);
   const [loadingItemHistory, setLoadingItemHistory] = useState(false);
 
   const [historyDetailData, setHistoryDetailData] = useState<StockHistory[]>([]);
@@ -119,7 +119,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       } 
   }, [selectedItemHistory]);
 
-  // Reset page pagination ketika item atau search berubah di modal history item
   useEffect(() => {
     setItemHistoryPage(1);
   }, [selectedItemHistory, itemHistorySearch]);
@@ -132,16 +131,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
       let text = h.reason || ''; 
       let tempo = h.tempo || '-'; 
 
+      // 1. Ambil & Bersihkan Resi dan Via dari text reason utama
+      // Format dari service: "Customer (Via: X) (Resi: Y)"
       const resiMatch = text.match(/\(Resi: (.*?)\)/); 
       if (resiMatch && resiMatch[1]) { 
           resi = resiMatch[1]; 
-          text = text.replace(/\s*\(Resi:.*?\)/, ''); 
+          text = text.replace(/\s*\(Resi:.*?\)/, ''); // Hapus (Resi: ...) dari text
       } 
       
       const viaMatch = text.match(/\(Via: (.*?)\)/); 
       if (viaMatch && viaMatch[1]) { 
           ecommerce = viaMatch[1]; 
-          text = text.replace(/\s*\(Via:.*?\)/, ''); 
+          text = text.replace(/\s*\(Via:.*?\)/, ''); // Hapus (Via: ...) dari text
       } 
       
       text = text.trim();
@@ -149,9 +150,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
       let isRetur = false;
 
       if (h.type === 'out') {
+          // Barang Keluar
           if (text) {
-             // Hapus teks dalam tanda kurung untuk kolom pelanggan
-             // Contoh: "mrpoank (SPXID05983955930B / MJM)" menjadi "mrpoank"
+             // Sisa text harusnya nama customer. 
+             // PENTING: Bersihkan semua teks dalam kurung (...) yang mungkin terbawa dari database
+             // Contoh: "mrpoank (SPXID... / MJM)" -> "mrpoank"
              customer = text.replace(/\s*\(.*?\)/g, '').trim();
           }
           keterangan = 'Terjual';
@@ -160,33 +163,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
           if (text.toLowerCase().includes('retur') || text.toLowerCase().includes('cancel')) {
               isRetur = true;
               keterangan = 'RETUR';
-              
-              // LOGIKA BARU: Jika retur, nama pelanggan diambil dari text
-              // Hapus kata "(RETUR)" (case insensitive) dari nama pelanggan
-              customer = text.replace(/\(RETUR\)/i, '').trim();
-
+              // Hapus kata "(RETUR)" dari nama pelanggan (case insensitive)
+              customer = text.replace(/\s*\(RETUR\)/i, '').trim();
           } else {
-              // UBAH "Manual Restock" JADI "Restock"
               keterangan = text.replace('Manual Restock', 'Restock'); 
           }
       }
 
       // Logic Sub Info & Custom Split Resi/Toko dari Tempo
       let subInfo = '-';
-      
-      // LOGIKA: Cek apakah ada separator '/' di kolom tempo (Format: RESI / TOKO)
       if (tempo && tempo.includes('/')) {
           const parts = tempo.split('/');
           if (parts.length >= 2) {
-              resi = parts[0].trim();     // Bagian pertama jadi Resi (Tampil Biru)
-              subInfo = parts[1].trim();  // Bagian kedua jadi Nama Toko (Tampil di bawah)
+              resi = parts[0].trim();
+              subInfo = parts[1].trim();
           } else {
               const hasTempo = tempo && tempo !== '-' && tempo !== '' && tempo !== 'AUTO' && tempo !== 'APP';
               if (hasTempo) subInfo = tempo;
           }
       } else {
           const hasTempo = tempo && tempo !== '-' && tempo !== '' && tempo !== 'AUTO' && tempo !== 'APP';
-          
           if (hasTempo) {
               subInfo = tempo;
           } else {
@@ -213,7 +209,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return itemHistory; 
   }, [itemHistoryData, selectedItemHistory, itemHistorySearch]);
 
-  // Logic Pagination untuk Item History (Client-side)
   const paginatedItemHistory = useMemo(() => {
       const startIndex = (itemHistoryPage - 1) * 50;
       return filteredItemHistory.slice(startIndex, startIndex + 50);
@@ -227,7 +222,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return "bg-gray-800 border-gray-700 hover:border-gray-600";
   };
 
-  // --- KOMPONEN TABEL EXCEL STYLE ---
   const HistoryTable = ({ data }: { data: StockHistory[] }) => (
     <div className="overflow-x-auto rounded-lg border border-gray-700">
         <table className="w-full text-left border-collapse">
@@ -235,7 +229,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <tr>
                     <th className="px-3 py-2 border-r border-gray-700 w-24">Tanggal</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-32">Resi / Toko</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-36">Via</th> {/* LEBAR DIPERBESAR */}
+                    <th className="px-3 py-2 border-r border-gray-700 w-36">Via</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-32">Pelanggan</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-28">Part No</th>
                     <th className="px-3 py-2 border-r border-gray-700">Barang</th>
@@ -262,22 +256,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                     return (
                         <tr key={h.id || idx} className="hover:bg-blue-900/10 transition-colors group">
-                            {/* TANGGAL */}
                             <td className="px-3 py-2 align-top border-r border-gray-700 whitespace-nowrap text-gray-400">
                                 <div className="font-bold text-gray-200">{new Date(h.timestamp || 0).toLocaleDateString('id-ID', {day:'2-digit', month:'2-digit', year:'2-digit'})}</div>
                                 <div className="text-[9px] opacity-70 font-mono">{new Date(h.timestamp || 0).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div>
                             </td>
-
-                            {/* RESI / TOKO (TEMPO) */}
                             <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px]">
                                 <div className="flex flex-col items-start gap-2"> 
-                                    
-                                    {/* 1. RESI DI ATAS (BADGE BIRU) */}
                                     <span className={`px-1.5 py-0.5 rounded w-fit font-bold border ${resi !== '-' ? 'bg-blue-900/30 text-blue-400 border-blue-800' : 'text-gray-500 bg-gray-800 border-gray-600'}`}>
                                         {resi !== '-' ? resi : '-'}
                                     </span>
-
-                                    {/* 2. TOKO / TEMPO DI BAWAH (BADGE ABU) */}
                                     {subInfo !== '-' ? (
                                         <div className="flex items-center gap-1 text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded border border-gray-600 w-fit">
                                             <Store size={8}/>
@@ -286,45 +273,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     ) : null}
                                 </div>
                             </td>
-
-                            {/* VIA */}
                             <td className="px-3 py-2 align-top border-r border-gray-700">
                                 {ecommerce !== '-' ? (
                                     <span className="px-1.5 py-0.5 rounded bg-orange-900/30 text-orange-400 text-[9px] font-bold border border-orange-800 break-words">{ecommerce}</span>
                                 ) : <span className="text-gray-600">-</span>}
                             </td>
-
-                            {/* PELANGGAN */}
                             <td className="px-3 py-2 align-top border-r border-gray-700 text-gray-300 font-medium">
                                 {customer !== '-' ? customer : '-'}
                             </td>
-
-                            {/* PART NO */}
                             <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px] text-gray-400">
                                 {h.partNumber}
                             </td>
-
-                            {/* BARANG */}
                             <td className="px-3 py-2 align-top border-r border-gray-700">
                                 <div className="font-bold text-gray-200 text-xs">{h.name}</div>
                             </td>
-
-                            {/* QTY */}
                             <td className={`px-3 py-2 align-top border-r border-gray-700 text-right font-bold ${h.type === 'in' ? 'text-green-400' : 'text-red-400'}`}>
                                 {h.type === 'in' ? '+' : '-'}{h.quantity}
                             </td>
-
-                            {/* SATUAN */}
                             <td className="px-3 py-2 align-top border-r border-gray-700 text-right font-mono text-[10px] text-gray-400">
                                 {formatRupiah(h.price)}
                             </td>
-
-                            {/* TOTAL */}
                             <td className="px-3 py-2 align-top border-r border-gray-700 text-right font-mono text-[10px] font-bold text-gray-200">
                                 {formatRupiah(h.totalPrice || ((h.price||0) * h.quantity))}
                             </td>
-
-                            {/* KETERANGAN */}
                             <td className="px-3 py-2 align-top text-center">
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${ketStyle}`}>
                                     {keterangan}
@@ -346,7 +317,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div className="bg-gray-800 border-b border-gray-700 sticky top-0 z-20 shadow-md">
         <div className="px-4 py-3">
             <div className="flex gap-3 overflow-x-auto scrollbar-hide snap-x md:grid md:grid-cols-5 md:overflow-visible">
-                {/* Stats Cards */}
                 <div className="min-w-[140px] snap-start bg-gradient-to-br from-blue-900/40 to-gray-800 p-3 rounded-xl border border-blue-900/50 flex flex-col justify-between h-24 md:w-auto"><div className="flex items-center gap-2 text-blue-400 mb-1"><div className="p-1.5 bg-blue-900/50 rounded-lg"><Package size={14} /></div><span className="text-[10px] font-bold uppercase tracking-wider">Item</span></div><div className="text-2xl font-extrabold text-white">{formatCompactNumber(stats.totalItems, false)}</div></div>
                 <div className="min-w-[140px] snap-start bg-gradient-to-br from-purple-900/40 to-gray-800 p-3 rounded-xl border border-purple-900/50 flex flex-col justify-between h-24 md:w-auto"><div className="flex items-center gap-2 text-purple-400 mb-1"><div className="p-1.5 bg-purple-900/50 rounded-lg"><Layers size={14} /></div><span className="text-[10px] font-bold uppercase tracking-wider">Stok</span></div><div className="text-2xl font-extrabold text-white">{formatCompactNumber(stats.totalStock, false)}</div></div>
                 <button onClick={() => setShowHistoryDetail('in')} className="min-w-[130px] snap-start bg-gray-800 p-3 rounded-xl border border-gray-700 flex flex-col justify-between h-24 active:scale-95 transition-transform md:w-auto text-left hover:border-green-700/50 hover:bg-gray-750"><div className="flex items-center justify-between w-full"><div className="flex items-center gap-2 text-green-500"><div className="p-1.5 bg-green-900/30 rounded-lg"><TrendingUp size={14} /></div><span className="text-[10px] font-bold uppercase">Masuk</span></div></div><div><div className="text-xl font-extrabold text-white">{stats.todayIn}</div><div className="text-[9px] text-green-500 font-medium flex items-center">Lihat Detail <ChevronRight size={10} /></div></div></button>
@@ -359,7 +329,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="px-4 pb-3"><div className="flex gap-2 items-center mb-2"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} /><input type="text" placeholder="Cari barang..." onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/50 outline-none text-white placeholder-gray-400" /></div><button onClick={handleAddNewClick} className="bg-blue-600 text-white p-2.5 rounded-xl shadow-md hover:bg-blue-700 active:scale-95 transition-all"><Plus size={20} /></button></div><div className="flex justify-between items-center"><div className="flex gap-2 overflow-x-auto scrollbar-hide py-1"><button onClick={() => setFilterType('all')} className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap ${filterType === 'all' ? 'bg-gray-700 text-white border-gray-600' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}>Semua</button><button onClick={() => setFilterType('low')} className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap flex items-center gap-1 ${filterType === 'low' ? 'bg-orange-900/30 text-orange-400 border-orange-900/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}><AlertTriangle size={12}/> Menipis</button><button onClick={() => setFilterType('empty')} className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap flex items-center gap-1 ${filterType === 'empty' ? 'bg-red-900/30 text-red-400 border-red-900/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}><AlertCircle size={12}/> Habis</button></div><div className="flex bg-gray-800 p-1 rounded-lg ml-2 border border-gray-700"><button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-md ${viewMode === 'grid' ? 'bg-gray-700 shadow-sm text-blue-400' : 'text-gray-500 hover:text-gray-300'}`}><LayoutGrid size={16}/></button><button onClick={() => setViewMode('list')} className={`p-1.5 rounded-md ${viewMode === 'list' ? 'bg-gray-700 shadow-sm text-blue-400' : 'text-gray-500 hover:text-gray-300'}`}><List size={16}/></button></div></div></div>
       </div>
 
-      {/* --- CONTENT GRID/LIST --- */}
       <div className="p-4">
         {loading ? ( <div className="flex flex-col items-center justify-center py-20 text-gray-500"><Loader2 size={32} className="animate-spin mb-3 text-blue-500"/><p className="text-xs font-medium">Memuat Data Gudang...</p></div> ) : localItems.length === 0 ? ( <div className="flex flex-col items-center justify-center py-20 text-gray-500 border-2 border-dashed border-gray-700 rounded-2xl bg-gray-800/50"><Package size={40} className="opacity-20 mb-3"/><p className="text-sm">Tidak ada barang ditemukan</p></div> ) : (
             <>
@@ -399,7 +368,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         )}
       </div>
 
-      {/* --- HISTORY LOGS MODAL (TABEL EXCEL) --- */}
       {showHistoryDetail && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
              <div className="bg-gray-800 rounded-2xl w-full max-w-6xl h-[85vh] flex flex-col border border-gray-700 shadow-2xl m-4">
@@ -422,7 +390,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
-      {/* --- HISTORY PER ITEM MODAL (TABEL EXCEL) --- */}
       {selectedItemHistory && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
               <div className="bg-gray-800 rounded-2xl w-full max-w-5xl max-h-[85vh] flex flex-col border border-gray-700 shadow-2xl m-4 overflow-hidden">
@@ -432,14 +399,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                    </div>
                    <div className="p-3 bg-gray-800 border-b border-gray-700"><input type="text" placeholder="Cari Resi / Nama Customer..." className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 focus:border-blue-500 outline-none" value={itemHistorySearch} onChange={(e) => setItemHistorySearch(e.target.value)} /></div>
                    
-                   {/* ISI KONTEN (PAGINATED) */}
                    <div className="flex-1 overflow-auto p-2 bg-gray-900/30">
                        {loadingItemHistory ? ( <div className="flex justify-center py-8"><Loader2 className="animate-spin text-blue-500" size={24}/></div> ) : paginatedItemHistory.length === 0 ? ( <div className="text-center py-8 text-gray-500 text-xs">Belum ada riwayat transaksi.</div> ) : (
                            <HistoryTable data={paginatedItemHistory} />
                        )}
                    </div>
 
-                   {/* FOOTER PAGINATION UNTUK ITEM HISTORY */}
                    <div className="p-3 border-t border-gray-700 flex justify-between items-center bg-gray-800 rounded-b-2xl">
                        <button onClick={() => setItemHistoryPage(p => Math.max(1, p - 1))} disabled={itemHistoryPage === 1} className="p-1 bg-gray-700 rounded disabled:opacity-30"><ChevronLeft size={18}/></button>
                        <span className="text-xs text-gray-400">Hal {itemHistoryPage} / {itemHistoryTotalPages}</span>
