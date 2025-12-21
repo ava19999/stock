@@ -33,14 +33,22 @@ import {
 const STORE_LIST = ['MJM', 'LARIS', 'BJW'];
 const MARKETPLACES = ['Shopee', 'Tiktok', 'Tokopedia', 'Lazada', 'Offline'];
 
-// --- HELPER TIMEZONE (WIB) ---
+// --- HELPER TIMEZONE (WIB - UTC+7) ---
 const getWIBISOString = () => {
-    // Membuat objek Date yang digeser ke WIB (UTC+7)
+    // Ambil waktu sekarang (UTC)
     const now = new Date();
-    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-    const wibTime = new Date(utc + (7 * 60 * 60 * 1000));
-    // Mengembalikan string ISO tanpa 'Z' di akhir agar dianggap sebagai waktu lokal (WIB)
-    return wibTime.toISOString().slice(0, -1);
+    
+    // Tambahkan 7 jam (dalam milidetik) secara manual ke waktu UTC
+    // 7 jam * 60 menit * 60 detik * 1000 milidetik
+    const wibOffset = 7 * 60 * 60 * 1000; 
+    
+    // Buat objek Date baru yang sudah digeser +7 jam
+    const wibDate = new Date(now.getTime() + wibOffset);
+    
+    // Ubah ke ISO string dan HAPUS huruf 'Z' di belakang
+    // Jika Z ada, browser akan menganggapnya UTC dan mengonversi lagi (salah lagi nanti)
+    // Tanpa Z, browser menganggap ini "Local Time" (sesuai angka yang tertulis)
+    return wibDate.toISOString().replace('Z', '');
 };
 
 // --- KOMPONEN TOAST LOCAL ---
@@ -518,8 +526,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
         const { resiText, shopName, ecommerce, cleanName } = getOrderDetails(selectedOrderForReturn);
         const combinedResiShop = `${resiText} / ${shopName}`;
         
-        // --- PERBAIKAN LOGIKA TANGGAL & TIMEZONE ---
-        // Jika timestamp order tidak ada, gunakan waktu WIB sekarang
+        // --- PERBAIKAN LOGIKA TANGGAL & TIMEZONE (V2) ---
+        // Gunakan getWIBISOString() yang baru untuk memastikan waktu adalah UTC+7
         const orderTimestamp = selectedOrderForReturn.timestamp 
             ? new Date(selectedOrderForReturn.timestamp).toISOString() 
             : getWIBISOString();
