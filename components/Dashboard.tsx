@@ -108,7 +108,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => { if (showHistoryDetail) { setHistoryDetailLoading(true); const timer = setTimeout(async () => { const { data, count } = await fetchHistoryLogsPaginated(showHistoryDetail, historyDetailPage, 50, historyDetailSearch); setHistoryDetailData(data); setHistoryDetailTotalPages(Math.ceil(count / 50)); setHistoryDetailLoading(false); }, 500); return () => clearTimeout(timer); } else { setHistoryDetailData([]); setHistoryDetailPage(1); setHistoryDetailSearch(''); } }, [showHistoryDetail, historyDetailPage, historyDetailSearch]);
   useEffect(() => { if (selectedItemHistory && selectedItemHistory.partNumber) { setLoadingItemHistory(true); setItemHistoryData([]); fetchItemHistory(selectedItemHistory.partNumber).then((data) => { setItemHistoryData(data); setLoadingItemHistory(false); }).catch(() => setLoadingItemHistory(false)); } }, [selectedItemHistory]);
   
-  // --- PARSING LOGIC YANG DIPERBARUI ---
+  // --- PARSING LOGIC ---
   const parseHistoryReason = (h: StockHistory) => { 
       let resi = h.resi || '-';
       let ecommerce = '-'; 
@@ -123,7 +123,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           text = text.replace(/\s*\(Resi:.*?\)/, ''); 
       } 
       
-      // 2. Ekstrak Via/Ecommerce
+      // 2. Ekstrak Via
       const viaMatch = text.match(/\(Via: (.*?)\)/); 
       if (viaMatch && viaMatch[1]) { 
           ecommerce = viaMatch[1]; 
@@ -136,34 +136,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       // 3. Tentukan Keterangan & Retur
       if (h.type === 'out') {
-          // Jika Barang Keluar
           if (text) customer = text;
           keterangan = 'Terjual';
       } else {
-          // Jika Barang Masuk
-          // Cek apakah ini Retur
+          // Barang Masuk
           if (text.toLowerCase().includes('retur') || text.toLowerCase().includes('cancel')) {
               isRetur = true;
-              keterangan = 'RETUR'; // Tampilkan "RETUR" saja
+              keterangan = 'RETUR';
               if (text.includes('(RETUR)')) {
                   customer = text.replace('(RETUR)', '').trim();
               }
           } else {
-              keterangan = text; // Tampilkan alasan asli (misal: Restock)
+              keterangan = text; 
           }
       }
 
       // 4. Logika Sub Info (Tempo vs Toko)
-      // Prioritas: Tempo > Toko (ecommerce)
       let subInfo = '-';
-      
-      // Cek apakah ada data Tempo yang valid
       const hasTempo = tempo && tempo !== '-' && tempo !== '' && tempo !== 'AUTO' && tempo !== 'APP';
       
       if (hasTempo) {
           subInfo = tempo;
       } else {
-          // Jika Tempo tidak ada, pakai Nama Toko (biasanya tersimpan di ecommerce untuk barang masuk)
           if (ecommerce !== '-' && ecommerce !== 'Lainnya' && ecommerce !== 'APP' && ecommerce !== 'SYSTEM') {
               subInfo = ecommerce;
           }
@@ -187,7 +181,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700">
                 <tr>
                     <th className="px-3 py-2 border-r border-gray-700 w-24">Tanggal</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-32">Resi / Toko</th>
+                    <th className="px-3 py-2 border-r border-gray-700 w-32">Resi / Toko</th> {/* KOLOM INI YANG PENTING */}
                     <th className="px-3 py-2 border-r border-gray-700 w-24">Via</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-32">Pelanggan</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-28">Part No</th>
@@ -202,16 +196,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 {data.map((h, idx) => {
                     const { resi, subInfo, customer, ecommerce, keterangan, isRetur } = parseHistoryReason(h);
                     
-                    // Logic Warna Keterangan
-                    let ketStyle = 'bg-gray-700 text-gray-300 border-gray-600'; // Default
+                    let ketStyle = 'bg-gray-700 text-gray-300 border-gray-600';
                     if (h.type === 'in') {
                         if (isRetur) {
-                            ketStyle = 'bg-red-900/30 text-red-400 border-red-800'; // RETUR MERAH
+                            ketStyle = 'bg-red-900/30 text-red-400 border-red-800'; // RETUR = MERAH
                         } else {
-                            ketStyle = 'bg-green-900/30 text-green-400 border-green-800'; // MASUK HIJAU
+                            ketStyle = 'bg-green-900/30 text-green-400 border-green-800'; // MASUK BIASA = HIJAU
                         }
                     } else if (h.type === 'out') {
-                        ketStyle = 'bg-blue-900/30 text-blue-400 border-blue-800'; // KELUAR BIRU
+                        ketStyle = 'bg-blue-900/30 text-blue-400 border-blue-800'; // KELUAR = BIRU
                     }
 
                     return (
@@ -222,26 +215,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 <div className="text-[9px] opacity-70 font-mono">{new Date(h.timestamp || 0).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div>
                             </td>
 
-                            {/* RESI / TOKO (TEMPO) - LOGIC TAMPILAN */}
+                            {/* RESI / TOKO (TEMPO) - LOGIC TAMPILAN TERPISAH */}
                             <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px]">
-                                <div className="flex flex-col gap-1">
-                                    {/* Tampilkan RESI jika ada */}
-                                    {resi !== '-' && (
-                                        <span className="px-1.5 py-0.5 rounded w-fit font-bold border bg-blue-900/30 text-blue-400 border-blue-800">
+                                <div className="flex flex-col items-start gap-1.5">
+                                    {/* 1. RESI DI ATAS (JUDUL) */}
+                                    {resi !== '-' ? (
+                                        <span className="font-bold text-blue-400 text-[11px] select-all">
                                             {resi}
                                         </span>
-                                    )}
-                                    
-                                    {/* Tampilkan TEMPO atau NAMA TOKO */}
-                                    {subInfo !== '-' && (
-                                        <div className="flex items-center gap-1 text-gray-400 bg-gray-700 px-1.5 py-0.5 rounded w-fit border border-gray-600">
+                                    ) : null}
+
+                                    {/* 2. TOKO / TEMPO DI BAWAH (SUB JUDUL) */}
+                                    {subInfo !== '-' ? (
+                                        <div className="flex items-center gap-1 text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded border border-gray-600">
                                             <Store size={8}/>
                                             <span className="uppercase truncate max-w-[90px]">{subInfo}</span>
                                         </div>
+                                    ) : (
+                                        // Jika Resi juga kosong dan subInfo kosong, baru tampilkan strip
+                                        resi === '-' && <span className="text-gray-600">-</span>
                                     )}
-
-                                    {/* Jika keduanya kosong */}
-                                    {resi === '-' && subInfo === '-' && <span className="text-gray-600">-</span>}
                                 </div>
                             </td>
 
@@ -262,7 +255,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 {h.partNumber}
                             </td>
 
-                            {/* BARANG (Hanya Nama Barang) */}
+                            {/* BARANG */}
                             <td className="px-3 py-2 align-top border-r border-gray-700">
                                 <div className="font-bold text-gray-200 text-xs">{h.name}</div>
                             </td>
@@ -282,7 +275,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 {formatRupiah(h.totalPrice || ((h.price||0) * h.quantity))}
                             </td>
 
-                            {/* KETERANGAN (Kolom Baru dengan Warna) */}
+                            {/* KETERANGAN */}
                             <td className="px-3 py-2 align-top text-center">
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${ketStyle}`}>
                                     {keterangan}
