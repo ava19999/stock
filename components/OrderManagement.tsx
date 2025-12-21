@@ -90,10 +90,11 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [selectedResis, setSelectedResis] = useState<string[]>([]);
   const [isDuplicating, setIsDuplicating] = useState<number | null>(null);
 
-  // --- STATE AUTOCOMPLETE ---
+  // --- STATE AUTOCOMPLETE (FIXED POPUP) ---
   const [inventoryCache, setInventoryCache] = useState<InventoryItem[]>([]);
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
-  const [activeSearchId, setActiveSearchId] = useState<number | null>(null); // ID log yang sedang diedit
+  const [activeSearchId, setActiveSearchId] = useState<number | null>(null); 
+  const [popupPos, setPopupPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -158,18 +159,31 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
     finally { setAnalyzing(false); if (cameraInputRef.current) cameraInputRef.current.value = ''; }
   };
 
-  // --- NEW: LOGIKA AUTOCOMPLETE ---
-  const handlePartNumberInput = (id: number, value: string) => {
-      // 1. Update nilai di input lokal (Scan Logs)
+  // --- NEW: LOGIKA AUTOCOMPLETE (REVISI) ---
+  const handleInputFocus = (e: React.ChangeEvent<HTMLInputElement>, id: number) => {
+      const rect = e.target.getBoundingClientRect();
+      setPopupPos({ top: rect.bottom, left: rect.left, width: rect.width });
+      // Trigger search ulang saat fokus
+      handlePartNumberInput(id, e.target.value, e.target);
+  };
+
+  const handlePartNumberInput = (id: number, value: string, target?: EventTarget & HTMLInputElement) => {
+      // 1. Update nilai lokal
       setScanLogs(prev => prev.map(log => log.id === id ? { ...log, part_number: value } : log));
       
-      // 2. Logic Filtering
-      if (value && value.length >= 2) { // Mulai mencari setelah 2 karakter
+      // 2. Update posisi popup (real-time tracking)
+      if (target) {
+          const rect = target.getBoundingClientRect();
+          setPopupPos({ top: rect.bottom, left: rect.left, width: rect.width });
+      }
+
+      // 3. Filtering
+      if (value && value.length >= 2) { 
           const lowerVal = value.toLowerCase();
           const matches = inventoryCache.filter(item => 
               item.partNumber.toLowerCase().includes(lowerVal) || 
               item.name.toLowerCase().includes(lowerVal)
-          ).slice(0, 10); // Batasi 10 hasil
+          ).slice(0, 10); // Ambil 10 hasil teratas
           
           setSuggestions(matches);
           setActiveSearchId(id);
@@ -180,26 +194,20 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   };
 
   const selectSuggestion = async (id: number, item: InventoryItem) => {
-      // Update UI dengan Part Number yang dipilih
       setScanLogs(prev => prev.map(log => log.id === id ? { ...log, part_number: item.partNumber } : log));
-      
-      // Simpan ke database
       await updateScanResiLogField(id, 'part_number', item.partNumber);
-      
-      // Reset suggestion
       setSuggestions([]);
       setActiveSearchId(null);
   };
 
   const handleBlurInput = async (id: number, currentValue: string) => {
-      // Delay sedikit agar klik pada suggestion bisa tereksekusi sebelum suggestion hilang
+      // Delay agar klik pada popup sempat tereksekusi sebelum state di-reset
       setTimeout(async () => {
           if (activeSearchId === id) {
               setActiveSearchId(null);
           }
-          // Simpan value terakhir (jika user mengetik manual dan tidak klik suggestion)
           await updateScanResiLogField(id, 'part_number', currentValue);
-      }, 200);
+      }, 250);
   };
 
   const parseIndonesianNumber = (val: any): number => {
@@ -698,24 +706,13 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                 <span className="text-[10px] text-gray-500 w-12 flex-shrink-0">Part No</span>
                                                 <div className="flex-1 relative">
                                                     {!isSold ? (
-                                                        <>
                                                         <input className="w-full bg-gray-700 border-b border-gray-600 focus:border-blue-500 text-xs py-0.5 px-1 font-mono outline-none text-gray-200" 
                                                             placeholder="Isi Part Number" 
                                                             value={log.part_number || ''} 
-                                                            onChange={(e) => handlePartNumberInput(log.id!, e.target.value)}
+                                                            onChange={(e) => handlePartNumberInput(log.id!, e.target.value, e.target)}
+                                                            onFocus={(e) => handleInputFocus(e, log.id!)}
                                                             onBlur={(e) => handleBlurInput(log.id!, e.target.value)}
                                                         />
-                                                        {activeSearchId === log.id && suggestions.length > 0 && (
-                                                            <div className="absolute top-full left-0 z-[100] w-full bg-gray-800 border border-gray-600 rounded-lg shadow-xl mt-1 max-h-40 overflow-y-auto">
-                                                                {suggestions.map((item, idx) => (
-                                                                    <div key={idx} onClick={() => selectSuggestion(log.id!, item)} className="px-3 py-2 text-xs hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0">
-                                                                        <div className="font-bold text-white font-mono">{item.partNumber}</div>
-                                                                        <div className="text-gray-400 truncate text-[10px]">{item.name}</div>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                        </>
                                                     ) : (
                                                         <span className="text-xs font-mono text-gray-400">{log.part_number || '-'}</span>
                                                     )}
@@ -731,7 +728,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                             })}
                         </div>
 
-                        {/* DESKTOP TABLE VIEW - FIX OVERFLOW HIDDEN */}
+                        {/* DESKTOP TABLE VIEW */}
                         <div className="hidden md:block bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-visible min-w-[1000px]">
                             <table className="w-full text-left border-collapse">
                                 <thead className="bg-gray-800 sticky top-0 z-10 shadow-sm text-[10px] font-bold text-gray-400 uppercase tracking-wider">
@@ -742,7 +739,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                         <th className="px-4 py-3 border-b border-gray-700">Toko</th>
                                         <th className="px-4 py-3 border-b border-gray-700">Via</th>
                                         <th className="px-4 py-3 border-b border-gray-700">Pelanggan</th>
-                                        {/* Added min-w to prevent shrinking */}
                                         <th className="px-4 py-3 border-b border-gray-700 min-w-[150px]">Part.No (Edit)</th>
                                         <th className="px-4 py-3 border-b border-gray-700">Barang</th>
                                         <th className="px-4 py-3 border-b border-gray-700 text-center">Qty</th>
@@ -779,26 +775,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                 <td className="px-4 py-3 relative">
                                                     <div className="flex items-center gap-1 relative">
                                                         {!isSold ? (
-                                                            <>
-                                                                <input 
-                                                                    className="bg-transparent border-b border-transparent focus:border-blue-500 outline-none w-full font-mono text-gray-300 placeholder-red-900/50" 
-                                                                    placeholder="Part Number" 
-                                                                    value={log.part_number || ''} 
-                                                                    onChange={(e) => handlePartNumberInput(log.id!, e.target.value)} 
-                                                                    onBlur={(e) => handleBlurInput(log.id!, e.target.value)}
-                                                                />
-                                                                {/* POPUP REKOMENDASI DESKTOP - FIX CLIPPING */}
-                                                                {activeSearchId === log.id && suggestions.length > 0 && (
-                                                                    <div className="absolute top-full left-0 z-[100] min-w-[200px] w-64 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl mt-1 max-h-48 overflow-y-auto ring-1 ring-black/50">
-                                                                        {suggestions.map((item, idx) => (
-                                                                            <div key={idx} onClick={() => selectSuggestion(log.id!, item)} className="px-3 py-2 text-xs hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0 group">
-                                                                                <div className="font-bold text-white font-mono group-hover:text-blue-300">{item.partNumber}</div>
-                                                                                <div className="text-gray-400 truncate group-hover:text-gray-300">{item.name}</div>
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                )}
-                                                            </>
+                                                            <input 
+                                                                className="bg-transparent border-b border-transparent focus:border-blue-500 outline-none w-full font-mono text-gray-300 placeholder-red-900/50" 
+                                                                placeholder="Part Number" 
+                                                                value={log.part_number || ''} 
+                                                                onChange={(e) => handlePartNumberInput(log.id!, e.target.value, e.target)} 
+                                                                onFocus={(e) => handleInputFocus(e, log.id!)}
+                                                                onBlur={(e) => handleBlurInput(log.id!, e.target.value)}
+                                                            />
                                                         ) : (<span className="font-mono text-gray-400 break-all">{log.part_number}</span>)}
                                                         {!!log.part_number && <Search size={10} className="text-blue-400 flex-shrink-0" title="Terdeteksi Otomatis"/>}
                                                     </div>
@@ -855,6 +839,29 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
             <div className="flex-1 overflow-x-auto p-2 bg-gray-900"><div className="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden min-w-[1000px]"><table className="w-full text-left border-collapse"><thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700"><tr><th className="px-3 py-2 w-28">Tanggal</th><th className="px-3 py-2 w-32">Resi / Toko</th><th className="px-3 py-2 w-24">Via</th> <th className="px-3 py-2 w-32">Pelanggan</th><th className="px-3 py-2 w-28">Part No.</th><th className="px-3 py-2">Barang</th><th className="px-3 py-2 text-right w-16">Qty</th><th className="px-3 py-2 text-right w-24">Satuan</th><th className="px-3 py-2 text-right w-24">Total</th>{activeTab === 'history' ? (<><th className="px-3 py-2 w-24 bg-red-900/20 text-red-400 border-l border-red-800">Tgl Retur</th><th className="px-3 py-2 text-center w-24 bg-red-900/20 text-red-400">Status</th></>) : (<th className="px-3 py-2 text-center w-24">Status</th>)}<th className="px-3 py-2 text-center w-32">{activeTab === 'history' ? 'Ket' : 'Aksi'}</th></tr></thead><tbody className="divide-y divide-gray-700 text-xs">{currentItems.length === 0 ? (<tr><td colSpan={13} className="p-8 text-center text-gray-500"><ClipboardList size={32} className="opacity-20 mx-auto mb-2" /><p>Belum ada data</p></td></tr>) : (activeTab==='history' ? (currentItems as ReturRecord[]).map(retur => { const dtOrder = formatDate(retur.tanggal_pemesanan||''); const dtRetur = formatDate(retur.tanggal_retur); return (<tr key={`retur-${retur.id}`} className="hover:bg-red-900/10 transition-colors"><td className="px-3 py-2 align-top border-r border-gray-700"><div className="font-bold text-gray-200">{dtOrder.date}</div></td><td className="px-3 py-2 align-top font-mono text-[10px] text-gray-400"><div className="flex flex-col gap-1"><span className="font-bold text-blue-400 bg-blue-900/30 px-1.5 py-0.5 rounded border border-blue-800 w-fit">{retur.resi || '-'}</span>{retur.toko && <span className="uppercase text-gray-400 bg-gray-700 px-1 py-0.5 rounded w-fit">{retur.toko}</span>}</div></td><td className="px-3 py-2 align-top">{retur.ecommerce ? <span className="px-1.5 py-0.5 bg-orange-900/30 text-orange-400 text-[9px] font-bold rounded border border-orange-800">{retur.ecommerce}</span> : '-'}</td><td className="px-3 py-2 align-top font-medium text-gray-200 truncate max-w-[120px]" title={retur.customer}>{retur.customer||'Guest'}</td><td className="px-3 py-2 align-top font-mono text-[10px] text-gray-500">{retur.part_number||'-'}</td><td className="px-3 py-2 align-top text-gray-300 font-medium truncate max-w-[200px]" title={retur.nama_barang}>{retur.nama_barang}</td><td className="px-3 py-2 align-top text-right font-bold text-red-400">-{retur.quantity}</td><td className="px-3 py-2 align-top text-right font-mono text-[10px] text-gray-500">{formatRupiah(retur.harga_satuan)}</td><td className="px-3 py-2 align-top text-right font-mono text-[10px] font-bold text-gray-300">{formatRupiah(retur.harga_total)}</td><td className="px-3 py-2 align-top border-l border-red-800 bg-red-900/10"><div className="font-bold text-red-400 text-[10px]">{dtRetur.date}</div></td><td className="px-3 py-2 align-top text-center bg-red-900/10"><span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase ${retur.status==='Full Retur'?'bg-red-900/30 text-red-400 border-red-800':'bg-orange-900/30 text-orange-400 border-orange-800'}`}>{retur.status||'Retur'}</span></td><td className="px-3 py-2 align-top"><div className="flex items-start justify-between gap-1 group/edit"><div className="text-[10px] text-gray-500 italic truncate max-w-[100px]">{retur.keterangan||'-'}</div><button onClick={()=>openNoteModal(retur)} className="text-blue-400 hover:bg-blue-900/50 p-1 rounded opacity-0 group-hover/edit:opacity-100"><Edit3 size={12}/></button></div></td></tr>); }) : (currentItems as Order[]).map(order => { if(!order) return null; const {cleanName, resiText, ecommerce, shopName} = getOrderDetails(order); const isResi = !resiText.startsWith('#'); const dt = formatDate(order.timestamp); const items = Array.isArray(order.items) ? order.items : []; if(items.length===0) return null; return items.map((item, index) => { const dealPrice = item.customPrice ?? item.price ?? 0; const dealTotal = dealPrice * (item.cartQuantity || 0); const hasCustomPrice = item.customPrice !== undefined && item.customPrice !== item.price; return (<tr key={`${order.id}-${index}`} className="hover:bg-blue-900/10 transition-colors group">{index===0 && (<><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-700 bg-gray-800 group-hover:bg-blue-900/10"><div className="font-bold text-gray-200">{dt.date}</div><div className="text-[9px] text-gray-500 font-mono">{dt.time}</div></td><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px] bg-gray-800 group-hover:bg-blue-900/10"><div className="flex flex-col gap-1"><span className={`px-1.5 py-0.5 rounded w-fit font-bold border ${isResi ? 'bg-blue-900/30 text-blue-400 border-blue-800' : 'text-gray-500 bg-gray-700 border-gray-600'}`}>{resiText}</span>{shopName!=='-' && <div className="flex items-center gap-1 text-gray-400 bg-gray-700 px-1.5 py-0.5 rounded w-fit border border-gray-600"><Store size={8}/><span className="uppercase truncate max-w-[80px]">{shopName}</span></div>}</div></td><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-700 bg-gray-800 group-hover:bg-blue-900/10">{ecommerce!=='-'?<div className="px-1.5 py-0.5 rounded bg-orange-900/30 text-orange-400 border border-orange-800 w-fit text-[9px] font-bold">{ecommerce}</div>:<span className="text-gray-600">-</span>}</td><td rowSpan={items.length} className="px-3 py-2 align-top border-r border-gray-700 font-medium text-gray-200 bg-gray-800 group-hover:bg-blue-900/10 truncate max-w-[120px]" title={cleanName}>{cleanName}</td></>)}<td className="px-3 py-2 align-top font-mono text-[10px] text-gray-500">{item.partNumber||'-'}</td><td className="px-3 py-2 align-top text-gray-300 font-medium truncate max-w-[180px]" title={item.name}>{item.name}</td><td className="px-3 py-2 align-top text-right font-bold text-gray-300">{item.cartQuantity||0}</td><td className="px-3 py-2 align-top text-right text-gray-500 font-mono text-[10px]"><div className={hasCustomPrice?"text-orange-400 font-bold":""}>{formatRupiah(dealPrice)}</div></td><td className="px-3 py-2 align-top text-right font-bold text-gray-200 font-mono text-[10px]">{formatRupiah(dealTotal)}</td>{index===0 && (<><td rowSpan={items.length} className="px-3 py-2 align-top text-center border-l border-gray-700 bg-gray-800 group-hover:bg-blue-900/10"><div className={`inline-block px-2 py-0.5 rounded text-[9px] font-extrabold border uppercase mb-1 shadow-sm ${getStatusColor(order.status)}`}>{getStatusLabel(order.status)}</div><div className="text-[10px] font-extrabold text-purple-400">{formatRupiah(order.totalAmount||0)}</div></td><td rowSpan={items.length} className="px-3 py-2 align-top text-center border-l border-gray-700 bg-gray-800 group-hover:bg-blue-900/10"><div className="flex flex-col gap-1 items-center">{order.status==='pending' && (<><button onClick={()=>onUpdateStatus(order.id, 'processing')} className="w-full py-1 bg-purple-700 text-white text-[9px] font-bold rounded hover:bg-purple-600 shadow-sm flex items-center justify-center gap-1">Proses</button><button onClick={()=>onUpdateStatus(order.id, 'cancelled')} className="w-full py-1 bg-gray-700 border border-gray-600 text-gray-400 text-[9px] font-bold rounded hover:bg-red-900/30 hover:text-red-400">Tolak</button></>)}{order.status==='processing' && (<button onClick={()=>openReturnModal(order)} className="w-full py-1 bg-orange-900/30 border border-orange-800 text-orange-400 text-[9px] font-bold rounded hover:bg-orange-800 flex items-center justify-center gap-1">Retur</button>)}</div></td></>)}</tr>); }); }))}</tbody></table></div></div>
             <div className="px-4 py-3 bg-gray-800 border-t border-gray-700 flex items-center justify-between text-xs text-gray-500"><div>Menampilkan {startIndex + 1}-{Math.min(startIndex + itemsPerPage, totalItems)} dari {totalItems} data</div><div className="flex items-center gap-2"><button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16}/></button><span className="font-bold text-gray-200">Halaman {currentPage}</span><button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16}/></button></div></div>
         </>
+      )}
+
+      {/* --- GLOBAL AUTOCOMPLETE POPUP (FIXED) --- */}
+      {activeSearchId !== null && suggestions.length > 0 && popupPos && (
+          <div 
+              className="fixed z-[9999] bg-gray-800 border border-gray-600 rounded-lg shadow-2xl max-h-48 overflow-y-auto ring-1 ring-black/50"
+              style={{ 
+                  top: `${popupPos.top}px`, 
+                  left: `${popupPos.left}px`, 
+                  width: `${Math.max(popupPos.width, 250)}px` 
+              }}
+          >
+              {suggestions.map((item, idx) => (
+                  <div 
+                    key={idx} 
+                    onMouseDown={(e) => { e.preventDefault(); selectSuggestion(activeSearchId, item); }} 
+                    className="px-3 py-2 text-xs hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0 group"
+                  >
+                      <div className="font-bold text-white font-mono group-hover:text-blue-300 text-sm">{item.partNumber}</div>
+                      <div className="text-gray-400 truncate group-hover:text-gray-300 text-[10px]">{item.name}</div>
+                  </div>
+              ))}
+          </div>
       )}
     </div>
   );
