@@ -123,7 +123,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setItemHistoryPage(1);
   }, [selectedItemHistory, itemHistorySearch]);
   
-  // --- PARSING LOGIC ---
+  // --- PARSING LOGIC DIPERBAIKI DISINI ---
   const parseHistoryReason = (h: StockHistory) => { 
       let resi = h.resi || '-';
       let ecommerce = '-'; 
@@ -132,29 +132,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
       let tempo = h.tempo || '-'; 
 
       // 1. Ambil & Bersihkan Resi dan Via dari text reason utama
-      // Format dari service: "Customer (Via: X) (Resi: Y)"
       const resiMatch = text.match(/\(Resi: (.*?)\)/); 
       if (resiMatch && resiMatch[1]) { 
           resi = resiMatch[1]; 
-          text = text.replace(/\s*\(Resi:.*?\)/, ''); // Hapus (Resi: ...) dari text
+          text = text.replace(/\s*\(Resi:.*?\)/, ''); 
       } 
       
       const viaMatch = text.match(/\(Via: (.*?)\)/); 
       if (viaMatch && viaMatch[1]) { 
           ecommerce = viaMatch[1]; 
-          text = text.replace(/\s*\(Via:.*?\)/, ''); // Hapus (Via: ...) dari text
+          text = text.replace(/\s*\(Via:.*?\)/, ''); 
       } 
       
-      text = text.trim();
+      // PERBAIKAN: Bersihkan sisa karakter aneh seperti "(-)" atau "()" yang mungkin terbawa
+      text = text.replace(/\s*\(\-\)/, '').replace(/\s*\(\)/, '').trim();
+
       let keterangan = '';
       let isRetur = false;
 
       if (h.type === 'out') {
           // Barang Keluar
           if (text) {
-             // Sisa text harusnya nama customer. 
-             // PENTING: Bersihkan semua teks dalam kurung (...) yang mungkin terbawa dari database
-             // Contoh: "mrpoank (SPXID... / MJM)" -> "mrpoank"
+             // Bersihkan semua teks dalam kurung
              customer = text.replace(/\s*\(.*?\)/g, '').trim();
           }
           keterangan = 'Terjual';
@@ -164,27 +163,30 @@ export const Dashboard: React.FC<DashboardProps> = ({
               isRetur = true;
               keterangan = 'RETUR';
               
-              // 1. Hapus kata (RETUR) atau (CANCEL) terlebih dahulu
+              // Hapus kata (RETUR)/(CANCEL) dan sisa kurung lainnya
               let tempName = text.replace(/\s*\(RETUR\)/i, '').replace(/\s*\(CANCEL\)/i, '');
-              // 2. Hapus sisa teks yang ada di dalam kurung (seperti SPXID/Toko dll)
               customer = tempName.replace(/\s*\(.*?\)/g, '').trim();
 
           } else {
-              // --- PERBAIKAN: Jika bukan teks standar, anggap sebagai Nama Customer ---
-              const standardTexts = ['Manual Restock', 'Restock', 'Stok Awal', 'System Log'];
+              // --- LOGIKA PENAMPILAN NAMA CUSTOMER ---
+              const standardTexts = ['Manual Restock', 'Restock', 'Stok Awal', 'System Log', 'Opname', 'Adjustment'];
               
-              if (standardTexts.includes(text)) {
-                  keterangan = text.replace('Manual Restock', 'Restock'); 
+              // Cek case-insensitive
+              const isStandard = standardTexts.some(st => st.toLowerCase() === text.toLowerCase());
+
+              if (isStandard || text === '') {
+                  // Jika teks standar atau kosong, jangan tampilkan di kolom Customer
+                  keterangan = (text === '' || text === 'Manual Restock') ? 'Restock' : text; 
                   customer = '-';
               } else {
-                  // Jika teks berbeda (misal nama orang "Budi"), masukkan ke customer
+                  // Jika teks berbeda (misal nama orang "Budi"), tampilkan sebagai Customer
                   customer = text;
-                  keterangan = 'Restock'; // Set keterangan default agar rapi
+                  keterangan = 'Restock'; // Keterangan di-set default agar rapi
               }
           }
       }
 
-      // Logic Sub Info & Custom Split Resi/Toko dari Tempo
+      // Logic Sub Info
       let subInfo = '-';
       if (tempo && tempo.includes('/')) {
           const parts = tempo.split('/');
