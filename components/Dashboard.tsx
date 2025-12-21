@@ -44,6 +44,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null);
   const [itemHistorySearch, setItemHistorySearch] = useState('');
   const [itemHistoryData, setItemHistoryData] = useState<StockHistory[]>([]);
+  const [itemHistoryPage, setItemHistoryPage] = useState(1); // State halaman untuk riwayat item
   const [loadingItemHistory, setLoadingItemHistory] = useState(false);
 
   const [historyDetailData, setHistoryDetailData] = useState<StockHistory[]>([]);
@@ -106,7 +107,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const formatCompactNumber = (num: number, isCurrency = true) => { const n = num || 0; if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'M'; if (n >= 1000000) return (n / 1000000).toFixed(1) + 'jt'; return isCurrency ? formatRupiah(n) : new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(n); };
   
   useEffect(() => { if (showHistoryDetail) { setHistoryDetailLoading(true); const timer = setTimeout(async () => { const { data, count } = await fetchHistoryLogsPaginated(showHistoryDetail, historyDetailPage, 50, historyDetailSearch); setHistoryDetailData(data); setHistoryDetailTotalPages(Math.ceil(count / 50)); setHistoryDetailLoading(false); }, 500); return () => clearTimeout(timer); } else { setHistoryDetailData([]); setHistoryDetailPage(1); setHistoryDetailSearch(''); } }, [showHistoryDetail, historyDetailPage, historyDetailSearch]);
-  useEffect(() => { if (selectedItemHistory && selectedItemHistory.partNumber) { setLoadingItemHistory(true); setItemHistoryData([]); fetchItemHistory(selectedItemHistory.partNumber).then((data) => { setItemHistoryData(data); setLoadingItemHistory(false); }).catch(() => setLoadingItemHistory(false)); } }, [selectedItemHistory]);
+  
+  useEffect(() => { 
+      if (selectedItemHistory && selectedItemHistory.partNumber) { 
+          setLoadingItemHistory(true); 
+          setItemHistoryData([]); 
+          fetchItemHistory(selectedItemHistory.partNumber).then((data) => { 
+              setItemHistoryData(data); 
+              setLoadingItemHistory(false); 
+          }).catch(() => setLoadingItemHistory(false)); 
+      } 
+  }, [selectedItemHistory]);
+
+  // Reset page pagination ketika item atau search berubah di modal history item
+  useEffect(() => {
+    setItemHistoryPage(1);
+  }, [selectedItemHistory, itemHistorySearch]);
   
   // --- PARSING LOGIC ---
   const parseHistoryReason = (h: StockHistory) => { 
@@ -144,27 +160,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   customer = text.replace('(RETUR)', '').trim();
               }
           } else {
-              keterangan = text; 
+              // UBAH "Manual Restock" JADI "Restock"
+              keterangan = text.replace('Manual Restock', 'Restock'); 
           }
       }
 
       // Logic Sub Info & Custom Split Resi/Toko dari Tempo
       let subInfo = '-';
       
-      // LOGIKA BARU: Cek apakah ada separator '/' di kolom tempo (Format: RESI / TOKO)
-      // Contoh: "SPXID05983955930B / MJM"
+      // LOGIKA: Cek apakah ada separator '/' di kolom tempo (Format: RESI / TOKO)
       if (tempo && tempo.includes('/')) {
           const parts = tempo.split('/');
           if (parts.length >= 2) {
               resi = parts[0].trim();     // Bagian pertama jadi Resi (Tampil Biru)
               subInfo = parts[1].trim();  // Bagian kedua jadi Nama Toko (Tampil di bawah)
           } else {
-              // Fallback jika ada slash tapi format tidak lengkap
               const hasTempo = tempo && tempo !== '-' && tempo !== '' && tempo !== 'AUTO' && tempo !== 'APP';
               if (hasTempo) subInfo = tempo;
           }
       } else {
-          // Logika Existing (Biasa)
           const hasTempo = tempo && tempo !== '-' && tempo !== '' && tempo !== 'AUTO' && tempo !== 'APP';
           
           if (hasTempo) {
@@ -179,7 +193,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return { resi, subInfo, customer, keterangan, ecommerce, isRetur }; 
   };
 
-  const filteredItemHistory = useMemo(() => { if (!selectedItemHistory) return []; let itemHistory = [...itemHistoryData]; if (itemHistorySearch.trim() !== '') { const lowerSearch = itemHistorySearch.toLowerCase(); itemHistory = itemHistory.filter(h => { const { resi, subInfo, customer, keterangan } = parseHistoryReason(h); return ( keterangan.toLowerCase().includes(lowerSearch) || resi.toLowerCase().includes(lowerSearch) || subInfo.toLowerCase().includes(lowerSearch) || customer.toLowerCase().includes(lowerSearch) || h.reason.toLowerCase().includes(lowerSearch) ); }); } return itemHistory; }, [itemHistoryData, selectedItemHistory, itemHistorySearch]);
+  const filteredItemHistory = useMemo(() => { 
+      if (!selectedItemHistory) return []; 
+      let itemHistory = [...itemHistoryData]; 
+      
+      if (itemHistorySearch.trim() !== '') { 
+          const lowerSearch = itemHistorySearch.toLowerCase(); 
+          itemHistory = itemHistory.filter(h => { 
+              const { resi, subInfo, customer, keterangan } = parseHistoryReason(h); 
+              return ( keterangan.toLowerCase().includes(lowerSearch) || resi.toLowerCase().includes(lowerSearch) || subInfo.toLowerCase().includes(lowerSearch) || customer.toLowerCase().includes(lowerSearch) || h.reason.toLowerCase().includes(lowerSearch) ); 
+          }); 
+      } 
+      return itemHistory; 
+  }, [itemHistoryData, selectedItemHistory, itemHistorySearch]);
+
+  // Logic Pagination untuk Item History (Client-side)
+  const paginatedItemHistory = useMemo(() => {
+      const startIndex = (itemHistoryPage - 1) * 50;
+      return filteredItemHistory.slice(startIndex, startIndex + 50);
+  }, [filteredItemHistory, itemHistoryPage]);
+
+  const itemHistoryTotalPages = Math.ceil(filteredItemHistory.length / 50) || 1;
 
   const getItemCardStyle = (qty: number) => {
       if (qty === 0) return "bg-red-900/30 border-red-800 hover:border-red-600";
@@ -194,8 +228,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700">
                 <tr>
                     <th className="px-3 py-2 border-r border-gray-700 w-24">Tanggal</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-32">Resi / Toko</th> {/* KOLOM UTAMA */}
-                    <th className="px-3 py-2 border-r border-gray-700 w-24">Via</th>
+                    <th className="px-3 py-2 border-r border-gray-700 w-32">Resi / Toko</th>
+                    <th className="px-3 py-2 border-r border-gray-700 w-36">Via</th> {/* LEBAR DIPERBESAR */}
                     <th className="px-3 py-2 border-r border-gray-700 w-32">Pelanggan</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-28">Part No</th>
                     <th className="px-3 py-2 border-r border-gray-700">Barang</th>
@@ -228,9 +262,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 <div className="text-[9px] opacity-70 font-mono">{new Date(h.timestamp || 0).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div>
                             </td>
 
-                            {/* RESI / TOKO (TEMPO) - FIXED STYLE: RESI BADGE ATAS, TOKO BADGE BAWAH */}
+                            {/* RESI / TOKO (TEMPO) */}
                             <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px]">
-                                <div className="flex flex-col items-start gap-2"> {/* Gap lebih besar agar terpisah */}
+                                <div className="flex flex-col items-start gap-2"> 
                                     
                                     {/* 1. RESI DI ATAS (BADGE BIRU) */}
                                     <span className={`px-1.5 py-0.5 rounded w-fit font-bold border ${resi !== '-' ? 'bg-blue-900/30 text-blue-400 border-blue-800' : 'text-gray-500 bg-gray-800 border-gray-600'}`}>
@@ -243,17 +277,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             <Store size={8}/>
                                             <span className="uppercase truncate max-w-[90px]">{subInfo}</span>
                                         </div>
-                                    ) : (
-                                        // Jika tidak ada info, kosongkan agar tidak merusak layout
-                                        null
-                                    )}
+                                    ) : null}
                                 </div>
                             </td>
 
                             {/* VIA */}
                             <td className="px-3 py-2 align-top border-r border-gray-700">
                                 {ecommerce !== '-' ? (
-                                    <span className="px-1.5 py-0.5 rounded bg-orange-900/30 text-orange-400 text-[9px] font-bold border border-orange-800">{ecommerce}</span>
+                                    <span className="px-1.5 py-0.5 rounded bg-orange-900/30 text-orange-400 text-[9px] font-bold border border-orange-800 break-words">{ecommerce}</span>
                                 ) : <span className="text-gray-600">-</span>}
                             </td>
 
@@ -394,10 +425,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
                        <button onClick={() => setSelectedItemHistory(null)} className="p-1 bg-gray-700 hover:bg-gray-600 rounded-full"><X size={18}/></button>
                    </div>
                    <div className="p-3 bg-gray-800 border-b border-gray-700"><input type="text" placeholder="Cari Resi / Nama Customer..." className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 focus:border-blue-500 outline-none" value={itemHistorySearch} onChange={(e) => setItemHistorySearch(e.target.value)} /></div>
+                   
+                   {/* ISI KONTEN (PAGINATED) */}
                    <div className="flex-1 overflow-auto p-2 bg-gray-900/30">
-                       {loadingItemHistory ? ( <div className="flex justify-center py-8"><Loader2 className="animate-spin text-blue-500" size={24}/></div> ) : filteredItemHistory.length === 0 ? ( <div className="text-center py-8 text-gray-500 text-xs">Belum ada riwayat transaksi.</div> ) : (
-                           <HistoryTable data={filteredItemHistory} />
+                       {loadingItemHistory ? ( <div className="flex justify-center py-8"><Loader2 className="animate-spin text-blue-500" size={24}/></div> ) : paginatedItemHistory.length === 0 ? ( <div className="text-center py-8 text-gray-500 text-xs">Belum ada riwayat transaksi.</div> ) : (
+                           <HistoryTable data={paginatedItemHistory} />
                        )}
+                   </div>
+
+                   {/* FOOTER PAGINATION UNTUK ITEM HISTORY */}
+                   <div className="p-3 border-t border-gray-700 flex justify-between items-center bg-gray-800 rounded-b-2xl">
+                       <button onClick={() => setItemHistoryPage(p => Math.max(1, p - 1))} disabled={itemHistoryPage === 1} className="p-1 bg-gray-700 rounded disabled:opacity-30"><ChevronLeft size={18}/></button>
+                       <span className="text-xs text-gray-400">Hal {itemHistoryPage} / {itemHistoryTotalPages}</span>
+                       <button onClick={() => setItemHistoryPage(p => Math.min(itemHistoryTotalPages, p + 1))} disabled={itemHistoryPage === itemHistoryTotalPages} className="p-1 bg-gray-700 rounded disabled:opacity-30"><ChevronRightIcon size={18}/></button>
                    </div>
               </div>
           </div>
