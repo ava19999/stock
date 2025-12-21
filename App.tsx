@@ -7,7 +7,6 @@ import { ShopView } from './components/ShopView';
 import { ChatView } from './components/ChatView';
 import { OrderManagement } from './components/OrderManagement';
 import { CustomerOrderView } from './components/CustomerOrderView';
-// ScanResiView di-hapus importnya karena sudah tidak dipakai di sini
 import { InventoryItem, InventoryFormData, CartItem, Order, ChatSession, Message, OrderStatus, StockHistory } from './types';
 
 // --- IMPORT LOGIKA ---
@@ -30,7 +29,6 @@ import {
 const CUSTOMER_ID_KEY = 'stockmaster_my_customer_id';
 const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 
-// Hapus 'scan' dari tipe active view
 type ActiveView = 'shop' | 'chat' | 'inventory' | 'orders';
 
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
@@ -63,6 +61,9 @@ const AppContent: React.FC = () => {
   const [editItem, setEditItem] = useState<InventoryItem | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+
+  // --- TRIGGER UNTUK DASHBOARD ---
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => setToast({msg, type});
 
@@ -98,6 +99,9 @@ const AppContent: React.FC = () => {
         const chatData = await fetchChatSessions();
         setChatSessions(chatData);
 
+        // Update trigger agar Dashboard me-reload tabelnya
+        setRefreshTrigger(prev => prev + 1);
+
     } catch (e) { console.error("Gagal memuat data:", e); showToast("Gagal sinkronisasi data", 'error'); }
     setLoading(false);
   };
@@ -122,7 +126,6 @@ const AppContent: React.FC = () => {
 
   const handleLogout = () => { setIsAuthenticated(false); setIsAdmin(false); setLoginName(''); setLoginPass(''); localStorage.removeItem('stockmaster_customer_name'); };
 
-  // --- SAVE ITEM ---
   const handleSaveItem = async (data: InventoryFormData) => {
       setLoading(true);
       const newQuantity = Number(data.quantity) || 0;
@@ -174,7 +177,6 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- LOGIC BARU: PROCESS PARTIAL RETURN ---
   const handleProcessReturn = async (orderId: string, returnedItems: { itemId: string, qty: number }[]) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -246,7 +248,6 @@ const AppContent: React.FC = () => {
       setLoading(false);
   };
 
-  // --- UPDATE STATUS BIASA (FULL PROCESS / CANCEL) ---
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -363,12 +364,9 @@ const AppContent: React.FC = () => {
   if (!isAuthenticated) {
       return (
         <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4 font-sans relative overflow-hidden">
-            {/* Background Effects */}
             <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 rounded-full blur-[100px] -mr-20 -mt-20"></div>
             <div className="absolute bottom-0 left-0 w-80 h-80 bg-purple-600/10 rounded-full blur-[80px] -ml-10 -mb-10"></div>
-
             {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
-            
             <div className="bg-gray-800/80 backdrop-blur-xl p-8 rounded-3xl shadow-2xl w-full max-w-md border border-gray-700/50 relative z-10">
                 <div className="relative z-10">
                     <div className="flex justify-center mb-6"><div className="bg-gray-700 p-4 rounded-2xl shadow-lg ring-1 ring-gray-600"><Car size={40} className="text-blue-400" strokeWidth={1.5} /></div></div>
@@ -408,14 +406,13 @@ const AppContent: React.FC = () => {
                   <>
                     <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-purple-900/30 text-purple-300 ring-1 ring-purple-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><ShoppingCart size={18}/> Beranda</button>
                     <button onClick={() => setActiveView('inventory')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='inventory'?'bg-purple-900/30 text-purple-300 ring-1 ring-purple-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><Package size={18}/> Gudang</button>
-                    {/* Menu Scan Resi sudah dihapus dari sini karena ada di dalam Orders */}
                     <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-purple-900/30 text-purple-300 ring-1 ring-purple-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><ClipboardList size={18}/> Manajemen Pesanan {pendingOrdersCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{pendingOrdersCount}</span>}</button>
                     <button onClick={() => setActiveView('chat')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='chat'?'bg-purple-900/30 text-purple-300 ring-1 ring-purple-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><MessageSquare size={18}/> Chat {unreadChatCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{unreadChatCount}</span>}</button>
                   </>
               ) : (
                   <>
                     <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-blue-900/30 text-blue-300 ring-1 ring-blue-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><Home size={18}/> Belanja</button>
-                    <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-blue-900/30 text-blue-300 ring-1 ring-blue-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><ClipboardList size={18}/> Pesanan {myPendingOrdersCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-white"></span>}</button>
+                    <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-blue-900/30 text-blue-300 ring-1 ring-blue-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><ClipboardList size={18}/> Pesanan {myPendingOrdersCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-gray-900"></span>}</button>
                     <button onClick={() => setActiveView('chat')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='chat'?'bg-blue-900/30 text-blue-300 ring-1 ring-blue-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><MessageSquare size={18}/> Chat</button>
                   </>
               )}
@@ -427,14 +424,34 @@ const AppContent: React.FC = () => {
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
-        {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
         
-        {/* Pass onProcessReturn to OrderManagement */}
-        {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
+        {/* --- DASHBOARD MENGGUNAKAN TRIGGER --- */}
+        {activeView === 'inventory' && isAdmin && (
+          <Dashboard 
+            items={items} 
+            orders={orders} 
+            history={history} 
+            refreshTrigger={refreshTrigger} // <-- PASS PROP INI
+            onViewOrders={() => setActiveView('orders')} 
+            onAddNew={() => { setEditItem(null); setIsEditing(true); }} 
+            onEdit={(item) => { setEditItem(item); setIsEditing(true); }} 
+            onDelete={handleDelete} 
+          />
+        )}
+        
+        {/* --- ORDER MANAGEMENT DENGAN LOADING STATE --- */}
+        {activeView === 'orders' && isAdmin && (
+          <OrderManagement 
+              orders={orders} 
+              isLoading={loading} // <-- PASS STATUS LOADING
+              onUpdateStatus={handleUpdateStatus} 
+              onProcessReturn={handleProcessReturn} 
+              onRefresh={refreshData} 
+          />
+        )}
         
         {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
         {activeView === 'chat' && <ChatView isAdmin={isAdmin} currentCustomerId={isAdmin ? undefined : myCustomerId} sessions={chatSessions} onSendMessage={handleSendMessage} />}
-        {/* Scan Resi View sudah dihapus */}
         
         {isEditing && isAdmin && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in">
@@ -445,14 +462,11 @@ const AppContent: React.FC = () => {
         )}
       </div>
 
-      {/* --- NAVIGASI BAWAH ORIGINAL (MOBILE) --- */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-gray-800 border-t border-gray-700 pb-safe z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.2)]">
-        {/* Grid diubah dari 5 menjadi 4 karena scan resi dihapus */}
         <div className={`grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'} h-16`}>
             {isAdmin ? (
                 <>
                     <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}><ShoppingCart size={22} className={activeView==='shop'?'fill-purple-900/50':''} /><span className="text-[10px] font-medium">Beranda</span></button>
-                    {/* Tombol Scan dihapus dari sini */}
                     <button onClick={()=>setActiveView('inventory')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='inventory'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}><Package size={22} className={activeView==='inventory'?'fill-purple-900/50':''} /><span className="text-[10px] font-medium">Gudang</span></button>
                     <button onClick={()=>setActiveView('orders')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='orders'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}><div className="relative"><ClipboardList size={22} className={activeView==='orders'?'fill-purple-900/50':''} />{pendingOrdersCount>0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-gray-900"></span>}</div><span className="text-[10px] font-medium">Pesanan</span></button>
                     <button onClick={()=>setActiveView('chat')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='chat'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}><div className="relative"><MessageSquare size={22} className={activeView==='chat'?'fill-purple-900/50':''} />{unreadChatCount>0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-gray-900"></span>}</div><span className="text-[10px] font-medium">Chat</span></button>
