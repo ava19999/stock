@@ -233,8 +233,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // --- UPDATE WARNA KUNING UNTUK STOK TIPIS ---
   const getItemCardStyle = (qty: number) => {
       if (qty === 0) return "bg-red-900/30 border-red-800 hover:border-red-600";
-      // GANTI DARI ORANGE KE YELLOW
-      if (qty < 4) return "bg-yellow-900/30 border-yellow-800 hover:border-yellow-600";
+      // MENIPIS: Border & Background KUNING (Yellow-500)
+      if (qty < 4) return "bg-yellow-900/20 border-yellow-500 hover:border-yellow-400";
       return "bg-gray-800 border-gray-700 hover:border-gray-600";
   };
 
@@ -380,7 +380,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="flex gap-2 overflow-x-auto scrollbar-hide py-1">
                     <button onClick={() => setFilterType('all')} className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap ${filterType === 'all' ? 'bg-gray-700 text-white border-gray-600' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}>Semua</button>
                     {/* TOMBOL FILTER 'MENIPIS' JUGA DIUBAH KE KUNING AGAR KONSISTEN */}
-                    <button onClick={() => setFilterType('low')} className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap flex items-center gap-1 ${filterType === 'low' ? 'bg-yellow-900/30 text-yellow-400 border-yellow-900/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}><AlertTriangle size={12}/> Menipis</button>
+                    <button onClick={() => setFilterType('low')} className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap flex items-center gap-1 ${filterType === 'low' ? 'bg-yellow-400 text-black border-yellow-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}><AlertTriangle size={12}/> Menipis</button>
                     <button onClick={() => setFilterType('empty')} className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap flex items-center gap-1 ${filterType === 'empty' ? 'bg-red-900/30 text-red-400 border-red-900/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}><AlertCircle size={12}/> Habis</button>
                 </div>
                 <div className="flex bg-gray-800 p-1 rounded-lg ml-2 border border-gray-700">
@@ -400,8 +400,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <div key={item.id} className={`rounded-xl shadow-none border overflow-hidden flex flex-col transition-all ${getItemCardStyle(item.quantity)}`}>
                             <div className="aspect-[4/3] relative bg-gray-700 cursor-pointer group" onClick={() => setSelectedItemHistory(item)}>
                                 {item.imageUrl ? ( <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}/> ) : ( <div className="w-full h-full flex items-center justify-center text-gray-600"><Package size={24}/></div> )}
-                                {/* LABEL STOK DI GAMBAR JUGA DIUBAH */}
-                                <div className="absolute top-2 left-2 flex flex-col gap-1"><span className={`px-2 py-0.5 rounded-md text-[9px] font-bold shadow-sm border ${item.quantity === 0 ? 'bg-red-600 text-white border-red-700' : item.quantity < 4 ? 'bg-yellow-600 text-white border-yellow-700' : 'bg-gray-900/90 text-white backdrop-blur border-gray-700'}`}>{item.quantity === 0 ? 'HABIS' : `${item.quantity} Unit`}</span></div>
+                                {/* LABEL STOK DI GAMBAR JUGA DIUBAH - KUNING (bg-yellow-400) TEXT HITAM */}
+                                <div className="absolute top-2 left-2 flex flex-col gap-1"><span className={`px-2 py-0.5 rounded-md text-[9px] font-bold shadow-sm border ${item.quantity === 0 ? 'bg-red-600 text-white border-red-700' : item.quantity < 4 ? 'bg-yellow-400 text-black border-yellow-500' : 'bg-gray-900/90 text-white backdrop-blur border-gray-700'}`}>{item.quantity === 0 ? 'HABIS' : `${item.quantity} Unit`}</span></div>
                                 <div className="absolute bottom-2 right-2 bg-black/60 backdrop-blur text-white px-1.5 py-0.5 rounded text-[9px] flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><History size={10} /> Riwayat</div>
                             </div>
                             <div className="p-3 flex-1 flex flex-col">
@@ -420,8 +420,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     {localItems.map(item => (
                          <div key={item.id} className={`rounded-xl p-3 border shadow-none flex items-center gap-3 ${getItemCardStyle(item.quantity)}`}>
                             <div className="w-16 h-16 bg-gray-700 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer relative" onClick={() => setSelectedItemHistory(item)}>{item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-600"><Package size={20}/></div>}</div>
-                            {/* LABEL STOK DI LIST JUGA DIUBAH */}
-                            <div className="flex-1 min-w-0"><div className="flex items-center gap-2 mb-0.5"><span className="text-xs font-bold text-white bg-black px-1.5 py-0.5 rounded border border-black">{item.partNumber}</span><span className={`text-[9px] font-bold px-1.5 rounded ${item.quantity === 0 ? 'bg-red-900/40 text-red-400 border border-red-900/50' : item.quantity < 4 ? 'bg-yellow-900/40 text-yellow-400 border border-yellow-900/50' : 'bg-green-900/30 text-green-400 border border-green-900/50'}`}>{item.quantity} Unit</span></div><h3 className="font-bold text-sm text-gray-200 truncate">{item.name}</h3><div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-gray-400">{item.brand && <span className="bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded border border-gray-600 font-medium">{item.brand}</span>}{item.application && <span className="bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded border border-blue-900/50 font-medium">{item.application}</span>}<span className="flex items-center gap-1 ml-1"><MapPin size={10}/> Rak: <b>{item.shelf || '-'}</b></span></div></div>
+                            {/* LABEL STOK DI LIST JUGA DIUBAH - KUNING (bg-yellow-400) TEXT HITAM */}
+                            <div className="flex-1 min-w-0"><div className="flex items-center gap-2 mb-0.5"><span className="text-xs font-bold text-white bg-black px-1.5 py-0.5 rounded border border-black">{item.partNumber}</span><span className={`text-[9px] font-bold px-1.5 rounded ${item.quantity === 0 ? 'bg-red-900/40 text-red-400 border border-red-900/50' : item.quantity < 4 ? 'bg-yellow-400 text-black border border-yellow-500' : 'bg-green-900/30 text-green-400 border border-green-900/50'}`}>{item.quantity} Unit</span></div><h3 className="font-bold text-sm text-gray-200 truncate">{item.name}</h3><div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-gray-400">{item.brand && <span className="bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded border border-gray-600 font-medium">{item.brand}</span>}{item.application && <span className="bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded border border-blue-900/50 font-medium">{item.application}</span>}<span className="flex items-center gap-1 ml-1"><MapPin size={10}/> Rak: <b>{item.shelf || '-'}</b></span></div></div>
                             <div className="flex flex-col items-end gap-2 pl-2"><div className="font-extrabold text-blue-400 text-sm">{formatCompactNumber(item.price)}</div><div className="flex gap-1"><button onClick={() => handleEditClick(item)} className="p-1.5 bg-gray-700 rounded text-gray-400 hover:text-blue-400 hover:bg-gray-600 border border-gray-600"><Edit size={16}/></button><button onClick={() => onDelete(item.id)} className="p-1.5 bg-gray-700 rounded text-gray-400 hover:text-red-400 hover:bg-gray-600 border border-gray-600"><Trash2 size={16}/></button></div></div>
                          </div>
                     ))}

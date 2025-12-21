@@ -113,7 +113,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
             qty: qtyAdj,
             ecommerce: adjustmentEcommerce,
             resiTempo: adjustmentResiTempo,
-            customer: adjustmentCustomer // UPDATED: Kirim customer untuk in maupun out
+            customer: adjustmentCustomer 
         } : undefined;
 
         const updated = await updateInventory({ ...initialData, ...formData }, transactionData);
@@ -142,16 +142,18 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
       formData.quantity
   ) : formData.quantity;
 
-  // --- LOGIKA WARNA MODAL BERDASARKAN STOK ---
+  // --- LOGIKA WARNA MODAL BERDASARKAN STOK (UPDATED) ---
   let modalBorderClass = "border-gray-700";
   let modalHeaderClass = "bg-gray-900/80 border-gray-700";
   
   if (formData.quantity === 0) {
+      // Stok Habis (Merah)
       modalBorderClass = "border-red-600";
       modalHeaderClass = "bg-red-900/90 border-red-700";
   } else if (formData.quantity < 4) {
-      modalBorderClass = "border-orange-600";
-      modalHeaderClass = "bg-orange-900/90 border-orange-700";
+      // Stok Tipis (Kuning - UPDATED DARI ORANGE)
+      modalBorderClass = "border-yellow-600";
+      modalHeaderClass = "bg-yellow-900/90 border-yellow-700";
   }
 
   return (
@@ -246,7 +248,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                   </div>
                </div>
 
-               {/* 2. UPDATE STOK (SESUAI GAMBAR REQUEST) */}
+               {/* 2. UPDATE STOK */}
                {isEditMode && (
                    <div className="bg-blue-900/20 p-4 rounded-2xl border border-blue-900/40">
                        <h3 className="text-sm font-bold text-blue-300 flex items-center gap-1.5 mb-3"><History size={16}/> Mutasi Stok</h3>
@@ -275,7 +277,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
 
                                 {/* BAGIAN FORM SESUAI TIPE (IN / OUT) */}
                                 {stockAdjustmentType === 'in' ? (
-                                    // --- TAMPILAN MASUK (UPDATED: Ada Customer di tengah) ---
                                     <div className="grid grid-cols-3 gap-3 pt-1">
                                         <div>
                                             <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><ShoppingBag size={10}/> Via / Sumber</label>
@@ -291,7 +292,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                                         </div>
                                     </div>
                                 ) : (
-                                    // --- TAMPILAN KELUAR ---
                                     <div className="space-y-3 pt-1">
                                         <div>
                                             <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><User size={10}/> Penerima / Customer</label>
