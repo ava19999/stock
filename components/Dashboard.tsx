@@ -148,7 +148,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           }
       }
 
-      // 4. Logika Sub Info (Tempo vs Toko)
+      // Logic Sub Info
       let subInfo = '-';
       const hasTempo = tempo && tempo !== '-' && tempo !== '' && tempo !== 'AUTO' && tempo !== 'APP';
       
@@ -178,7 +178,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700">
                 <tr>
                     <th className="px-3 py-2 border-r border-gray-700 w-24">Tanggal</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-32">Resi / Toko</th>
+                    <th className="px-3 py-2 border-r border-gray-700 w-32">Resi / Toko</th> {/* KOLOM UTAMA */}
                     <th className="px-3 py-2 border-r border-gray-700 w-24">Via</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-32">Pelanggan</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-28">Part No</th>
@@ -196,12 +196,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     let ketStyle = 'bg-gray-700 text-gray-300 border-gray-600';
                     if (h.type === 'in') {
                         if (isRetur) {
-                            ketStyle = 'bg-red-900/30 text-red-400 border-red-800'; // RETUR = MERAH
+                            ketStyle = 'bg-red-900/30 text-red-400 border-red-800'; 
                         } else {
-                            ketStyle = 'bg-green-900/30 text-green-400 border-green-800'; // MASUK BIASA = HIJAU
+                            ketStyle = 'bg-green-900/30 text-green-400 border-green-800'; 
                         }
                     } else if (h.type === 'out') {
-                        ketStyle = 'bg-blue-900/30 text-blue-400 border-blue-800'; // KELUAR = BIRU
+                        ketStyle = 'bg-blue-900/30 text-blue-400 border-blue-800';
                     }
 
                     return (
@@ -212,22 +212,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 <div className="text-[9px] opacity-70 font-mono">{new Date(h.timestamp || 0).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div>
                             </td>
 
-                            {/* RESI / TOKO (TEMPO) - DIJAMIN SAMA STRUKTUR */}
+                            {/* RESI / TOKO (TEMPO) - FIXED STYLE: RESI BADGE ATAS, TOKO BADGE BAWAH */}
                             <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px]">
-                                <div className="flex flex-col gap-1.5">
-                                    {/* BARIS ATAS: RESI atau STRIP */}
-                                    <span className={`font-bold text-[11px] ${resi !== '-' ? 'text-blue-400 select-all' : 'text-gray-500'}`}>
+                                <div className="flex flex-col items-start gap-2"> {/* Gap lebih besar agar terpisah */}
+                                    
+                                    {/* 1. RESI DI ATAS (BADGE BIRU) */}
+                                    <span className={`px-1.5 py-0.5 rounded w-fit font-bold border ${resi !== '-' ? 'bg-blue-900/30 text-blue-400 border-blue-800' : 'text-gray-500 bg-gray-800 border-gray-600'}`}>
                                         {resi !== '-' ? resi : '-'}
                                     </span>
 
-                                    {/* BARIS BAWAH: TEMPO / TOKO */}
+                                    {/* 2. TOKO / TEMPO DI BAWAH (BADGE ABU) */}
                                     {subInfo !== '-' ? (
                                         <div className="flex items-center gap-1 text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded border border-gray-600 w-fit">
                                             <Store size={8}/>
                                             <span className="uppercase truncate max-w-[90px]">{subInfo}</span>
                                         </div>
                                     ) : (
-                                        <span className="text-gray-600 text-[9px]">-</span>
+                                        // Jika tidak ada info, kosongkan agar tidak merusak layout
+                                        null
                                     )}
                                 </div>
                             </td>
