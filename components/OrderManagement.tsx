@@ -33,22 +33,26 @@ import {
 const STORE_LIST = ['MJM', 'LARIS', 'BJW'];
 const MARKETPLACES = ['Shopee', 'Tiktok', 'Tokopedia', 'Lazada', 'Offline'];
 
-// --- HELPER TIMEZONE (WIB - UTC+7) ---
+// --- HELPER TIMEZONE ---
+
+// 1. Untuk Tanggal Retur (SEKARANG) - Tetap gunakan WIB manual agar akurat saat diklik
 const getWIBISOString = () => {
-    // Ambil waktu sekarang (UTC)
     const now = new Date();
-    
-    // Tambahkan 7 jam (dalam milidetik) secara manual ke waktu UTC
-    // 7 jam * 60 menit * 60 detik * 1000 milidetik
+    // Tambah 7 jam manual untuk waktu 'sekarang' agar sesuai WIB
     const wibOffset = 7 * 60 * 60 * 1000; 
-    
-    // Buat objek Date baru yang sudah digeser +7 jam
     const wibDate = new Date(now.getTime() + wibOffset);
-    
-    // Ubah ke ISO string dan HAPUS huruf 'Z' di belakang
-    // Jika Z ada, browser akan menganggapnya UTC dan mengonversi lagi (salah lagi nanti)
-    // Tanpa Z, browser menganggap ini "Local Time" (sesuai angka yang tertulis)
     return wibDate.toISOString().replace('Z', '');
+};
+
+// 2. Untuk Tanggal Pesanan (DARI DATABASE) - Gunakan Local ISO String
+// Fungsi ini hanya mengubah format tampilan timestamp menjadi string ISO LOKAL
+// Tanpa menambah/mengurangi jam secara manual, sehingga "22" tetap "22".
+const getLocalISOString = (timestamp: number) => {
+    const d = new Date(timestamp);
+    // Trik untuk mendapatkan string ISO sesuai waktu lokal (bukan UTC)
+    // getTimezoneOffset() mengembalikan selisih menit (negatif untuk WIB)
+    const offsetMs = d.getTimezoneOffset() * 60000; 
+    return new Date(d.getTime() - offsetMs).toISOString().slice(0, -1);
 };
 
 // --- KOMPONEN TOAST LOCAL ---
@@ -526,13 +530,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
         const { resiText, shopName, ecommerce, cleanName } = getOrderDetails(selectedOrderForReturn);
         const combinedResiShop = `${resiText} / ${shopName}`;
         
-        // --- PERBAIKAN LOGIKA TANGGAL & TIMEZONE (V2) ---
-        // Gunakan getWIBISOString() yang baru untuk memastikan waktu adalah UTC+7
+        // --- PERBAIKAN LOGIKA TANGGAL (V4 - LOCAL ISO) ---
+        // Jika timestamp pesanan ada, gunakan getLocalISOString agar hasilnya sesuai "apa yang terlihat"
+        // di komputer user (tidak dikonversi ke UTC yang membuatnya mundur sehari).
         const orderTimestamp = selectedOrderForReturn.timestamp 
-            ? new Date(selectedOrderForReturn.timestamp).toISOString() 
+            ? getLocalISOString(selectedOrderForReturn.timestamp) 
             : getWIBISOString();
         
-        // Tanggal retur saat ini (WIB)
+        // Tanggal retur saat ini (WIB Manual)
         const currentReturDate = getWIBISOString();
 
         const remainingItems = selectedOrderForReturn.items.map(item => {
