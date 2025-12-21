@@ -150,7 +150,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       if (h.type === 'out') {
           if (text) {
-             // Hapus teks dalam tanda kurung untuk kolom pelanggan, misal: "mrpoank (SPX...)" -> "mrpoank"
+             // Hapus teks dalam tanda kurung untuk kolom pelanggan
+             // Contoh: "mrpoank (SPXID05983955930B / MJM)" menjadi "mrpoank"
              customer = text.replace(/\s*\(.*?\)/g, '').trim();
           }
           keterangan = 'Terjual';
