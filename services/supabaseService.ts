@@ -18,15 +18,6 @@ const handleDbError = (op: string, err: any) => { console.error(`${op} Error:`, 
 
 // --- HELPER FUNCTIONS ---
 
-// Helper untuk memecah array besar menjadi potongan kecil (untuk menghindari error URL too long)
-const chunkArray = <T>(array: T[], size: number): T[][] => {
-  const result: T[][] = [];
-  for (let i = 0; i < array.length; i += size) {
-    result.push(array.slice(i, i + size));
-  }
-  return result;
-};
-
 const getWIBISOString = (): string => {
     const now = new Date();
     const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
@@ -36,6 +27,25 @@ const getWIBISOString = (): string => {
     return `${wibTime.getFullYear()}-${pad(wibTime.getMonth() + 1)}-${pad(wibTime.getDate())}T${pad(wibTime.getHours())}:${pad(wibTime.getMinutes())}:${pad(wibTime.getSeconds())}.${pad3(wibTime.getMilliseconds())}`;
 };
 
+// HELPER BARU: Mengubah timestamp (angka) menjadi format ISO lengkap dengan Jam (WIB)
+const getWIBISOStringFromTimestamp = (timestamp: number): string => {
+    // Logika konversi manual ke WIB agar konsisten dengan getWIBISOString
+    // Asumsi timestamp input adalah UTC/Epoch standar
+    // Kita buat object Date, lalu ambil komponen UTC-nya dan tambah offset 7 jam manual
+    
+    const date = new Date(timestamp);
+    // Dapatkan waktu UTC dalam ms
+    const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
+    // Tambah 7 jam untuk WIB
+    const wibTime = new Date(utc + (7 * 3600000));
+    
+    const pad = (n: number) => n < 10 ? '0' + n : n;
+    const pad3 = (n: number) => n < 10 ? '00' + n : (n < 100 ? '0' + n : n);
+    
+    return `${wibTime.getFullYear()}-${pad(wibTime.getMonth() + 1)}-${pad(wibTime.getDate())}T${pad(wibTime.getHours())}:${pad(wibTime.getMinutes())}:${pad(wibTime.getSeconds())}.${pad3(wibTime.getMilliseconds())}`;
+};
+
+// Hapus atau tidak gunakan getWIBDateString jika ingin jam selalu ada
 const getWIBDateString = (timestamp: number): string => {
     const wibTime = new Date(timestamp + (7 * 3600000));
     return wibTime.toISOString().split('T')[0];
@@ -81,6 +91,15 @@ const mapBaseItem = (item: any): InventoryItem => ({
 });
 
 // --- HELPER PRICES ---
+// Helper untuk memecah array besar menjadi potongan kecil (untuk menghindari error URL too long)
+const chunkArray = <T>(array: T[], size: number): T[][] => {
+  const result: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    result.push(array.slice(i, i + size));
+  }
+  return result;
+};
+
 const fetchLatestCostPrices = async (partNumbers?: string[]) => {
     let query = supabase.from('barang_masuk').select('part_number, harga_satuan').order('created_at', { ascending: false, nullsFirst: false });
     if (partNumbers && partNumbers.length > 0) { query = query.in('part_number', partNumbers); }
@@ -204,14 +223,11 @@ export const fetchInventoryStats = async () => {
     if (partNumbers.length === 0) return { totalItems: 0, totalStock: 0, totalAsset: 0 };
 
     // --- BATCHING REQUEST: MENCEGAH ERROR URI TOO LONG ---
-    // Memecah request harga menjadi per 50 item agar tidak gagal load
     const batches = chunkArray(partNumbers, 50);
     let costMap: Record<string, number> = {};
 
-    // Mengambil harga secara paralel per batch
     const results = await Promise.all(batches.map(batch => fetchLatestCostPrices(batch)));
     
-    // Menggabungkan hasil
     results.forEach(res => {
         costMap = { ...costMap, ...res };
     });
@@ -219,7 +235,6 @@ export const fetchInventoryStats = async () => {
     let totalStock = 0; let totalAsset = 0;
     all.forEach((item: any) => {
         const qty = Number(item.quantity) || 0;
-        // Harga default 0 jika tidak ditemukan di costMap
         const cost = costMap[item.part_number] || 0;
         totalStock += qty;
         totalAsset += (qty * cost);
@@ -605,6 +620,7 @@ export const fetchOrders = async (): Promise<Order[]> => {
     return Object.values(groupedOrders);
 };
 
+// --- UPDATE DI SINI: MENGGUNAKAN HELPER BARU UNTUK TANGGAL ORDER ---
 export const saveOrder = async (order: Order): Promise<boolean> => { 
     const parseDetails = (name: string) => {
         let cleanName = name;
@@ -616,7 +632,9 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
     };
 
     const details = parseDetails(order.customerName);
-    const orderDate = getWIBDateString(order.timestamp); 
+    
+    // GANTI DARI getWIBDateString KE getWIBISOStringFromTimestamp
+    const orderDate = getWIBISOStringFromTimestamp(order.timestamp); 
 
     const rows = order.items.map(item => ({
         tanggal: orderDate, 
@@ -637,10 +655,12 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
     return true; 
 };
 
+// --- UPDATE DI SINI: UPDATE STATUS ORDER JUGA MENYERTAKAN JAM ---
 export const updateOrderStatusService = async (id: string, status: string, timestamp?: number): Promise<boolean> => { 
     const updateData: any = { status }; 
     if (timestamp) { 
-        updateData.tanggal = getWIBDateString(timestamp);
+        // GANTI DARI getWIBDateString KE getWIBISOStringFromTimestamp
+        updateData.tanggal = getWIBISOStringFromTimestamp(timestamp);
     } 
     const { error } = await supabase.from('orders').update(updateData).eq('resi', id); 
     return !error; 
