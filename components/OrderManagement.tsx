@@ -90,11 +90,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
   const [selectedResis, setSelectedResis] = useState<string[]>([]);
   const [isDuplicating, setIsDuplicating] = useState<number | null>(null);
 
-  // --- STATE AUTOCOMPLETE (NEW) ---
+  // --- STATE AUTOCOMPLETE ---
   const [inventoryCache, setInventoryCache] = useState<InventoryItem[]>([]);
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
   const [activeSearchId, setActiveSearchId] = useState<number | null>(null); // ID log yang sedang diedit
-  const [suggestionPosition, setSuggestionPosition] = useState<'top' | 'bottom'>('bottom');
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -707,7 +706,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                             onBlur={(e) => handleBlurInput(log.id!, e.target.value)}
                                                         />
                                                         {activeSearchId === log.id && suggestions.length > 0 && (
-                                                            <div className="absolute top-full left-0 z-50 w-full bg-gray-800 border border-gray-600 rounded-lg shadow-xl mt-1 max-h-40 overflow-y-auto">
+                                                            <div className="absolute top-full left-0 z-[100] w-full bg-gray-800 border border-gray-600 rounded-lg shadow-xl mt-1 max-h-40 overflow-y-auto">
                                                                 {suggestions.map((item, idx) => (
                                                                     <div key={idx} onClick={() => selectSuggestion(log.id!, item)} className="px-3 py-2 text-xs hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0">
                                                                         <div className="font-bold text-white font-mono">{item.partNumber}</div>
@@ -732,8 +731,8 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                             })}
                         </div>
 
-                        {/* DESKTOP TABLE VIEW */}
-                        <div className="hidden md:block bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden min-w-[1000px]">
+                        {/* DESKTOP TABLE VIEW - FIX OVERFLOW HIDDEN */}
+                        <div className="hidden md:block bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-visible min-w-[1000px]">
                             <table className="w-full text-left border-collapse">
                                 <thead className="bg-gray-800 sticky top-0 z-10 shadow-sm text-[10px] font-bold text-gray-400 uppercase tracking-wider">
                                     <tr>
@@ -788,13 +787,13 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                                     onChange={(e) => handlePartNumberInput(log.id!, e.target.value)} 
                                                                     onBlur={(e) => handleBlurInput(log.id!, e.target.value)}
                                                                 />
-                                                                {/* POPUP REKOMENDASI DESKTOP */}
+                                                                {/* POPUP REKOMENDASI DESKTOP - FIX CLIPPING */}
                                                                 {activeSearchId === log.id && suggestions.length > 0 && (
-                                                                    <div className="absolute top-8 left-0 z-50 w-64 bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                                                                    <div className="absolute top-full left-0 z-[100] min-w-[200px] w-64 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl mt-1 max-h-48 overflow-y-auto ring-1 ring-black/50">
                                                                         {suggestions.map((item, idx) => (
-                                                                            <div key={idx} onClick={() => selectSuggestion(log.id!, item)} className="px-3 py-2 text-xs hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0">
-                                                                                <div className="font-bold text-white font-mono">{item.partNumber}</div>
-                                                                                <div className="text-gray-400 truncate">{item.name}</div>
+                                                                            <div key={idx} onClick={() => selectSuggestion(log.id!, item)} className="px-3 py-2 text-xs hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0 group">
+                                                                                <div className="font-bold text-white font-mono group-hover:text-blue-300">{item.partNumber}</div>
+                                                                                <div className="text-gray-400 truncate group-hover:text-gray-300">{item.name}</div>
                                                                             </div>
                                                                         ))}
                                                                     </div>
@@ -804,7 +803,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], o
                                                         {!!log.part_number && <Search size={10} className="text-blue-400 flex-shrink-0" title="Terdeteksi Otomatis"/>}
                                                     </div>
                                                 </td>
-                                                {/* REMOVED TRUNCATE AND MAX-W HERE */}
                                                 <td className="px-4 py-3 text-gray-400 whitespace-normal" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td>
                                                 <td className="px-4 py-3 text-gray-400 text-center">{log.quantity || '-'}</td>
                                                 <td className="px-4 py-3 text-gray-200 font-bold text-right">{log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}</td>
