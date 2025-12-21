@@ -38,17 +38,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [showHistoryDetail, setShowHistoryDetail] = useState<'in' | 'out' | null>(null);
   
-  // State Edit/Add
   const [showItemForm, setShowItemForm] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | undefined>(undefined);
 
-  // State History Item Specific
   const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null);
   const [itemHistorySearch, setItemHistorySearch] = useState('');
   const [itemHistoryData, setItemHistoryData] = useState<StockHistory[]>([]);
   const [loadingItemHistory, setLoadingItemHistory] = useState(false);
 
-  // State History Logs Global
   const [historyDetailData, setHistoryDetailData] = useState<StockHistory[]>([]);
   const [historyDetailPage, setHistoryDetailPage] = useState(1);
   const [historyDetailTotalPages, setHistoryDetailTotalPages] = useState(1);
@@ -57,7 +54,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  // Debounce Search
   useEffect(() => {
     const timer = setTimeout(() => { setDebouncedSearch(searchTerm); }, 500);
     return () => clearTimeout(timer);
@@ -86,7 +82,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setStats({ ...invStats, todayIn, todayOut });
   }, [history]);
 
-  // Refresh Trigger
   useEffect(() => { loadData(); }, [loadData, refreshTrigger]);
   useEffect(() => { loadStats(); }, [loadStats, refreshTrigger]);
 
@@ -113,37 +108,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => { if (showHistoryDetail) { setHistoryDetailLoading(true); const timer = setTimeout(async () => { const { data, count } = await fetchHistoryLogsPaginated(showHistoryDetail, historyDetailPage, 50, historyDetailSearch); setHistoryDetailData(data); setHistoryDetailTotalPages(Math.ceil(count / 50)); setHistoryDetailLoading(false); }, 500); return () => clearTimeout(timer); } else { setHistoryDetailData([]); setHistoryDetailPage(1); setHistoryDetailSearch(''); } }, [showHistoryDetail, historyDetailPage, historyDetailSearch]);
   useEffect(() => { if (selectedItemHistory && selectedItemHistory.partNumber) { setLoadingItemHistory(true); setItemHistoryData([]); fetchItemHistory(selectedItemHistory.partNumber).then((data) => { setItemHistoryData(data); setLoadingItemHistory(false); }).catch(() => setLoadingItemHistory(false)); } }, [selectedItemHistory]);
   
-  // Helper Helper untuk parsing data agar sesuai kolom
   const parseHistoryReason = (h: StockHistory) => { 
       let resi = h.resi || '-';
       let ecommerce = '-'; 
       let customer = '-'; 
       let keterangan = h.reason || ''; 
-      let tempo = h.tempo || '-'; // Ambil data tempo dari object
+      let tempo = h.tempo || '-'; 
 
-      // Parsing Regex jika data tersimpan dalam string reason
-      const resiMatch = keterangan.match(/\(Resi: (.*?)\)/); 
-      if (resiMatch && resiMatch[1]) { resi = resiMatch[1]; keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, ''); } 
-      
-      const viaMatch = keterangan.match(/\(Via: (.*?)\)/); 
-      if (viaMatch && viaMatch[1]) { ecommerce = viaMatch[1]; keterangan = keterangan.replace(/\s*\(Via:.*?\)/, ''); } 
-      
-      const nameMatch = keterangan.match(/\((.*?)\)/); 
-      if (nameMatch && nameMatch[1] && nameMatch[1] !== 'RETUR') { 
-          // Cek apakah match adalah customer atau bukan
-          customer = nameMatch[1]; 
-          keterangan = keterangan.replace(/\s*\(.*?\)/, ''); 
-      } 
+      const resiMatch = keterangan.match(/\(Resi: (.*?)\)/); if (resiMatch && resiMatch[1]) { resi = resiMatch[1]; keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, ''); } 
+      const viaMatch = keterangan.match(/\(Via: (.*?)\)/); if (viaMatch && viaMatch[1]) { ecommerce = viaMatch[1]; keterangan = keterangan.replace(/\s*\(Via:.*?\)/, ''); } 
+      const nameMatch = keterangan.match(/\((.*?)\)/); if (nameMatch && nameMatch[1] && nameMatch[1] !== 'RETUR') { customer = nameMatch[1]; keterangan = keterangan.replace(/\s*\(.*?\)/, ''); } 
       
       if (keterangan.toLowerCase().includes('cancel order')) { keterangan = 'Retur Pesanan'; } 
       if (!keterangan.trim()) keterangan = 'Transaksi'; 
 
-      // Fallback logika untuk "Tempo/Toko"
-      // Jika tempo kosong, coba pakai ecommerce atau customer sebagai info tambahan di bawah resi
+      // Logic Tempo/Toko di bawah Resi
       let subInfo = tempo;
       if (subInfo === '-' || subInfo === '' || subInfo === 'AUTO') {
-          if (ecommerce !== '-') subInfo = ecommerce;
-          else if (customer !== '-') subInfo = customer;
+          // Jika tempo kosong, coba ambil dari customer jika ecommerce ada, atau sebaliknya
+          if (ecommerce !== '-' && ecommerce !== 'Lainnya') subInfo = ecommerce; // Kadang nama toko ada di ecommerce
+          else subInfo = '-';
       }
 
       return { resi, subInfo, customer, keterangan: keterangan.trim(), ecommerce }; 
@@ -157,37 +141,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return "bg-gray-800 border-gray-700 hover:border-gray-600";
   };
 
-  // --- COMPONENT TABEL HISTORY (Re-usable) ---
+  // --- KOMPONEN TABEL EXCEL STYLE ---
   const HistoryTable = ({ data }: { data: StockHistory[] }) => (
     <div className="overflow-x-auto rounded-lg border border-gray-700">
         <table className="w-full text-left border-collapse">
             <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700">
                 <tr>
-                    <th className="px-3 py-2 w-28">Tanggal</th>
-                    <th className="px-3 py-2 w-32">Resi / Info</th>
-                    <th className="px-3 py-2">Barang / Keterangan</th>
-                    <th className="px-3 py-2 w-24">Tipe</th>
-                    <th className="px-3 py-2 text-right w-20">Jml</th>
-                    <th className="px-3 py-2 text-right w-28">Total</th>
+                    <th className="px-3 py-2 border-r border-gray-700 w-24">Tanggal</th>
+                    <th className="px-3 py-2 border-r border-gray-700 w-32">Resi / Toko</th>
+                    <th className="px-3 py-2 border-r border-gray-700 w-24">Via</th>
+                    <th className="px-3 py-2 border-r border-gray-700 w-32">Pelanggan</th>
+                    <th className="px-3 py-2 border-r border-gray-700 w-28">Part No</th>
+                    <th className="px-3 py-2 border-r border-gray-700">Barang / Ket</th>
+                    <th className="px-3 py-2 border-r border-gray-700 text-right w-16">Qty</th>
+                    <th className="px-3 py-2 border-r border-gray-700 text-right w-24">Satuan</th>
+                    <th className="px-3 py-2 text-right w-24">Total</th>
                 </tr>
             </thead>
             <tbody className="divide-y divide-gray-700 text-xs bg-gray-900/30">
                 {data.map((h, idx) => {
-                    const { resi, subInfo, customer, keterangan } = parseHistoryReason(h);
+                    const { resi, subInfo, customer, ecommerce, keterangan } = parseHistoryReason(h);
                     return (
                         <tr key={h.id || idx} className="hover:bg-blue-900/10 transition-colors group">
-                            {/* KOLOM TANGGAL */}
-                            <td className="px-3 py-2 align-top border-r border-gray-700 bg-gray-800/50 group-hover:bg-blue-900/10">
-                                <div className="font-bold text-gray-200">
-                                    {new Date(h.timestamp || 0).toLocaleDateString('id-ID', {day:'2-digit', month:'2-digit', year:'2-digit'})}
-                                </div>
-                                <div className="text-[9px] text-gray-500 font-mono">
-                                    {new Date(h.timestamp || 0).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}
-                                </div>
+                            {/* TANGGAL */}
+                            <td className="px-3 py-2 align-top border-r border-gray-700 whitespace-nowrap text-gray-400">
+                                <div className="font-bold text-gray-200">{new Date(h.timestamp || 0).toLocaleDateString('id-ID', {day:'2-digit', month:'2-digit', year:'2-digit'})}</div>
+                                <div className="text-[9px] opacity-70 font-mono">{new Date(h.timestamp || 0).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div>
                             </td>
 
-                            {/* KOLOM RESI / TEMPO (STYLE EXCEL ORDER MANAGEMENT) */}
-                            <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px] bg-gray-800/50 group-hover:bg-blue-900/10">
+                            {/* RESI / TOKO (TEMPO) */}
+                            <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px]">
                                 <div className="flex flex-col gap-1">
                                     <span className={`px-1.5 py-0.5 rounded w-fit font-bold border ${resi !== '-' ? 'bg-blue-900/30 text-blue-400 border-blue-800' : 'text-gray-500 bg-gray-700 border-gray-600'}`}>
                                         {resi !== '-' ? resi : 'MANUAL'}
@@ -201,28 +184,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 </div>
                             </td>
 
-                            {/* KOLOM BARANG & KETERANGAN */}
+                            {/* VIA */}
                             <td className="px-3 py-2 align-top border-r border-gray-700">
-                                <div className="font-bold text-gray-200 text-xs">{h.name}</div>
-                                <div className="text-[10px] text-gray-500 font-mono mb-1">{h.partNumber}</div>
-                                {keterangan && <div className="text-[10px] text-gray-400 italic bg-gray-800/50 px-1.5 py-0.5 rounded w-fit">{keterangan}</div>}
-                                {customer !== '-' && <div className="text-[10px] text-orange-400 mt-0.5">Oleh: {customer}</div>}
+                                {ecommerce !== '-' ? (
+                                    <span className="px-1.5 py-0.5 rounded bg-orange-900/30 text-orange-400 text-[9px] font-bold border border-orange-800">{ecommerce}</span>
+                                ) : <span className="text-gray-600">-</span>}
                             </td>
 
-                            {/* KOLOM TIPE */}
-                            <td className="px-3 py-2 align-top border-r border-gray-700 text-center">
-                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase border ${h.type === 'in' ? 'bg-green-900/30 text-green-400 border-green-800' : 'bg-red-900/30 text-red-400 border-red-800'}`}>
-                                    {h.type === 'in' ? 'MASUK' : 'KELUAR'}
-                                </span>
+                            {/* PELANGGAN */}
+                            <td className="px-3 py-2 align-top border-r border-gray-700 text-gray-300 font-medium">
+                                {customer !== '-' ? customer : '-'}
                             </td>
 
-                            {/* KOLOM JUMLAH */}
-                            <td className={`px-3 py-2 align-top text-right font-bold text-sm border-r border-gray-700 ${h.type === 'in' ? 'text-green-400' : 'text-red-400'}`}>
+                            {/* PART NO */}
+                            <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px] text-gray-400">
+                                {h.partNumber}
+                            </td>
+
+                            {/* BARANG / KETERANGAN */}
+                            <td className="px-3 py-2 align-top border-r border-gray-700">
+                                <div className="font-bold text-gray-200 text-xs mb-0.5">{h.name}</div>
+                                <div className="text-[10px] text-gray-500 italic">{keterangan}</div>
+                            </td>
+
+                            {/* QTY */}
+                            <td className={`px-3 py-2 align-top border-r border-gray-700 text-right font-bold ${h.type === 'in' ? 'text-green-400' : 'text-red-400'}`}>
                                 {h.type === 'in' ? '+' : '-'}{h.quantity}
                             </td>
 
-                            {/* KOLOM TOTAL HARGA */}
-                            <td className="px-3 py-2 align-top text-right font-mono text-[10px] text-gray-300">
+                            {/* SATUAN */}
+                            <td className="px-3 py-2 align-top border-r border-gray-700 text-right font-mono text-[10px] text-gray-400">
+                                {formatRupiah(h.price)}
+                            </td>
+
+                            {/* TOTAL */}
+                            <td className="px-3 py-2 align-top text-right font-mono text-[10px] font-bold text-gray-200">
                                 {formatRupiah(h.totalPrice || ((h.price||0) * h.quantity))}
                             </td>
                         </tr>
@@ -294,22 +290,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
         )}
       </div>
 
-      {/* --- HISTORY LOGS MODAL (GLOBAL - TABEL STYLE EXCEL) --- */}
+      {/* --- HISTORY LOGS MODAL (TABEL EXCEL) --- */}
       {showHistoryDetail && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
-             <div className="bg-gray-800 rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col border border-gray-700 shadow-2xl m-4">
+             <div className="bg-gray-800 rounded-2xl w-full max-w-6xl h-[85vh] flex flex-col border border-gray-700 shadow-2xl m-4">
                  <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900/50 rounded-t-2xl">
                      <h3 className="font-bold text-gray-100 flex items-center gap-2">{showHistoryDetail === 'in' ? <TrendingUp className="text-green-500" size={20}/> : <TrendingDown className="text-red-500" size={20}/>} Detail Barang {showHistoryDetail === 'in' ? 'Masuk' : 'Keluar'}</h3>
                      <button onClick={() => setShowHistoryDetail(null)} className="p-1 hover:bg-gray-700 rounded-full"><X size={20}/></button>
                  </div>
                  <div className="p-3 border-b border-gray-700 bg-gray-800"><input type="text" placeholder="Cari Resi / Nama Barang..." className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-blue-500 outline-none" value={historyDetailSearch} onChange={(e) => setHistoryDetailSearch(e.target.value)} /></div>
-                 
                  <div className="flex-1 overflow-auto bg-gray-900/30 p-2">
                      {historyDetailLoading ? ( <div className="flex justify-center py-10"><Loader2 className="animate-spin text-blue-500" size={30}/></div> ) : historyDetailData.length === 0 ? ( <div className="text-center py-10 text-gray-500">Tidak ada data history</div> ) : (
                          <HistoryTable data={historyDetailData} />
                      )}
                  </div>
-
                  <div className="p-3 border-t border-gray-700 flex justify-between items-center bg-gray-800 rounded-b-2xl">
                      <button onClick={() => setHistoryDetailPage(p => Math.max(1, p - 1))} disabled={historyDetailPage === 1} className="p-1 bg-gray-700 rounded disabled:opacity-30"><ChevronLeft size={18}/></button>
                      <span className="text-xs text-gray-400">Hal {historyDetailPage} / {historyDetailTotalPages}</span>
@@ -319,16 +313,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
-      {/* --- HISTORY PER ITEM MODAL (TABEL STYLE EXCEL) --- */}
+      {/* --- HISTORY PER ITEM MODAL (TABEL EXCEL) --- */}
       {selectedItemHistory && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-gray-800 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col border border-gray-700 shadow-2xl m-4 overflow-hidden">
+              <div className="bg-gray-800 rounded-2xl w-full max-w-5xl max-h-[85vh] flex flex-col border border-gray-700 shadow-2xl m-4 overflow-hidden">
                    <div className="p-4 border-b border-gray-700 bg-gray-900/50 flex justify-between items-center">
                        <div><h3 className="font-bold text-gray-100 flex items-center gap-2"><History size={16} className="text-blue-400"/> Riwayat Item</h3><p className="text-xs text-gray-400 truncate max-w-[300px]">{selectedItemHistory.name}</p></div>
                        <button onClick={() => setSelectedItemHistory(null)} className="p-1 bg-gray-700 hover:bg-gray-600 rounded-full"><X size={18}/></button>
                    </div>
                    <div className="p-3 bg-gray-800 border-b border-gray-700"><input type="text" placeholder="Cari Resi / Nama Customer..." className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 focus:border-blue-500 outline-none" value={itemHistorySearch} onChange={(e) => setItemHistorySearch(e.target.value)} /></div>
-
                    <div className="flex-1 overflow-auto p-2 bg-gray-900/30">
                        {loadingItemHistory ? ( <div className="flex justify-center py-8"><Loader2 className="animate-spin text-blue-500" size={24}/></div> ) : filteredItemHistory.length === 0 ? ( <div className="text-center py-8 text-gray-500 text-xs">Belum ada riwayat transaksi.</div> ) : (
                            <HistoryTable data={filteredItemHistory} />
