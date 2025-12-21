@@ -13,7 +13,7 @@ interface DashboardProps {
   items: InventoryItem[]; 
   orders: Order[];
   history: StockHistory[];
-  refreshTrigger: number; // <-- TAMBAHAN: Prop untuk sinyal refresh
+  refreshTrigger: number; // <--- PROP PENTING UNTUK REFRESH
   onViewOrders: () => void;
   onAddNew: () => void;
   onEdit: (item: InventoryItem) => void;
@@ -28,9 +28,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  
   const [searchTerm, setSearchTerm] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
   
   const [filterType, setFilterType] = useState<'all' | 'low' | 'empty'>('all');
   
@@ -38,14 +36,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [showHistoryDetail, setShowHistoryDetail] = useState<'in' | 'out' | null>(null);
   
+  // State untuk Edit / Tambah di dalam Dashboard
   const [showItemForm, setShowItemForm] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | undefined>(undefined);
 
+  // State untuk History Item Specific
   const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null);
   const [itemHistorySearch, setItemHistorySearch] = useState('');
   const [itemHistoryData, setItemHistoryData] = useState<StockHistory[]>([]);
   const [loadingItemHistory, setLoadingItemHistory] = useState(false);
 
+  // State untuk History Logs Global
   const [historyDetailData, setHistoryDetailData] = useState<StockHistory[]>([]);
   const [historyDetailPage, setHistoryDetailPage] = useState(1);
   const [historyDetailTotalPages, setHistoryDetailTotalPages] = useState(1);
@@ -54,22 +55,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(searchTerm);
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-
   const loadData = useCallback(async () => {
     setLoading(true);
-    const { data, count } = await fetchInventoryPaginated(page, 50, debouncedSearch, filterType);
+    const { data, count } = await fetchInventoryPaginated(page, 50, searchTerm, filterType);
     setLocalItems(data);
     setTotalCount(count);
     setTotalPages(Math.ceil(count / 50));
     setLoading(false);
-  }, [page, debouncedSearch, filterType]);
+  }, [page, searchTerm, filterType]);
 
   const loadStats = useCallback(async () => {
     const invStats = await fetchInventoryStats();
@@ -85,9 +78,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setStats({ ...invStats, todayIn, todayOut });
   }, [history]);
 
-  // --- UPDATE PENTING DI SINI ---
-  // Tambahkan 'refreshTrigger' ke dependency agar data dimuat ulang saat tombol refresh ditekan
-  useEffect(() => { loadData(); }, [loadData, refreshTrigger]);
+  // --- REFRESH TRIGGER DITAMBAHKAN DI SINI ---
+  useEffect(() => { loadData(); }, [loadData, refreshTrigger]); 
   useEffect(() => { loadStats(); }, [loadStats, refreshTrigger]);
 
   const handleEditClick = (item: InventoryItem) => {
@@ -151,6 +143,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const filteredItemHistory = useMemo(() => { if (!selectedItemHistory) return []; let itemHistory = [...itemHistoryData]; if (itemHistorySearch.trim() !== '') { const lowerSearch = itemHistorySearch.toLowerCase(); itemHistory = itemHistory.filter(h => { const { resi, ecommerce, customer, keterangan } = parseHistoryReason(h.reason); return ( keterangan.toLowerCase().includes(lowerSearch) || resi.toLowerCase().includes(lowerSearch) || ecommerce.toLowerCase().includes(lowerSearch) || customer.toLowerCase().includes(lowerSearch) || h.reason.toLowerCase().includes(lowerSearch) ); }); } return itemHistory; }, [itemHistoryData, selectedItemHistory, itemHistorySearch]);
 
+  // --- LOGIKA WARNA KARTU ---
   const getItemCardStyle = (qty: number) => {
       if (qty === 0) return "bg-red-900/30 border-red-800 hover:border-red-600";
       if (qty < 4) return "bg-orange-900/30 border-orange-800 hover:border-orange-600";
@@ -170,8 +163,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {/* --- STATS SECTION --- */}
       <div className="bg-gray-800 border-b border-gray-700 sticky top-0 z-20 shadow-md">
         <div className="px-4 py-3">
+            {/* Mobile: Scroll, Desktop: Grid 5 Columns */}
             <div className="flex gap-3 overflow-x-auto scrollbar-hide snap-x md:grid md:grid-cols-5 md:overflow-visible">
                 
+                {/* 1. Total Item */}
                 <div className="min-w-[140px] snap-start bg-gradient-to-br from-blue-900/40 to-gray-800 p-3 rounded-xl border border-blue-900/50 flex flex-col justify-between h-24 md:w-auto">
                     <div className="flex items-center gap-2 text-blue-400 mb-1">
                         <div className="p-1.5 bg-blue-900/50 rounded-lg"><Package size={14} /></div>
@@ -180,6 +175,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <div className="text-2xl font-extrabold text-white">{formatCompactNumber(stats.totalItems, false)}</div>
                 </div>
 
+                {/* 2. Total Stok */}
                 <div className="min-w-[140px] snap-start bg-gradient-to-br from-purple-900/40 to-gray-800 p-3 rounded-xl border border-purple-900/50 flex flex-col justify-between h-24 md:w-auto">
                     <div className="flex items-center gap-2 text-purple-400 mb-1">
                          <div className="p-1.5 bg-purple-900/50 rounded-lg"><Layers size={14} /></div>
@@ -188,6 +184,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <div className="text-2xl font-extrabold text-white">{formatCompactNumber(stats.totalStock, false)}</div>
                 </div>
 
+                {/* 3. Masuk Hari Ini */}
                 <button onClick={() => setShowHistoryDetail('in')} className="min-w-[130px] snap-start bg-gray-800 p-3 rounded-xl border border-gray-700 flex flex-col justify-between h-24 active:scale-95 transition-transform md:w-auto text-left hover:border-green-700/50 hover:bg-gray-750">
                     <div className="flex items-center justify-between w-full">
                         <div className="flex items-center gap-2 text-green-500">
@@ -201,6 +198,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                 </button>
 
+                {/* 4. Keluar Hari Ini */}
                 <button onClick={() => setShowHistoryDetail('out')} className="min-w-[130px] snap-start bg-gray-800 p-3 rounded-xl border border-gray-700 flex flex-col justify-between h-24 active:scale-95 transition-transform md:w-auto text-left hover:border-red-700/50 hover:bg-gray-750">
                      <div className="flex items-center justify-between w-full">
                         <div className="flex items-center gap-2 text-red-500">
@@ -214,6 +212,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                 </button>
 
+                 {/* 5. Aset (PALING BELAKANG/KANAN) */}
                  <div className="min-w-[180px] snap-start bg-gradient-to-br from-gray-950 to-gray-800 p-3 rounded-xl shadow-md text-white flex flex-col justify-between h-24 relative overflow-hidden md:w-auto border border-gray-700">
                     <div className="absolute right-0 top-0 p-2 opacity-10"><Wallet size={48} /></div>
                     <div className="flex items-center gap-2 text-gray-400 mb-1">
