@@ -105,8 +105,6 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
   const { data: baseData, error } = await supabase.from(TABLE_NAME).select('*').order('date', { ascending: false, nullsFirst: false });
   if (error) { console.error(error); return []; }
   
-  // Optimasi: Parallel fetch jika memungkinkan, namun untuk fetchInventory (all) kita biarkan dulu
-  // atau bisa dioptimasi sama seperti fetchInventoryPaginated jika jumlah data sedikit.
   const costMap = await fetchLatestCostPrices();
   const sellMap = await fetchLatestSellingPrices();
   
@@ -136,7 +134,6 @@ export const getItemByPartNumber = async (partNumber: string): Promise<Inventory
   return mapped;
 };
 
-// --- UPDATED OPTIMIZED FUNCTION ---
 export const fetchInventoryPaginated = async (page: number, limit: number, search: string, filter: string = 'all') => {
     let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' });
     if (search) { query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`); }
@@ -153,9 +150,6 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
     
     if (baseItems.length > 0) {
         const partNumbers = baseItems.map(i => i.partNumber).filter(Boolean);
-        
-        // OPTIMASI: Parallel Fetching
-        // Mengambil harga beli dan harga jual secara bersamaan
         const [costMap, sellMap] = await Promise.all([
             fetchLatestCostPrices(partNumbers),
             fetchLatestSellingPrices(partNumbers)
@@ -169,19 +163,11 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
     return { data: baseItems, count: count || 0 };
 };
 
-// --- UPDATED OPTIMIZED FUNCTION ---
 export const fetchInventoryStats = async () => {
     const { data: items } = await supabase.from(TABLE_NAME).select('part_number, quantity');
     const all = items || [];
-    
-    // OPTIMASI: Filter Cost Price
-    // Hanya ambil harga untuk barang yang ada di stock list, bukan seluruh history database
     const partNumbers = all.map((i: any) => i.part_number).filter(Boolean);
-    
-    // Jika tidak ada barang, return 0 segera
-    if (partNumbers.length === 0) {
-         return { totalItems: 0, totalStock: 0, totalAsset: 0 };
-    }
+    if (partNumbers.length === 0) return { totalItems: 0, totalStock: 0, totalAsset: 0 };
 
     const costMap = await fetchLatestCostPrices(partNumbers);
     
@@ -238,7 +224,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   return data ? data.id : null;
 };
 
-// --- UPDATE INVENTORY ---
+// --- UPDATE INVENTORY (UPDATED) ---
 export const updateInventory = async (
     item: InventoryItem, 
     transaction?: { 
@@ -301,6 +287,7 @@ export const updateInventory = async (
               ketText = `${custName} (RETUR)`; 
           }
 
+          // KITA SIMPAN CUSTOMER DI KOLOM BARU JUGA
           await addBarangMasuk({
               created_at: wibNow,
               tempo: transaction.resiTempo || '-', 
@@ -308,7 +295,8 @@ export const updateInventory = async (
               ecommerce: sourceName, 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
               rak: item.shelf, stockAhir: finalQty, qtyMasuk: txQty,
-              hargaSatuan: txPrice, hargaTotal: txTotal
+              hargaSatuan: txPrice, hargaTotal: txTotal,
+              customer: transaction.customer // KIRIM DATA CUSTOMER KE DB
           });
       } else {
           await addBarangKeluar({
@@ -343,11 +331,13 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
   return true;
 };
 
-// --- HISTORY & TRANSAKSI ---
+// --- HISTORY & TRANSAKSI (UPDATED) ---
 export const fetchHistory = async (): Promise<StockHistory[]> => {
+    // Select semua kolom (termasuk customer)
     const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
     const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
     const history: StockHistory[] = [];
+    
     (dataMasuk || []).forEach((m: any) => {
         const ket = m.keterangan || 'Restock';
         const reasonText = `${ket} (Via: ${m.ecommerce}) (${m.tempo || '-'})`;
@@ -355,15 +345,21 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
             id: m.id, itemId: m.part_number, partNumber: m.part_number, name: m.name,
             type: 'in', quantity: Number(m.qty_masuk), previousStock: Number(m.stock_ahir) - Number(m.qty_masuk),
             currentStock: Number(m.stock_ahir), price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
-            timestamp: parseTimestamp(m.created_at || m.date), reason: reasonText, resi: '-', tempo: m.tempo || '-'
+            timestamp: parseTimestamp(m.created_at || m.date), 
+            reason: reasonText, resi: '-', tempo: m.tempo || '-',
+            customer: m.customer || '-' // MAP KOLOM CUSTOMER
         });
     });
+    
     (dataKeluar || []).forEach((k: any) => {
         history.push({
             id: k.id, itemId: k.part_number, partNumber: k.part_number, name: k.name,
             type: 'out', quantity: Number(k.qty_keluar), previousStock: Number(k.stock_ahir) + Number(k.qty_keluar),
             currentStock: Number(k.stock_ahir), price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
-            timestamp: parseTimestamp(k.created_at || k.date), reason: `${k.customer || ''} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, resi: k.resi || '-', tempo: formatDisplayTempo(k.tempo) 
+            timestamp: parseTimestamp(k.created_at || k.date), 
+            reason: `${k.customer || ''} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, 
+            resi: k.resi || '-', tempo: formatDisplayTempo(k.tempo),
+            customer: k.customer || '-' // MAP KOLOM CUSTOMER
         });
     });
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -374,7 +370,7 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
     let query = supabase.from(table).select('*', { count: 'exact' });
     if (search) {
         if (type === 'in') {
-            query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,keterangan.ilike.%${search}%,tempo.ilike.%${search}%`);
+            query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,keterangan.ilike.%${search}%,tempo.ilike.%${search}%,customer.ilike.%${search}%`);
         }
         else {
             query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,customer.ilike.%${search}%,resi.ilike.%${search}%,tempo.ilike.%${search}%`);
@@ -383,12 +379,14 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
     const from = (page - 1) * limit; const to = from + limit - 1;
     const { data, error, count } = await query.order('created_at', { ascending: false, nullsFirst: false }).range(from, to);
     if (error) { return { data: [], count: 0 }; }
+    
     const mappedData: StockHistory[] = (data || []).map((item: any) => {
         const qty = type === 'in' ? Number(item.qty_masuk) : Number(item.qty_keluar);
         const current = Number(item.stock_ahir); 
         const previous = type === 'in' ? (current - qty) : (current + qty);
         let reasonText = '';
         let displayTempo = formatDisplayTempo(item.tempo);
+        
         if (type === 'in') {
             displayTempo = item.tempo || '-';
             const ket = item.keterangan || 'Restock';
@@ -396,12 +394,14 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
         } else {
             reasonText = `${item.customer || ''} (Via: ${item.ecommerce || '-'}) (Resi: ${item.resi || '-'})`;
         }
+        
         return {
             id: item.id, itemId: item.part_number, partNumber: item.part_number, name: item.name,
             type: type, quantity: qty, previousStock: previous, currentStock: current,
             price: Number(item.harga_satuan), totalPrice: Number(item.harga_total),
             timestamp: parseTimestamp(item.created_at || item.date), 
-            reason: reasonText, resi: item.resi || '-', tempo: displayTempo
+            reason: reasonText, resi: item.resi || '-', tempo: displayTempo,
+            customer: item.customer || '-' // MAP KOLOM CUSTOMER
         };
     });
     return { data: mappedData, count: count || 0 };
@@ -411,6 +411,7 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
     const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
     const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
     const history: StockHistory[] = [];
+    
     (dataMasuk || []).forEach((m: any) => {
         const ket = m.keterangan || 'Restock';
         const reasonText = `${ket} (Via: ${m.ecommerce}) (${m.tempo || '-'})`;
@@ -418,15 +419,21 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
             id: m.id, itemId: m.part_number, partNumber: m.part_number, name: m.name,
             type: 'in', quantity: Number(m.qty_masuk), previousStock: Number(m.stock_ahir) - Number(m.qty_masuk),
             currentStock: Number(m.stock_ahir), price: Number(m.harga_satuan), totalPrice: Number(m.harga_total),
-            timestamp: parseTimestamp(m.created_at || m.date), reason: reasonText, resi: '-', tempo: m.tempo || '-'
+            timestamp: parseTimestamp(m.created_at || m.date), 
+            reason: reasonText, resi: '-', tempo: m.tempo || '-',
+            customer: m.customer || '-' // MAP KOLOM CUSTOMER
         });
     });
+    
     (dataKeluar || []).forEach((k: any) => {
         history.push({
             id: k.id, itemId: k.part_number, partNumber: k.part_number, name: k.name,
             type: 'out', quantity: Number(k.qty_keluar), previousStock: Number(k.stock_ahir) + Number(k.qty_keluar),
             currentStock: Number(k.stock_ahir), price: Number(k.harga_satuan), totalPrice: Number(k.harga_total),
-            timestamp: parseTimestamp(k.created_at || k.date), reason: `${k.customer || ''} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, resi: k.resi || '-', tempo: formatDisplayTempo(k.tempo) 
+            timestamp: parseTimestamp(k.created_at || k.date), 
+            reason: `${k.customer || ''} (Via: ${k.ecommerce}) (Resi: ${k.resi})`, 
+            resi: k.resi || '-', tempo: formatDisplayTempo(k.tempo),
+            customer: k.customer || '-' // MAP KOLOM CUSTOMER
         });
     });
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -435,12 +442,14 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
 export const addBarangMasuk = async (data: any) => { 
     const ecommerceVal = data.ecommerce || 'Lainnya';
     const keteranganVal = data.keterangan || 'Restock'; 
+    
     const { error } = await supabase.from('barang_masuk').insert([{ 
         created_at: data.created_at || getWIBISOString(), 
         tempo: data.tempo, ecommerce: ecommerceVal, keterangan: keteranganVal, 
         part_number: data.partNumber || data.part_number, name: data.name, brand: data.brand, application: data.application, rak: data.rak, 
         stock_ahir: data.stockAhir || data.stock_ahir, qty_masuk: data.qtyMasuk || data.qty_masuk, 
-        harga_satuan: data.hargaSatuan || data.harga_satuan, harga_total: data.hargaTotal || data.harga_total 
+        harga_satuan: data.hargaSatuan || data.harga_satuan, harga_total: data.hargaTotal || data.harga_total,
+        customer: data.customer || '-' // SIMPAN KOLOM CUSTOMER
     }]); 
     if(error) console.error("addBarangMasuk Error", error);
     return !error; 
@@ -458,6 +467,9 @@ export const addBarangKeluar = async (data: any) => {
     return !error; 
 };
 
+// ... sisa kode lainnya tetap sama ...
+// (addHistoryLog, updateOrderData, fetchOrders, saveOrder, updateOrderStatusService, dll tidak perlu diubah)
+
 export const addHistoryLog = async (h: StockHistory) => { 
     const now = getWIBISOString(); 
     if (h.type === 'in') {
@@ -465,7 +477,8 @@ export const addHistoryLog = async (h: StockHistory) => {
             created_at: now, tempo: '', keterangan: 'System Log', ecommerce: 'SYSTEM', 
             partNumber: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-', 
             stockAhir: h.previousStock + h.quantity, qtyMasuk: h.quantity, 
-            hargaSatuan: h.price, hargaTotal: h.totalPrice 
+            hargaSatuan: h.price, hargaTotal: h.totalPrice,
+            customer: '-'
         }); 
     } else {
         return addBarangKeluar({ 
@@ -477,6 +490,7 @@ export const addHistoryLog = async (h: StockHistory) => {
     }
 };
 
+// ... (sisa file sama)
 export const updateOrderData = async (orderId: string, newItems: any[], newTotal: number, newStatus: string): Promise<boolean> => {
     const { data: oldData } = await supabase.from('orders').select('*').eq('resi', orderId).limit(1).single();
     if (!oldData) return false;
@@ -782,7 +796,6 @@ export const updateScanResiLogField = async (id: number, field: string, value: a
 // --- FUNGSI BARU: DUPLICATE & SPLIT PRICE ---
 export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
     try {
-        // 1. Ambil data baris yang diklik
         const { data: sourceItem, error: fetchError } = await supabase
             .from('scan_resi')
             .select('*')
@@ -791,7 +804,6 @@ export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
 
         if (fetchError || !sourceItem) return false;
 
-        // 2. Cari SEMUA saudara kembar (Resi sama & Nama Barang sama) untuk menghitung Total Pool Harga
         const { data: siblings } = await supabase
             .from('scan_resi')
             .select('*')
@@ -800,15 +812,11 @@ export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
 
         if (!siblings) return false;
 
-        // 3. Hitung Total Harga dari semua saudara
         const totalPoolPrice = siblings.reduce((sum, item) => sum + (Number(item.harga_total) || 0), 0);
         
-        // 4. Hitung Harga Baru Rata-Rata
-        // Jumlah item sekarang + 1 item baru
         const newCount = siblings.length + 1;
         const newPricePerItem = Math.floor(totalPoolPrice / newCount);
 
-        // 5. Update harga SEMUA saudara yang ada
         const updatePromises = siblings.map(item => 
             supabase.from('scan_resi').update({ 
                 harga_total: newPricePerItem,
@@ -817,8 +825,6 @@ export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
         );
         await Promise.all(updatePromises);
 
-        // 6. Insert Item Baru (Clone)
-        // PERBAIKAN: Pisahkan id lama agar tidak konflik
         const { id: oldId, ...cleanItemData } = sourceItem;
 
         const { error: insertError } = await supabase.from('scan_resi').insert([{
@@ -841,7 +847,6 @@ export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
     }
 };
 
-// --- FUNGSI BARU: DELETE ROW ---
 export const deleteScanResiLog = async (id: number): Promise<boolean> => {
     try {
         const { error } = await supabase.from('scan_resi').delete().eq('id', id);

@@ -123,7 +123,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setItemHistoryPage(1);
   }, [selectedItemHistory, itemHistorySearch]);
   
-  // --- PARSING LOGIC DIPERBAIKI DISINI ---
+  // --- PARSING LOGIC DIPERBAIKI (MENGGUNAKAN KOLOM CUSTOMER) ---
   const parseHistoryReason = (h: StockHistory) => { 
       let resi = h.resi || '-';
       let ecommerce = '-'; 
@@ -131,30 +131,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
       let text = h.reason || ''; 
       let tempo = h.tempo || '-'; 
 
-      // 1. Ambil & Bersihkan Resi dan Via dari text reason utama
+      // 1. Ambil Resi dan Via dari text reason utama (jika ada)
       const resiMatch = text.match(/\(Resi: (.*?)\)/); 
       if (resiMatch && resiMatch[1]) { 
           resi = resiMatch[1]; 
           text = text.replace(/\s*\(Resi:.*?\)/, ''); 
       } 
-      
       const viaMatch = text.match(/\(Via: (.*?)\)/); 
       if (viaMatch && viaMatch[1]) { 
           ecommerce = viaMatch[1]; 
           text = text.replace(/\s*\(Via:.*?\)/, ''); 
       } 
-      
-      // PERBAIKAN: Bersihkan sisa karakter aneh seperti "(-)" atau "()" yang mungkin terbawa
       text = text.replace(/\s*\(\-\)/, '').replace(/\s*\(\)/, '').trim();
 
       let keterangan = '';
       let isRetur = false;
 
+      // --- LOGIKA BARU: PRIORITASKAN KOLOM CUSTOMER LANGSUNG ---
+      if (h.customer && h.customer !== '-' && h.customer !== '') {
+         customer = h.customer;
+      }
+
       if (h.type === 'out') {
           // Barang Keluar
-          if (text) {
-             // Bersihkan semua teks dalam kurung
-             customer = text.replace(/\s*\(.*?\)/g, '').trim();
+          if (customer === '-' && text) {
+             customer = text.replace(/\s*\(.*?\)/g, '').trim(); // Fallback untuk data lama
           }
           keterangan = 'Terjual';
       } else {
@@ -162,26 +163,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
           if (text.toLowerCase().includes('retur') || text.toLowerCase().includes('cancel')) {
               isRetur = true;
               keterangan = 'RETUR';
-              
-              // Hapus kata (RETUR)/(CANCEL) dan sisa kurung lainnya
-              let tempName = text.replace(/\s*\(RETUR\)/i, '').replace(/\s*\(CANCEL\)/i, '');
-              customer = tempName.replace(/\s*\(.*?\)/g, '').trim();
-
+              if (customer === '-') {
+                   let tempName = text.replace(/\s*\(RETUR\)/i, '').replace(/\s*\(CANCEL\)/i, '');
+                   customer = tempName.replace(/\s*\(.*?\)/g, '').trim();
+              }
           } else {
-              // --- LOGIKA PENAMPILAN NAMA CUSTOMER ---
               const standardTexts = ['Manual Restock', 'Restock', 'Stok Awal', 'System Log', 'Opname', 'Adjustment'];
-              
-              // Cek case-insensitive
               const isStandard = standardTexts.some(st => st.toLowerCase() === text.toLowerCase());
 
               if (isStandard || text === '') {
-                  // Jika teks standar atau kosong, jangan tampilkan di kolom Customer
                   keterangan = (text === '' || text === 'Manual Restock') ? 'Restock' : text; 
-                  customer = '-';
+                  // Jika customer masih kosong, biarkan '-'
               } else {
-                  // Jika teks berbeda (misal nama orang "Budi"), tampilkan sebagai Customer
-                  customer = text;
-                  keterangan = 'Restock'; // Keterangan di-set default agar rapi
+                  // Jika ada teks aneh di keterangan, dan customer kosong, anggap itu customer (untuk data lama)
+                  if (customer === '-') customer = text;
+                  keterangan = 'Restock';
               }
           }
       }

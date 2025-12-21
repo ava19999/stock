@@ -35,6 +35,7 @@ export interface BarangMasuk {
   qtyMasuk: number;
   hargaSatuan: number;
   hargaTotal: number;
+  customer?: string; // TAMBAHAN BARU
 }
 
 export interface BarangKeluar {
@@ -71,6 +72,7 @@ export interface StockHistory {
   reason: string;
   resi?: string;
   tempo?: string;
+  customer?: string; // TAMBAHAN BARU
 }
 
 export interface Order {
@@ -120,13 +122,12 @@ export interface ReturRecord {
   keterangan: string | null;
 }
 
-// --- INTERFACE UNTUK SCAN RESI ---
 export interface ScanResiLog {
   id?: number;
-  tanggal: string;      // date
-  resi: string;         // text
-  toko: string | null;  // text
-  ecommerce: string;    // text
+  tanggal: string;      
+  resi: string;         
+  toko: string | null;  
+  ecommerce: string;    
   customer: string | null;
   part_number: string | null;
   nama_barang: string | null;
