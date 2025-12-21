@@ -163,8 +163,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
           if (text.toLowerCase().includes('retur') || text.toLowerCase().includes('cancel')) {
               isRetur = true;
               keterangan = 'RETUR';
-              // Hapus kata "(RETUR)" dari nama pelanggan (case insensitive)
-              customer = text.replace(/\s*\(RETUR\)/i, '').trim();
+              
+              // --- PERBAIKAN DI SINI ---
+              // 1. Hapus kata (RETUR) atau (CANCEL) terlebih dahulu
+              let tempName = text.replace(/\s*\(RETUR\)/i, '').replace(/\s*\(CANCEL\)/i, '');
+              
+              // 2. Hapus sisa teks yang ada di dalam kurung (seperti SPXID/Toko dll)
+              // Logika ini sekarang sama dengan logika Barang Keluar
+              customer = tempName.replace(/\s*\(.*?\)/g, '').trim();
+
           } else {
               keterangan = text.replace('Manual Restock', 'Restock'); 
           }
