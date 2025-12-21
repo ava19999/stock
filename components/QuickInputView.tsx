@@ -264,7 +264,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const totalPages = Math.ceil(rows.length / itemsPerPage);
 
   return (
-    <div className="bg-gray-800 rounded-xl shadow-sm min-h-[80vh] flex flex-col overflow-hidden text-gray-100">
+    <div className="bg-gray-800 min-h-[80vh] flex flex-col overflow-hidden text-gray-100">
       {/* Header */}
       <div className="px-4 py-3 bg-gray-800 flex justify-between items-center">
         <div>
@@ -297,10 +297,10 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         </div>
       </div>
 
-      {/* Tabel Input - Tanpa Border */}
-      <div className="flex-1 overflow-auto p-2 bg-gray-900">
-        <div className="bg-gray-800 rounded-lg overflow-x-auto min-w-[1000px]">
-          <table className="w-full text-left border-collapse">
+      {/* Tabel Input - TANPA BORDER SAMA SEKALI */}
+      <div className="flex-1 overflow-auto p-2">
+        <div className="overflow-x-auto min-w-[1000px]">
+          <table className="w-full text-left">
             <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
               <tr>
                 <th className="px-3 py-2 w-10 text-center">#</th>
@@ -317,7 +317,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                 <th className="px-3 py-2 w-10 text-center">Aksi</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-700/30 text-xs">
+            <tbody className="text-xs">
               {currentRows.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="p-8 text-center text-gray-500">
@@ -329,7 +329,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                 currentRows.map((row, index) => (
                   <tr 
                     key={row.id} 
-                    className={`transition-colors hover:bg-gray-700/30 ${
+                    className={`hover:bg-gray-700/20 ${
                       row.error ? 'bg-red-900/10' : ''
                     }`}
                   >
@@ -344,8 +344,8 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                         <input
                           ref={el => inputRefs.current[index * 6] = el}
                           type="text"
-                          className={`w-full bg-gray-700 border-0 rounded px-2 py-1.5 text-sm font-mono text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                            row.error ? 'ring-1 ring-red-500' : ''
+                          className={`w-full bg-transparent px-2 py-1.5 text-sm font-mono text-gray-200 focus:outline-none focus:text-blue-400 ${
+                            row.error ? 'text-red-400' : ''
                           }`}
                           value={row.partNumber}
                           onChange={(e) => handlePartNumberChange(row.id, e.target.value)}
@@ -385,7 +385,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                     {/* Tipe Operasi */}
                     <td className="px-3 py-2 text-center">
                       <select
-                        className={`w-full bg-gray-700 border-0 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+                        className={`w-full bg-transparent px-2 py-1.5 text-xs focus:outline-none ${
                           row.operation === 'in' ? 'text-green-400 font-bold' : 'text-red-400 font-bold'
                         }`}
                         value={row.operation}
@@ -403,9 +403,9 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                         type="number"
                         min="0"
                         step="1"
-                        className={`w-full bg-gray-700 border-0 rounded px-2 py-1.5 text-sm font-bold text-right font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+                        className={`w-full bg-transparent px-2 py-1.5 text-sm font-bold text-right font-mono focus:outline-none ${
                           row.operation === 'in' ? 'text-green-400' : 'text-red-400'
-                        } ${row.error ? 'ring-1 ring-red-500' : ''}`}
+                        } ${row.error ? 'text-red-400' : ''}`}
                         value={row.quantity}
                         onChange={(e) => updateRow(row.id, 'quantity', parseInt(e.target.value) || 0)}
                       />
@@ -417,7 +417,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                         <span className="text-gray-500 text-[10px]">Rp</span>
                         <input
                           type="number"
-                          className="w-full bg-gray-700 border-0 rounded px-2 py-1.5 text-sm font-mono text-right text-orange-300 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                          className="w-full bg-transparent px-2 py-1.5 text-sm font-mono text-right text-orange-300 focus:outline-none focus:text-orange-400"
                           value={row.hargaModal}
                           onChange={(e) => updateRow(row.id, 'hargaModal', parseInt(e.target.value) || 0)}
                         />
@@ -430,7 +430,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                         <span className="text-gray-500 text-[10px]">Rp</span>
                         <input
                           type="number"
-                          className="w-full bg-gray-700 border-0 rounded px-2 py-1.5 text-sm font-mono text-right text-blue-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full bg-transparent px-2 py-1.5 text-sm font-mono text-right text-blue-300 focus:outline-none focus:text-blue-400"
                           value={row.hargaJual}
                           onChange={(e) => updateRow(row.id, 'hargaJual', parseInt(e.target.value) || 0)}
                         />
@@ -441,7 +441,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                     <td className="px-3 py-2">
                       <input
                         type="text"
-                        className="w-full bg-gray-700 border-0 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full bg-transparent px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:text-blue-400"
                         value={row.via}
                         onChange={(e) => updateRow(row.id, 'via', e.target.value)}
                         placeholder="Shopee/Tokopedia"
@@ -452,7 +452,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                     <td className="px-3 py-2">
                       <input
                         type="text"
-                        className="w-full bg-gray-700 border-0 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full bg-transparent px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:text-blue-400"
                         value={row.customer}
                         onChange={(e) => updateRow(row.id, 'customer', e.target.value)}
                         placeholder="Nama customer"
@@ -463,7 +463,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                     <td className="px-3 py-2">
                       <input
                         type="text"
-                        className="w-full bg-gray-700 border-0 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full bg-transparent px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:text-blue-400"
                         value={row.resiTempo}
                         onChange={(e) => updateRow(row.id, 'resiTempo', e.target.value)}
                         placeholder="RESI123 / 30 hari"
@@ -501,7 +501,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
                     <td className="px-3 py-2 text-center">
                       <button
                         onClick={() => removeRow(row.id)}
-                        className="p-1 hover:bg-red-900/30 rounded text-red-400 transition-colors"
+                        className="p-1 hover:text-red-300 text-red-400 transition-colors"
                         title="Hapus baris"
                       >
                         <Trash2 size={14} />
@@ -540,7 +540,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
             <button
               onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
               disabled={currentPage === 1}
-              className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-1 hover:bg-gray-700/50 rounded text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <ChevronLeft size={16} />
             </button>
@@ -550,7 +550,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
             <button
               onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
               disabled={currentPage >= totalPages}
-              className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="p-1 hover:bg-gray-700/50 rounded text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <ChevronRight size={16} />
             </button>
