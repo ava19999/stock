@@ -33,6 +33,16 @@ import {
 const STORE_LIST = ['MJM', 'LARIS', 'BJW'];
 const MARKETPLACES = ['Shopee', 'Tiktok', 'Tokopedia', 'Lazada', 'Offline'];
 
+// --- HELPER TIMEZONE (WIB) ---
+const getWIBISOString = () => {
+    // Membuat objek Date yang digeser ke WIB (UTC+7)
+    const now = new Date();
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const wibTime = new Date(utc + (7 * 60 * 60 * 1000));
+    // Mengembalikan string ISO tanpa 'Z' di akhir agar dianggap sebagai waktu lokal (WIB)
+    return wibTime.toISOString().slice(0, -1);
+};
+
 // --- KOMPONEN TOAST LOCAL ---
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
@@ -508,9 +518,14 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
         const { resiText, shopName, ecommerce, cleanName } = getOrderDetails(selectedOrderForReturn);
         const combinedResiShop = `${resiText} / ${shopName}`;
         
-        // --- PERBAIKAN LOGIKA TANGGAL DISINI ---
-        // Menggunakan timestamp dari Order, bukan items[0]
-        const orderDate = selectedOrderForReturn.timestamp ? new Date(selectedOrderForReturn.timestamp).toISOString() : new Date().toISOString();
+        // --- PERBAIKAN LOGIKA TANGGAL & TIMEZONE ---
+        // Jika timestamp order tidak ada, gunakan waktu WIB sekarang
+        const orderTimestamp = selectedOrderForReturn.timestamp 
+            ? new Date(selectedOrderForReturn.timestamp).toISOString() 
+            : getWIBISOString();
+        
+        // Tanggal retur saat ini (WIB)
+        const currentReturDate = getWIBISOString();
 
         const remainingItems = selectedOrderForReturn.items.map(item => {
             const returItem = itemsToReturnData.find(r => r.id === item.id);
@@ -529,7 +544,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
                 });
             }
             const returData: ReturRecord = {
-                tanggal_pemesanan: orderDate, 
+                tanggal_pemesanan: orderTimestamp, 
                 resi: resiText, 
                 toko: shopName, 
                 ecommerce, 
@@ -539,7 +554,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
                 quantity: item.cartQuantity,
                 harga_satuan: hargaSatuan, 
                 harga_total: hargaSatuan * item.cartQuantity, 
-                tanggal_retur: new Date().toISOString(), // Ini adalah tanggal saat tombol retur diklik
+                tanggal_retur: currentReturDate, 
                 status: statusLabel, 
                 keterangan: 'Retur Barang'
             };
