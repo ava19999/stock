@@ -89,16 +89,6 @@ export interface CartItem extends InventoryItem {
   customPrice?: number;
 }
 
-export interface ChatSession {
-  customerId: string;
-  customerName: string;
-  messages: any[];
-  lastMessage: string;
-  lastTimestamp: number;
-  unreadAdminCount: number;
-  unreadUserCount: number;
-}
-
 export interface AIAnalysisResult {
   suggestedName?: string;
   suggestedDescription?: string;
