@@ -299,20 +299,20 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
       {/* Tabel Input - TANPA BORDER SAMA SEKALI */}
       <div className="flex-1 overflow-auto p-2">
-        <div className="overflow-x-auto min-w-[1000px]">
+        <div className="overflow-x-auto min-w-[1200px]">
           <table className="w-full text-left">
             <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
               <tr>
-                <th className="px-3 py-2 w-10 text-center">#</th>
+                <th className="px-3 py-2 w-8 text-center">#</th>
                 <th className="px-3 py-2 w-32">Part Number</th>
-                <th className="px-3 py-2">Nama Barang</th>
-                <th className="px-3 py-2 w-24 text-center">Tipe</th>
+                <th className="px-3 py-2 w-72">Nama Barang</th> {/* DILEBARKAN */}
+                <th className="px-3 py-2 w-40 text-center">Tipe</th> {/* DILEBARKAN */}
                 <th className="px-3 py-2 w-20 text-right">Qty</th>
                 <th className="px-3 py-2 w-32 text-right">Harga Modal</th>
                 <th className="px-3 py-2 w-32 text-right">Harga Jual</th>
                 <th className="px-3 py-2 w-24">Via</th>
-                <th className="px-3 py-2">Customer</th>
-                <th className="px-3 py-2">Resi/Tempo</th>
+                <th className="px-3 py-2 w-48">Customer</th> {/* DILEBARKAN */}
+                <th className="px-3 py-2 w-56">Resi/Tempo</th> {/* DILEBARKAN */}
                 <th className="px-3 py-2 w-24 text-center">Status</th>
                 <th className="px-3 py-2 w-10 text-center">Aksi</th>
               </tr>
@@ -377,7 +377,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
                     {/* Nama Barang */}
                     <td className="px-3 py-2">
-                      <div className="text-gray-300 font-medium text-sm truncate max-w-[200px]">
+                      <div className="text-gray-300 font-medium text-sm max-w-[280px] truncate">
                         {row.namaBarang || '-'}
                       </div>
                     </td>
