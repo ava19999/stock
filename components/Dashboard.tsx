@@ -164,16 +164,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
               isRetur = true;
               keterangan = 'RETUR';
               
-              // --- PERBAIKAN DI SINI ---
               // 1. Hapus kata (RETUR) atau (CANCEL) terlebih dahulu
               let tempName = text.replace(/\s*\(RETUR\)/i, '').replace(/\s*\(CANCEL\)/i, '');
-              
               // 2. Hapus sisa teks yang ada di dalam kurung (seperti SPXID/Toko dll)
-              // Logika ini sekarang sama dengan logika Barang Keluar
               customer = tempName.replace(/\s*\(.*?\)/g, '').trim();
 
           } else {
-              keterangan = text.replace('Manual Restock', 'Restock'); 
+              // --- PERBAIKAN: Jika bukan teks standar, anggap sebagai Nama Customer ---
+              const standardTexts = ['Manual Restock', 'Restock', 'Stok Awal', 'System Log'];
+              
+              if (standardTexts.includes(text)) {
+                  keterangan = text.replace('Manual Restock', 'Restock'); 
+                  customer = '-';
+              } else {
+                  // Jika teks berbeda (misal nama orang "Budi"), masukkan ke customer
+                  customer = text;
+                  keterangan = 'Restock'; // Set keterangan default agar rapi
+              }
           }
       }
 
