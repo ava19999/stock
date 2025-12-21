@@ -27,7 +27,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState(''); // State untuk debounce
   
   const [filterType, setFilterType] = useState<'all' | 'low' | 'empty'>('all');
   
@@ -54,14 +56,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
+  // --- OPTIMASI: DEBOUNCE EFFECT ---
+  // Hanya update debouncedSearch jika user berhenti mengetik selama 500ms
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
   const loadData = useCallback(async () => {
     setLoading(true);
-    const { data, count } = await fetchInventoryPaginated(page, 50, searchTerm, filterType);
+    // Gunakan debouncedSearch di sini alih-alih searchTerm langsung
+    const { data, count } = await fetchInventoryPaginated(page, 50, debouncedSearch, filterType);
     setLocalItems(data);
     setTotalCount(count);
     setTotalPages(Math.ceil(count / 50));
     setLoading(false);
-  }, [page, searchTerm, filterType]);
+  }, [page, debouncedSearch, filterType]); // Dependency berubah ke debouncedSearch
 
   const loadStats = useCallback(async () => {
     const invStats = await fetchInventoryStats();
