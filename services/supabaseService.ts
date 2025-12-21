@@ -224,7 +224,6 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   return data ? data.id : null;
 };
 
-// --- UPDATE INVENTORY (UPDATED LOGIC FOR SPLIT RESI/TEMPO) ---
 export const updateInventory = async (
     item: InventoryItem, 
     transaction?: { 
@@ -260,7 +259,7 @@ export const updateInventory = async (
   const wibNow = getWIBISOString();
   const { data: updatedData, error } = await supabase.from(TABLE_NAME).update({
     name: item.name, brand: item.brand, application: item.application,
-    shelf: item.shelf, quantity: finalQty, image_url: item.imageUrl,
+    shelf: item.shelf, quantity: finalQty, image_url: item.image_url,
     date: wibNow 
   }).eq('id', item.id).select();
 
@@ -281,8 +280,10 @@ export const updateInventory = async (
       const txTotal = txPrice * txQty;
 
       if (transaction.type === 'in') {
-          // --- LOGIKA BARANG MASUK ---
           let ketText = 'Manual Restock';
+          if (transaction.customer && transaction.customer.trim() !== '') {
+              ketText = transaction.customer;
+          }
           if (transaction.isReturn) {
               const custName = transaction.customer || 'Customer';
               ketText = `${custName} (RETUR)`; 
@@ -296,19 +297,17 @@ export const updateInventory = async (
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
               rak: item.shelf, stockAhir: finalQty, qtyMasuk: txQty,
               hargaSatuan: txPrice, hargaTotal: txTotal,
-              customer: transaction.customer // KIRIM DATA CUSTOMER KE DB
+              customer: transaction.customer 
           });
       } else {
-          // --- LOGIKA BARANG KELUAR ---
           let finalResi = transaction.resiTempo || '-';
           let finalTempo = transaction.store || ''; 
 
-          // PERUBAHAN DI SINI: Deteksi tanda "/" pada input Resi
           if (finalResi.includes('/')) {
               const parts = finalResi.split('/');
-              finalResi = parts[0].trim(); // Bagian depan masuk ke RESI
+              finalResi = parts[0].trim(); 
               if (parts.length > 1) {
-                  finalTempo = parts[1].trim(); // Bagian belakang masuk ke TEMPO
+                  finalTempo = parts[1].trim(); 
               }
           }
 
@@ -346,7 +345,6 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
 
 // --- HISTORY & TRANSAKSI ---
 export const fetchHistory = async (): Promise<StockHistory[]> => {
-    // Select semua kolom (termasuk customer)
     const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
     const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
     const history: StockHistory[] = [];
@@ -509,7 +507,7 @@ export const updateOrderData = async (orderId: string, newItems: any[], newTotal
 
     const rows = newItems.map((item: any) => ({
         tanggal: oldData.tanggal, resi: orderId, toko: oldData.toko, ecommerce: oldData.ecommerce,
-        customer: oldData.customer, part_number: item.partNumber, nama_barang: item.name,
+        customer: oldData.customer, part_number: item.part_number, nama_barang: item.name,
         quantity: item.cartQuantity, harga_satuan: item.customPrice || item.price,
         harga_total: (item.customPrice || item.price) * item.cartQuantity, status: newStatus
     }));
@@ -722,12 +720,25 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
 
         updates.forEach(item => {
             const candidates = existingGrouped.get(item.resi) || [];
+            
+            // --- PROTEKSI HARGA MULAI DISINI ---
+            const sameItemInDb = candidates.filter(c => 
+                (item.part_number && c.part_number === item.part_number) || 
+                (item.nama_barang && c.nama_barang === item.nama_barang)
+            );
+            const isSplitItem = sameItemInDb.length > 1;
+            // --- PROTEKSI HARGA SELESAI DISINI ---
+
             let existing = candidates.find(c => 
                 !updatedIds.has(c.id) && (
                     (item.part_number && c.part_number === item.part_number) || 
                     (item.nama_barang && c.nama_barang === item.nama_barang)
                 )
             );
+
+            if (!existing && candidates.length === 1 && !updatedIds.has(candidates[0].id)) {
+                 existing = candidates[0];
+            }
 
             let statusToUse = 'Pending';
             if (existing) {
@@ -738,18 +749,25 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
 
             if (existing) {
                 updatedIds.add(existing.id); 
+                
+                const updateData: any = {
+                    toko: item.toko,
+                    ecommerce: item.ecommerce,
+                    customer: item.customer,
+                    part_number: item.part_number,
+                    nama_barang: item.nama_barang,
+                    quantity: item.quantity,
+                    status: statusToUse 
+                };
+
+                // HANYA update harga jika BUKAN item split manual
+                if (!isSplitItem) {
+                    updateData.harga_satuan = item.harga_satuan;
+                    updateData.harga_total = item.harga_total;
+                }
+
                 updatePromises.push(
-                    supabase.from('scan_resi').update({
-                        toko: item.toko,
-                        ecommerce: item.ecommerce,
-                        customer: item.customer,
-                        part_number: item.part_number,
-                        nama_barang: item.nama_barang,
-                        quantity: item.quantity,
-                        harga_satuan: item.harga_satuan,
-                        harga_total: item.harga_total,
-                        status: statusToUse 
-                    }).eq('id', existing.id)
+                    supabase.from('scan_resi').update(updateData).eq('id', existing.id)
                 );
             } else {
                 insertPayload.push({
