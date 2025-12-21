@@ -108,29 +108,59 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => { if (showHistoryDetail) { setHistoryDetailLoading(true); const timer = setTimeout(async () => { const { data, count } = await fetchHistoryLogsPaginated(showHistoryDetail, historyDetailPage, 50, historyDetailSearch); setHistoryDetailData(data); setHistoryDetailTotalPages(Math.ceil(count / 50)); setHistoryDetailLoading(false); }, 500); return () => clearTimeout(timer); } else { setHistoryDetailData([]); setHistoryDetailPage(1); setHistoryDetailSearch(''); } }, [showHistoryDetail, historyDetailPage, historyDetailSearch]);
   useEffect(() => { if (selectedItemHistory && selectedItemHistory.partNumber) { setLoadingItemHistory(true); setItemHistoryData([]); fetchItemHistory(selectedItemHistory.partNumber).then((data) => { setItemHistoryData(data); setLoadingItemHistory(false); }).catch(() => setLoadingItemHistory(false)); } }, [selectedItemHistory]);
   
+  // --- FUNGSI PARSING DATA YANG DIPERBAIKI ---
   const parseHistoryReason = (h: StockHistory) => { 
       let resi = h.resi || '-';
       let ecommerce = '-'; 
       let customer = '-'; 
-      let keterangan = h.reason || ''; 
+      let text = h.reason || ''; 
       let tempo = h.tempo || '-'; 
 
-      const resiMatch = keterangan.match(/\(Resi: (.*?)\)/); if (resiMatch && resiMatch[1]) { resi = resiMatch[1]; keterangan = keterangan.replace(/\s*\(Resi:.*?\)/, ''); } 
-      const viaMatch = keterangan.match(/\(Via: (.*?)\)/); if (viaMatch && viaMatch[1]) { ecommerce = viaMatch[1]; keterangan = keterangan.replace(/\s*\(Via:.*?\)/, ''); } 
-      const nameMatch = keterangan.match(/\((.*?)\)/); if (nameMatch && nameMatch[1] && nameMatch[1] !== 'RETUR') { customer = nameMatch[1]; keterangan = keterangan.replace(/\s*\(.*?\)/, ''); } 
+      // 1. Ambil Resi dari string reason jika ada
+      const resiMatch = text.match(/\(Resi: (.*?)\)/); 
+      if (resiMatch && resiMatch[1]) { 
+          resi = resiMatch[1]; 
+          text = text.replace(/\s*\(Resi:.*?\)/, ''); 
+      } 
       
-      if (keterangan.toLowerCase().includes('cancel order')) { keterangan = 'Retur Pesanan'; } 
-      if (!keterangan.trim()) keterangan = 'Transaksi'; 
+      // 2. Ambil Via dari string reason jika ada
+      const viaMatch = text.match(/\(Via: (.*?)\)/); 
+      if (viaMatch && viaMatch[1]) { 
+          ecommerce = viaMatch[1]; 
+          text = text.replace(/\s*\(Via:.*?\)/, ''); 
+      } 
+      
+      // Bersihkan sisa text
+      text = text.trim();
 
-      // Logic Tempo/Toko di bawah Resi
+      // 3. Logika pemisahan: Sisa teks adalah Customer (jika Keluar) atau Keterangan (jika Masuk)
+      let keterangan = '';
+
+      if (h.type === 'out') {
+          // Jika Barang Keluar, sisa teks biasanya adalah NAMA PELANGGAN
+          if (text) {
+              customer = text;
+          }
+          keterangan = 'Terjual'; // Keterangan default untuk barang keluar
+      } else {
+          // Jika Barang Masuk, sisa teks adalah KETERANGAN (misal: Restock, Stok Awal)
+          keterangan = text;
+          
+          // Khusus jika ada kata RETUR, kemungkinan ada nama customernya
+          if (text.includes('(RETUR)')) {
+              customer = text.replace('(RETUR)', '').trim();
+              keterangan = 'Retur Masuk';
+          }
+      }
+
+      // 4. Logika Sub Info (Tempo/Toko)
       let subInfo = tempo;
       if (subInfo === '-' || subInfo === '' || subInfo === 'AUTO') {
-          // Jika tempo kosong, coba ambil dari customer jika ecommerce ada, atau sebaliknya
-          if (ecommerce !== '-' && ecommerce !== 'Lainnya') subInfo = ecommerce; // Kadang nama toko ada di ecommerce
+          if (ecommerce !== '-' && ecommerce !== 'Lainnya') subInfo = ecommerce;
           else subInfo = '-';
       }
 
-      return { resi, subInfo, customer, keterangan: keterangan.trim(), ecommerce }; 
+      return { resi, subInfo, customer, keterangan, ecommerce }; 
   };
 
   const filteredItemHistory = useMemo(() => { if (!selectedItemHistory) return []; let itemHistory = [...itemHistoryData]; if (itemHistorySearch.trim() !== '') { const lowerSearch = itemHistorySearch.toLowerCase(); itemHistory = itemHistory.filter(h => { const { resi, subInfo, customer, keterangan } = parseHistoryReason(h); return ( keterangan.toLowerCase().includes(lowerSearch) || resi.toLowerCase().includes(lowerSearch) || subInfo.toLowerCase().includes(lowerSearch) || customer.toLowerCase().includes(lowerSearch) || h.reason.toLowerCase().includes(lowerSearch) ); }); } return itemHistory; }, [itemHistoryData, selectedItemHistory, itemHistorySearch]);
@@ -191,7 +221,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 ) : <span className="text-gray-600">-</span>}
                             </td>
 
-                            {/* PELANGGAN */}
+                            {/* PELANGGAN (Sekarang sudah benar terisi) */}
                             <td className="px-3 py-2 align-top border-r border-gray-700 text-gray-300 font-medium">
                                 {customer !== '-' ? customer : '-'}
                             </td>
