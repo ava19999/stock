@@ -97,6 +97,9 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
   const [activeSearchId, setActiveSearchId] = useState<number | null>(null); 
   const [popupPos, setPopupPos] = useState<{ top?: number; bottom?: number; left: number; width: number } | null>(null);
 
+  // --- STATE INLINE EDIT ---
+  const [editingCell, setEditingCell] = useState<{id: number, field: string} | null>(null);
+
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -125,6 +128,46 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
 
   // --- LOGIKA SCAN RESI ---
   const loadScanLogs = async () => { setScanLogs(await fetchScanResiLogs()); };
+
+  // --- FUNGSI UPDATE FIELD DENGAN AUTO-SAVE ---
+  const handleUpdateField = async (id: number, field: string, value: any) => {
+    try {
+      // Update lokal state
+      setScanLogs(prev => prev.map(log => 
+        log.id === id ? { ...log, [field]: value } : log
+      ));
+      
+      // Jika field adalah quantity, hitung ulang harga_total
+      if (field === 'quantity') {
+        const log = scanLogs.find(l => l.id === id);
+        if (log) {
+          const newQuantity = parseFloat(value) || 0;
+          const newHargaTotal = log.harga_satuan * newQuantity;
+          
+          // Update harga_total di state
+          setScanLogs(prev => prev.map(log => 
+            log.id === id ? { ...log, harga_total: newHargaTotal } : log
+          ));
+          
+          // Simpan ke database
+          await updateScanResiLogField(id, 'quantity', newQuantity);
+          await updateScanResiLogField(id, 'harga_total', newHargaTotal);
+          showToast(`Qty diperbarui & total dihitung ulang`, 'success');
+          return;
+        }
+      }
+      
+      // Untuk field lainnya, langsung simpan
+      await updateScanResiLogField(id, field, value);
+      showToast(`${field} diperbarui`, 'success');
+      
+    } catch (error) {
+      console.error(`Gagal update field ${field}:`, error);
+      showToast(`Gagal update ${field}`, 'error');
+      // Reload data untuk sync ulang
+      loadScanLogs();
+    }
+  };
 
   const handleBarcodeInput = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -602,10 +645,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
           </div>
       </div>
 
-      {/* CONTENT (BAGIAN INI TIDAK DIUBAH DARI ASLINYA) */}
+      {/* CONTENT */}
       {activeTab === 'scan' ? (
         <div className="flex-1 flex flex-col overflow-hidden bg-gray-900">
-            {/* ... KODE SCAN RESI ASLI ANDA ... */}
+            {/* HEADER SCAN RESI */}
             <div className="bg-gray-800 p-3 shadow-sm border-b border-gray-700 z-20">
                 <div className="flex flex-col gap-3">
                     <div className="grid grid-cols-2 gap-2">
@@ -656,6 +699,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
                 </div>
             </div>
 
+            {/* TABEL SCAN RESI */}
             <div className="flex-1 overflow-auto p-2">
                 {scanCurrentItems.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-48 text-gray-500 gap-2">
@@ -664,6 +708,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
                     </div>
                 ) : (
                     <>
+                        {/* MOBILE VIEW */}
                         <div className="md:hidden space-y-3 pb-20">
                             {scanCurrentItems.map((log) => {
                                 const isReady = log.status === 'Siap Kirim';
@@ -719,11 +764,77 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
                                             </div>
                                         </div>
 
+                                        {/* INLINE EDIT MOBILE */}
                                         <div className="space-y-1 mb-2">
+                                            {/* Pelanggan */}
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[10px] text-gray-500 w-12 flex-shrink-0">Pelanggan</span>
+                                                {editingCell?.id === log.id && editingCell?.field === 'customer' ? (
+                                                    <input
+                                                        className="flex-1 bg-gray-700 border-b border-blue-500 text-gray-100 p-1 text-xs"
+                                                        value={log.customer || ''}
+                                                        onChange={(e) => setScanLogs(prev => prev.map(l => 
+                                                            l.id === log.id ? { ...l, customer: e.target.value } : l
+                                                        ))}
+                                                        onBlur={(e) => {
+                                                            handleUpdateField(log.id!, 'customer', e.target.value);
+                                                            setEditingCell(null);
+                                                        }}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                                handleUpdateField(log.id!, 'customer', (e.target as HTMLInputElement).value);
+                                                                setEditingCell(null);
+                                                            } else if (e.key === 'Escape') {
+                                                                setEditingCell(null);
+                                                            }
+                                                        }}
+                                                        autoFocus
+                                                    />
+                                                ) : (
+                                                    <span 
+                                                        className="text-xs font-medium text-gray-300 flex-1 cursor-text hover:text-blue-300"
+                                                        onClick={() => !isSold && setEditingCell({id: log.id!, field: 'customer'})}
+                                                    >
+                                                        {log.customer || '-'}
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {/* Produk */}
                                             <div className="flex items-center gap-2">
                                                 <span className="text-[10px] text-gray-500 w-12 flex-shrink-0">Produk</span>
-                                                <span className="text-xs font-medium text-gray-300 flex-1">{log.nama_barang || '-'}</span>
+                                                {editingCell?.id === log.id && editingCell?.field === 'nama_barang' ? (
+                                                    <input
+                                                        className="flex-1 bg-gray-700 border-b border-blue-500 text-gray-100 p-1 text-xs"
+                                                        value={log.nama_barang || ''}
+                                                        onChange={(e) => setScanLogs(prev => prev.map(l => 
+                                                            l.id === log.id ? { ...l, nama_barang: e.target.value } : l
+                                                        ))}
+                                                        onBlur={(e) => {
+                                                            handleUpdateField(log.id!, 'nama_barang', e.target.value);
+                                                            setEditingCell(null);
+                                                        }}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                                handleUpdateField(log.id!, 'nama_barang', (e.target as HTMLInputElement).value);
+                                                                setEditingCell(null);
+                                                            } else if (e.key === 'Escape') {
+                                                                setEditingCell(null);
+                                                            }
+                                                        }}
+                                                        autoFocus
+                                                    />
+                                                ) : (
+                                                    <span 
+                                                        className="text-xs font-medium text-gray-300 flex-1 cursor-text hover:text-blue-300"
+                                                        onClick={() => !isSold && setEditingCell({id: log.id!, field: 'nama_barang'})}
+                                                    >
+                                                        {log.nama_barang || '-'}
+                                                    </span>
+                                                )}
                                             </div>
+
+                                            {/* Part Number */}
                                             <div className="flex items-center gap-2 relative">
                                                 <span className="text-[10px] text-gray-500 w-12 flex-shrink-0">Part No</span>
                                                 <div className="flex-1 relative">
@@ -740,9 +851,45 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
                                                     )}
                                                 </div>
                                             </div>
+
+                                            {/* Qty */}
                                             <div className="flex items-center gap-2">
                                                 <span className="text-[10px] text-gray-500 w-12 flex-shrink-0">Info</span>
-                                                <span className="text-xs text-gray-400">{log.quantity}x @{formatRupiah(log.harga_satuan)}</span>
+                                                {editingCell?.id === log.id && editingCell?.field === 'quantity' ? (
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="1"
+                                                            className="w-16 bg-gray-700 border-b border-blue-500 text-gray-100 p-1 text-xs text-center"
+                                                            value={log.quantity || 0}
+                                                            onChange={(e) => setScanLogs(prev => prev.map(l => 
+                                                                l.id === log.id ? { ...l, quantity: parseFloat(e.target.value) || 0 } : l
+                                                            ))}
+                                                            onBlur={(e) => {
+                                                                handleUpdateField(log.id!, 'quantity', parseFloat(e.target.value) || 0);
+                                                                setEditingCell(null);
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    handleUpdateField(log.id!, 'quantity', parseFloat((e.target as HTMLInputElement).value) || 0);
+                                                                    setEditingCell(null);
+                                                                } else if (e.key === 'Escape') {
+                                                                    setEditingCell(null);
+                                                                }
+                                                            }}
+                                                            autoFocus
+                                                        />
+                                                        <span className="text-xs text-gray-400">@{formatRupiah(log.harga_satuan)}</span>
+                                                    </div>
+                                                ) : (
+                                                    <span 
+                                                        className="text-xs text-gray-400 cursor-text hover:text-blue-300"
+                                                        onClick={() => !isSold && setEditingCell({id: log.id!, field: 'quantity'})}
+                                                    >
+                                                        {log.quantity}x @{formatRupiah(log.harga_satuan)}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -750,6 +897,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
                             })}
                         </div>
 
+                        {/* DESKTOP VIEW */}
                         <div className="hidden md:block bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-visible min-w-[1000px]">
                             <table className="w-full text-left border-collapse">
                                 <thead className="bg-gray-800 sticky top-0 z-10 shadow-sm text-[10px] font-bold text-gray-400 uppercase tracking-wider">
@@ -792,7 +940,41 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
                                                 <td className="px-4 py-3 font-bold text-gray-200 font-mono select-all">{log.resi}</td>
                                                 <td className="px-4 py-3 text-gray-400 font-semibold">{log.toko || '-'}</td>
                                                 <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-gray-700 text-gray-300 border-gray-600">{log.ecommerce}</span></td>
-                                                <td className="px-4 py-3 text-gray-300 font-medium">{log.customer || '-'}</td>
+                                                
+                                                {/* Kolom Pelanggan - Desktop */}
+                                                <td className="px-4 py-3">
+                                                    {editingCell?.id === log.id && editingCell?.field === 'customer' ? (
+                                                        <input
+                                                            className="w-full bg-gray-700 border-b border-blue-500 text-gray-100 p-1 text-xs"
+                                                            value={log.customer || ''}
+                                                            onChange={(e) => setScanLogs(prev => prev.map(l => 
+                                                                l.id === log.id ? { ...l, customer: e.target.value } : l
+                                                            ))}
+                                                            onBlur={(e) => {
+                                                                handleUpdateField(log.id!, 'customer', e.target.value);
+                                                                setEditingCell(null);
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    handleUpdateField(log.id!, 'customer', (e.target as HTMLInputElement).value);
+                                                                    setEditingCell(null);
+                                                                } else if (e.key === 'Escape') {
+                                                                    setEditingCell(null);
+                                                                }
+                                                            }}
+                                                            autoFocus
+                                                        />
+                                                    ) : (
+                                                        <div 
+                                                            className="cursor-text text-gray-300 font-medium hover:text-blue-300 transition-colors"
+                                                            onClick={() => !isSold && setEditingCell({id: log.id!, field: 'customer'})}
+                                                        >
+                                                            {log.customer || '-'}
+                                                        </div>
+                                                    )}
+                                                </td>
+
+                                                {/* Kolom Part Number - Desktop */}
                                                 <td className="px-4 py-3 relative">
                                                     <div className="flex items-center gap-1 relative">
                                                         {!isSold ? (
@@ -808,9 +990,82 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
                                                         {!!log.part_number && <Search size={10} className="text-blue-400 flex-shrink-0" title="Terdeteksi Otomatis"/>}
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3 text-gray-400 whitespace-normal" title={log.nama_barang || ''}>{log.nama_barang || '-'}</td>
-                                                <td className="px-4 py-3 text-gray-400 text-center">{log.quantity || '-'}</td>
-                                                <td className="px-4 py-3 text-gray-200 font-bold text-right">{log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}</td>
+
+                                                {/* Kolom Barang - Desktop */}
+                                                <td className="px-4 py-3 text-gray-400 whitespace-normal">
+                                                    {editingCell?.id === log.id && editingCell?.field === 'nama_barang' ? (
+                                                        <input
+                                                            className="w-full bg-gray-700 border-b border-blue-500 text-gray-100 p-1 text-xs"
+                                                            value={log.nama_barang || ''}
+                                                            onChange={(e) => setScanLogs(prev => prev.map(l => 
+                                                                l.id === log.id ? { ...l, nama_barang: e.target.value } : l
+                                                            ))}
+                                                            onBlur={(e) => {
+                                                                handleUpdateField(log.id!, 'nama_barang', e.target.value);
+                                                                setEditingCell(null);
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    handleUpdateField(log.id!, 'nama_barang', (e.target as HTMLInputElement).value);
+                                                                    setEditingCell(null);
+                                                                } else if (e.key === 'Escape') {
+                                                                    setEditingCell(null);
+                                                                }
+                                                            }}
+                                                            autoFocus
+                                                        />
+                                                    ) : (
+                                                        <div 
+                                                            className="cursor-text hover:text-blue-300 transition-colors"
+                                                            onClick={() => !isSold && setEditingCell({id: log.id!, field: 'nama_barang'})}
+                                                            title={log.nama_barang || ''}
+                                                        >
+                                                            {log.nama_barang || '-'}
+                                                        </div>
+                                                    )}
+                                                </td>
+
+                                                {/* Kolom Qty - Desktop */}
+                                                <td className="px-4 py-3 text-center">
+                                                    {editingCell?.id === log.id && editingCell?.field === 'quantity' ? (
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="1"
+                                                            className="w-full bg-gray-700 border-b border-blue-500 text-gray-100 p-1 text-xs text-center"
+                                                            value={log.quantity || 0}
+                                                            onChange={(e) => setScanLogs(prev => prev.map(l => 
+                                                                l.id === log.id ? { ...l, quantity: parseFloat(e.target.value) || 0 } : l
+                                                            ))}
+                                                            onBlur={(e) => {
+                                                                handleUpdateField(log.id!, 'quantity', parseFloat(e.target.value) || 0);
+                                                                setEditingCell(null);
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    handleUpdateField(log.id!, 'quantity', parseFloat((e.target as HTMLInputElement).value) || 0);
+                                                                    setEditingCell(null);
+                                                                } else if (e.key === 'Escape') {
+                                                                    setEditingCell(null);
+                                                                }
+                                                            }}
+                                                            autoFocus
+                                                        />
+                                                    ) : (
+                                                        <div 
+                                                            className="cursor-text text-gray-400 hover:text-blue-300 transition-colors"
+                                                            onClick={() => !isSold && setEditingCell({id: log.id!, field: 'quantity'})}
+                                                        >
+                                                            {log.quantity || '-'}
+                                                        </div>
+                                                    )}
+                                                </td>
+
+                                                {/* Kolom Total - Desktop (auto update berdasarkan qty) */}
+                                                <td className="px-4 py-3 text-gray-200 font-bold text-right">
+                                                    {log.harga_total ? `Rp${log.harga_total.toLocaleString('id-ID')}` : '-'}
+                                                </td>
+
                                                 <td className="px-4 py-3 text-center whitespace-nowrap">
                                                     {isSold ? (
                                                         <span className="inline-flex items-center gap-1 text-gray-400 font-bold bg-gray-700 px-2 py-0.5 rounded-full text-[10px]">Terjual</span>
@@ -846,6 +1101,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
                 )}
             </div>
 
+            {/* PAGINATION */}
             <div className="px-4 py-3 bg-gray-800 border-t border-gray-700 flex items-center justify-between text-xs text-gray-500 sticky bottom-0 z-30">
                 <div>Menampilkan {scanStartIndex + 1}-{Math.min(scanStartIndex + itemsPerPage, scanTotalItems)} dari {scanTotalItems} data</div>
                 <div className="flex items-center gap-2"><button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronLeft size={16}/></button><span className="font-bold text-gray-200">Halaman {currentPage}</span><button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} className="p-1 rounded hover:bg-gray-700 text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"><ChevronRight size={16}/></button></div></div>
@@ -858,7 +1114,6 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
       )}
 
       {/* --- GLOBAL AUTOCOMPLETE POPUP (FIXED & FLIPPABLE) --- */}
-      {/* Dirender paling bawah (di luar tabel) agar tidak terpotong (clipping) */}
       {activeSearchId !== null && suggestions.length > 0 && popupPos && (
           <div 
               className="fixed z-[9999] bg-gray-800 border border-gray-600 rounded-lg shadow-2xl max-h-48 overflow-y-auto ring-1 ring-black/50"
@@ -873,13 +1128,11 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
                   <div 
                     key={idx} 
                     onMouseDown={(e) => { 
-                        // Gunakan onMouseDown agar tereksekusi sebelum onBlur input
                         e.preventDefault(); 
                         handleSuggestionClick(activeSearchId, item); 
                     }} 
                     className="px-3 py-2 text-xs hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0 group transition-colors"
                   >
-                      {/* Tampilan Fokus ke Part Number */}
                       <div className="font-bold text-orange-400 font-mono text-sm group-hover:text-orange-300">
                           {item.partNumber}
                       </div>
