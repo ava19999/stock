@@ -46,7 +46,7 @@ const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 
 
 interface OrderManagementProps {
   orders: Order[];
-  isLoading?: boolean; // <--- TAMBAHAN PROP LOADING
+  isLoading?: boolean;
   onUpdateStatus: (orderId: string, status: OrderStatus) => void;
   onProcessReturn: (orderId: string, returnedItems: { itemId: string, qty: number }[]) => void;
   onRefresh?: () => void;
@@ -507,7 +507,10 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
       try {
         const { resiText, shopName, ecommerce, cleanName } = getOrderDetails(selectedOrderForReturn);
         const combinedResiShop = `${resiText} / ${shopName}`;
-        const orderDate = selectedOrderForReturn.items[0]?.timestamp ? new Date(selectedOrderForReturn.timestamp).toISOString() : new Date().toISOString();
+        
+        // --- PERBAIKAN LOGIKA TANGGAL DISINI ---
+        // Menggunakan timestamp dari Order, bukan items[0]
+        const orderDate = selectedOrderForReturn.timestamp ? new Date(selectedOrderForReturn.timestamp).toISOString() : new Date().toISOString();
 
         const remainingItems = selectedOrderForReturn.items.map(item => {
             const returItem = itemsToReturnData.find(r => r.id === item.id);
@@ -536,7 +539,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
                 quantity: item.cartQuantity,
                 harga_satuan: hargaSatuan, 
                 harga_total: hargaSatuan * item.cartQuantity, 
-                tanggal_retur: new Date().toISOString(),
+                tanggal_retur: new Date().toISOString(), // Ini adalah tanggal saat tombol retur diklik
                 status: statusLabel, 
                 keterangan: 'Retur Barang'
             };
