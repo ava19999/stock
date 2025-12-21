@@ -18,6 +18,15 @@ const handleDbError = (op: string, err: any) => { console.error(`${op} Error:`, 
 
 // --- HELPER FUNCTIONS ---
 
+// Helper untuk memecah array besar menjadi potongan kecil (untuk menghindari error URL too long)
+const chunkArray = <T>(array: T[], size: number): T[][] => {
+  const result: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    result.push(array.slice(i, i + size));
+  }
+  return result;
+};
+
 const getWIBISOString = (): string => {
     const now = new Date();
     const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
@@ -186,17 +195,31 @@ export const fetchInventoryPaginated = async (
     return { data: baseItems, count: count || 0 };
 };
 
+// --- UPDATE PENTING: PERBAIKAN TOTAL ASET KOSONG ---
 export const fetchInventoryStats = async () => {
     const { data: items } = await supabase.from(TABLE_NAME).select('part_number, quantity');
     const all = items || [];
     const partNumbers = all.map((i: any) => i.part_number).filter(Boolean);
+    
     if (partNumbers.length === 0) return { totalItems: 0, totalStock: 0, totalAsset: 0 };
 
-    const costMap = await fetchLatestCostPrices(partNumbers);
+    // --- BATCHING REQUEST: MENCEGAH ERROR URI TOO LONG ---
+    // Memecah request harga menjadi per 50 item agar tidak gagal load
+    const batches = chunkArray(partNumbers, 50);
+    let costMap: Record<string, number> = {};
+
+    // Mengambil harga secara paralel per batch
+    const results = await Promise.all(batches.map(batch => fetchLatestCostPrices(batch)));
+    
+    // Menggabungkan hasil
+    results.forEach(res => {
+        costMap = { ...costMap, ...res };
+    });
     
     let totalStock = 0; let totalAsset = 0;
     all.forEach((item: any) => {
         const qty = Number(item.quantity) || 0;
+        // Harga default 0 jika tidak ditemukan di costMap
         const cost = costMap[item.part_number] || 0;
         totalStock += qty;
         totalAsset += (qty * cost);
