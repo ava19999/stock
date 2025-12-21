@@ -116,14 +116,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
       let text = h.reason || ''; 
       let tempo = h.tempo || '-'; 
 
-      // 1. Ekstrak Resi
       const resiMatch = text.match(/\(Resi: (.*?)\)/); 
       if (resiMatch && resiMatch[1]) { 
           resi = resiMatch[1]; 
           text = text.replace(/\s*\(Resi:.*?\)/, ''); 
       } 
       
-      // 2. Ekstrak Via
       const viaMatch = text.match(/\(Via: (.*?)\)/); 
       if (viaMatch && viaMatch[1]) { 
           ecommerce = viaMatch[1]; 
@@ -134,7 +132,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       let keterangan = '';
       let isRetur = false;
 
-      // 3. Tentukan Keterangan & Retur
       if (h.type === 'out') {
           if (text) customer = text;
           keterangan = 'Terjual';
@@ -181,7 +178,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700">
                 <tr>
                     <th className="px-3 py-2 border-r border-gray-700 w-24">Tanggal</th>
-                    <th className="px-3 py-2 border-r border-gray-700 w-32">Resi / Toko</th> {/* KOLOM INI YANG PENTING */}
+                    <th className="px-3 py-2 border-r border-gray-700 w-32">Resi / Toko</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-24">Via</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-32">Pelanggan</th>
                     <th className="px-3 py-2 border-r border-gray-700 w-28">Part No</th>
@@ -215,25 +212,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 <div className="text-[9px] opacity-70 font-mono">{new Date(h.timestamp || 0).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</div>
                             </td>
 
-                            {/* RESI / TOKO (TEMPO) - LOGIC TAMPILAN TERPISAH */}
+                            {/* RESI / TOKO (TEMPO) - DIJAMIN SAMA STRUKTUR */}
                             <td className="px-3 py-2 align-top border-r border-gray-700 font-mono text-[10px]">
-                                <div className="flex flex-col items-start gap-1.5">
-                                    {/* 1. RESI DI ATAS (JUDUL) */}
-                                    {resi !== '-' ? (
-                                        <span className="font-bold text-blue-400 text-[11px] select-all">
-                                            {resi}
-                                        </span>
-                                    ) : null}
+                                <div className="flex flex-col gap-1.5">
+                                    {/* BARIS ATAS: RESI atau STRIP */}
+                                    <span className={`font-bold text-[11px] ${resi !== '-' ? 'text-blue-400 select-all' : 'text-gray-500'}`}>
+                                        {resi !== '-' ? resi : '-'}
+                                    </span>
 
-                                    {/* 2. TOKO / TEMPO DI BAWAH (SUB JUDUL) */}
+                                    {/* BARIS BAWAH: TEMPO / TOKO */}
                                     {subInfo !== '-' ? (
-                                        <div className="flex items-center gap-1 text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded border border-gray-600">
+                                        <div className="flex items-center gap-1 text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded border border-gray-600 w-fit">
                                             <Store size={8}/>
                                             <span className="uppercase truncate max-w-[90px]">{subInfo}</span>
                                         </div>
                                     ) : (
-                                        // Jika Resi juga kosong dan subInfo kosong, baru tampilkan strip
-                                        resi === '-' && <span className="text-gray-600">-</span>
+                                        <span className="text-gray-600 text-[9px]">-</span>
                                     )}
                                 </div>
                             </td>
