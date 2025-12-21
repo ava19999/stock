@@ -104,8 +104,12 @@ const fetchLatestSellingPrices = async (partNumbers?: string[]) => {
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
   const { data: baseData, error } = await supabase.from(TABLE_NAME).select('*').order('date', { ascending: false, nullsFirst: false });
   if (error) { console.error(error); return []; }
+  
+  // Optimasi: Parallel fetch jika memungkinkan, namun untuk fetchInventory (all) kita biarkan dulu
+  // atau bisa dioptimasi sama seperti fetchInventoryPaginated jika jumlah data sedikit.
   const costMap = await fetchLatestCostPrices();
   const sellMap = await fetchLatestSellingPrices();
+  
   return (baseData || []).map((item) => {
       const mapped = mapBaseItem(item);
       if (costMap[item.part_number] !== undefined) mapped.costPrice = costMap[item.part_number];
@@ -132,20 +136,31 @@ export const getItemByPartNumber = async (partNumber: string): Promise<Inventory
   return mapped;
 };
 
+// --- UPDATED OPTIMIZED FUNCTION ---
 export const fetchInventoryPaginated = async (page: number, limit: number, search: string, filter: string = 'all') => {
     let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' });
     if (search) { query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`); }
     if (filter === 'low') { query = query.gt('quantity', 0).lt('quantity', 4); } 
     else if (filter === 'empty') { query = query.or('quantity.lte.0,quantity.is.null'); }
+    
     const from = (page - 1) * limit;
     const to = from + limit - 1;
+    
     const { data, error, count } = await query.order('date', { ascending: false, nullsFirst: false }).range(from, to);
     if (error) { console.error("Error fetching inventory:", error); return { data: [], count: 0 }; }
+    
     const baseItems = (data || []).map(mapBaseItem);
+    
     if (baseItems.length > 0) {
         const partNumbers = baseItems.map(i => i.partNumber).filter(Boolean);
-        const costMap = await fetchLatestCostPrices(partNumbers);
-        const sellMap = await fetchLatestSellingPrices(partNumbers);
+        
+        // OPTIMASI: Parallel Fetching
+        // Mengambil harga beli dan harga jual secara bersamaan
+        const [costMap, sellMap] = await Promise.all([
+            fetchLatestCostPrices(partNumbers),
+            fetchLatestSellingPrices(partNumbers)
+        ]);
+
         baseItems.forEach(item => {
             if (costMap[item.partNumber] !== undefined) item.costPrice = costMap[item.partNumber];
             if (sellMap[item.partNumber] !== undefined) item.price = sellMap[item.partNumber];
@@ -154,10 +169,22 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
     return { data: baseItems, count: count || 0 };
 };
 
+// --- UPDATED OPTIMIZED FUNCTION ---
 export const fetchInventoryStats = async () => {
     const { data: items } = await supabase.from(TABLE_NAME).select('part_number, quantity');
-    const costMap = await fetchLatestCostPrices();
     const all = items || [];
+    
+    // OPTIMASI: Filter Cost Price
+    // Hanya ambil harga untuk barang yang ada di stock list, bukan seluruh history database
+    const partNumbers = all.map((i: any) => i.part_number).filter(Boolean);
+    
+    // Jika tidak ada barang, return 0 segera
+    if (partNumbers.length === 0) {
+         return { totalItems: 0, totalStock: 0, totalAsset: 0 };
+    }
+
+    const costMap = await fetchLatestCostPrices(partNumbers);
+    
     let totalStock = 0; let totalAsset = 0;
     all.forEach((item: any) => {
         const qty = Number(item.quantity) || 0;
