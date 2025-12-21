@@ -134,9 +134,32 @@ export const getItemByPartNumber = async (partNumber: string): Promise<Inventory
   return mapped;
 };
 
-export const fetchInventoryPaginated = async (page: number, limit: number, search: string, filter: string = 'all') => {
+// --- UPDATE DI SINI: MENAMBAHKAN PARAMETER BRAND & APPLICATION ---
+export const fetchInventoryPaginated = async (
+    page: number, 
+    limit: number, 
+    search: string, 
+    filter: string = 'all',
+    brand?: string,       // Parameter Baru
+    application?: string  // Parameter Baru
+) => {
     let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' });
-    if (search) { query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`); }
+    
+    // Pencarian Umum
+    if (search) { 
+        query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`); 
+    }
+    
+    // Filter Brand & Application (AND condition)
+    if (brand && brand.trim() !== '') {
+        query = query.ilike('brand', `%${brand}%`);
+    }
+    
+    if (application && application.trim() !== '') {
+        query = query.ilike('application', `%${application}%`);
+    }
+
+    // Filter Status Stok
     if (filter === 'low') { query = query.gt('quantity', 0).lt('quantity', 4); } 
     else if (filter === 'empty') { query = query.or('quantity.lte.0,quantity.is.null'); }
     

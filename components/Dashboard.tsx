@@ -6,7 +6,7 @@ import { ItemForm } from './ItemForm';
 import { 
   Package, Layers, TrendingUp, TrendingDown, Wallet, ChevronRight, Search, 
   ArrowUpRight, ArrowDownRight, Edit, Trash2, MapPin,
-  LayoutGrid, List, History, X, ChevronLeft, ChevronRight as ChevronRightIcon, Loader2, AlertTriangle, AlertCircle, Store, Plus
+  LayoutGrid, List, History, X, ChevronLeft, ChevronRight as ChevronRightIcon, Loader2, AlertTriangle, AlertCircle, Store, Plus, Tag, PenTool
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -29,9 +29,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   
+  // --- STATE PENCARIAN UTAMA ---
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   
+  // --- STATE PENCARIAN TAMBAHAN (BRAND & APPLICATION) ---
+  const [brandSearch, setBrandSearch] = useState('');
+  const [debouncedBrand, setDebouncedBrand] = useState('');
+  const [appSearch, setAppSearch] = useState('');
+  const [debouncedApp, setDebouncedApp] = useState('');
+
   const [filterType, setFilterType] = useState<'all' | 'low' | 'empty'>('all');
   
   const [stats, setStats] = useState({ totalItems: 0, totalStock: 0, totalAsset: 0, todayIn: 0, todayOut: 0 });
@@ -55,19 +62,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
+  // --- EFFECT DEBOUNCE UNTUK SEMUA KOLOM PENCARIAN ---
   useEffect(() => {
-    const timer = setTimeout(() => { setDebouncedSearch(searchTerm); }, 500);
+    const timer = setTimeout(() => { 
+        setDebouncedSearch(searchTerm); 
+        setDebouncedBrand(brandSearch);
+        setDebouncedApp(appSearch);
+    }, 500);
     return () => clearTimeout(timer);
-  }, [searchTerm]);
+  }, [searchTerm, brandSearch, appSearch]);
 
+  // --- LOAD DATA (UPDATED WITH BRAND & APP) ---
   const loadData = useCallback(async () => {
     setLoading(true);
-    const { data, count } = await fetchInventoryPaginated(page, 50, debouncedSearch, filterType);
+    // Asumsi: fetchInventoryPaginated diupdate untuk menerima parameter brand dan app
+    // Jika service belum diupdate, parameter tambahan ini mungkin diabaikan oleh JS atau perlu update di supabaseService.ts
+    // @ts-ignore - Mengabaikan error TS sementara jika signature service belum diupdate
+    const { data, count } = await fetchInventoryPaginated(page, 50, debouncedSearch, filterType, debouncedBrand, debouncedApp);
     setLocalItems(data);
     setTotalCount(count);
     setTotalPages(Math.ceil(count / 50));
     setLoading(false);
-  }, [page, debouncedSearch, filterType]);
+  }, [page, debouncedSearch, filterType, debouncedBrand, debouncedApp]);
 
   const loadStats = useCallback(async () => {
     const invStats = await fetchInventoryStats();
@@ -123,7 +139,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setItemHistoryPage(1);
   }, [selectedItemHistory, itemHistorySearch]);
   
-  // --- PARSING LOGIC DIPERBAIKI (MENGGUNAKAN KOLOM CUSTOMER) ---
   const parseHistoryReason = (h: StockHistory) => { 
       let resi = h.resi || '-';
       let ecommerce = '-'; 
@@ -131,7 +146,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       let text = h.reason || ''; 
       let tempo = h.tempo || '-'; 
 
-      // 1. Ambil Resi dan Via dari text reason utama (jika ada)
       const resiMatch = text.match(/\(Resi: (.*?)\)/); 
       if (resiMatch && resiMatch[1]) { 
           resi = resiMatch[1]; 
@@ -147,19 +161,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
       let keterangan = '';
       let isRetur = false;
 
-      // --- LOGIKA BARU: PRIORITASKAN KOLOM CUSTOMER LANGSUNG ---
       if (h.customer && h.customer !== '-' && h.customer !== '') {
          customer = h.customer;
       }
 
       if (h.type === 'out') {
-          // Barang Keluar
           if (customer === '-' && text) {
-             customer = text.replace(/\s*\(.*?\)/g, '').trim(); // Fallback untuk data lama
+             customer = text.replace(/\s*\(.*?\)/g, '').trim();
           }
           keterangan = 'Terjual';
       } else {
-          // Barang Masuk
           if (text.toLowerCase().includes('retur') || text.toLowerCase().includes('cancel')) {
               isRetur = true;
               keterangan = 'RETUR';
@@ -173,16 +184,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
               if (isStandard || text === '') {
                   keterangan = (text === '' || text === 'Manual Restock') ? 'Restock' : text; 
-                  // Jika customer masih kosong, biarkan '-'
               } else {
-                  // Jika ada teks aneh di keterangan, dan customer kosong, anggap itu customer (untuk data lama)
                   if (customer === '-') customer = text;
                   keterangan = 'Restock';
               }
           }
       }
 
-      // Logic Sub Info
       let subInfo = '-';
       if (tempo && tempo.includes('/')) {
           const parts = tempo.split('/');
@@ -338,7 +346,52 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {/* FILTER BAR */}
-        <div className="px-4 pb-3"><div className="flex gap-2 items-center mb-2"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} /><input type="text" placeholder="Cari barang..." onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/50 outline-none text-white placeholder-gray-400" /></div><button onClick={handleAddNewClick} className="bg-blue-600 text-white p-2.5 rounded-xl shadow-md hover:bg-blue-700 active:scale-95 transition-all"><Plus size={20} /></button></div><div className="flex justify-between items-center"><div className="flex gap-2 overflow-x-auto scrollbar-hide py-1"><button onClick={() => setFilterType('all')} className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap ${filterType === 'all' ? 'bg-gray-700 text-white border-gray-600' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}>Semua</button><button onClick={() => setFilterType('low')} className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap flex items-center gap-1 ${filterType === 'low' ? 'bg-orange-900/30 text-orange-400 border-orange-900/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}><AlertTriangle size={12}/> Menipis</button><button onClick={() => setFilterType('empty')} className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap flex items-center gap-1 ${filterType === 'empty' ? 'bg-red-900/30 text-red-400 border-red-900/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}><AlertCircle size={12}/> Habis</button></div><div className="flex bg-gray-800 p-1 rounded-lg ml-2 border border-gray-700"><button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-md ${viewMode === 'grid' ? 'bg-gray-700 shadow-sm text-blue-400' : 'text-gray-500 hover:text-gray-300'}`}><LayoutGrid size={16}/></button><button onClick={() => setViewMode('list')} className={`p-1.5 rounded-md ${viewMode === 'list' ? 'bg-gray-700 shadow-sm text-blue-400' : 'text-gray-500 hover:text-gray-300'}`}><List size={16}/></button></div></div></div>
+        <div className="px-4 pb-3">
+            {/* PENCARIAN UTAMA */}
+            <div className="flex gap-2 items-center mb-2">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <input type="text" placeholder="Cari nama / part number..." onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/50 outline-none text-white placeholder-gray-400" />
+                </div>
+                <button onClick={handleAddNewClick} className="bg-blue-600 text-white p-2.5 rounded-xl shadow-md hover:bg-blue-700 active:scale-95 transition-all"><Plus size={20} /></button>
+            </div>
+            
+            {/* PENCARIAN TAMBAHAN (BRAND & APPLICATION) - BARIS BARU */}
+            <div className="grid grid-cols-2 gap-2 mb-2">
+                <div className="relative">
+                    <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                    <input 
+                        type="text" 
+                        placeholder="Filter Brand..." 
+                        value={brandSearch}
+                        onChange={(e) => setBrandSearch(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 bg-gray-700 border border-gray-600 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500/50 outline-none text-white placeholder-gray-500" 
+                    />
+                </div>
+                <div className="relative">
+                    <PenTool className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                    <input 
+                        type="text" 
+                        placeholder="Filter Aplikasi..." 
+                        value={appSearch}
+                        onChange={(e) => setAppSearch(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 bg-gray-700 border border-gray-600 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500/50 outline-none text-white placeholder-gray-500" 
+                    />
+                </div>
+            </div>
+
+            <div className="flex justify-between items-center">
+                <div className="flex gap-2 overflow-x-auto scrollbar-hide py-1">
+                    <button onClick={() => setFilterType('all')} className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap ${filterType === 'all' ? 'bg-gray-700 text-white border-gray-600' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}>Semua</button>
+                    <button onClick={() => setFilterType('low')} className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap flex items-center gap-1 ${filterType === 'low' ? 'bg-orange-900/30 text-orange-400 border-orange-900/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}><AlertTriangle size={12}/> Menipis</button>
+                    <button onClick={() => setFilterType('empty')} className={`px-4 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap flex items-center gap-1 ${filterType === 'empty' ? 'bg-red-900/30 text-red-400 border-red-900/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}><AlertCircle size={12}/> Habis</button>
+                </div>
+                <div className="flex bg-gray-800 p-1 rounded-lg ml-2 border border-gray-700">
+                    <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-md ${viewMode === 'grid' ? 'bg-gray-700 shadow-sm text-blue-400' : 'text-gray-500 hover:text-gray-300'}`}><LayoutGrid size={16}/></button>
+                    <button onClick={() => setViewMode('list')} className={`p-1.5 rounded-md ${viewMode === 'list' ? 'bg-gray-700 shadow-sm text-blue-400' : 'text-gray-500 hover:text-gray-300'}`}><List size={16}/></button>
+                </div>
+            </div>
+        </div>
       </div>
 
       <div className="p-4">
