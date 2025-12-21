@@ -113,7 +113,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
             qty: qtyAdj,
             ecommerce: adjustmentEcommerce,
             resiTempo: adjustmentResiTempo,
-            customer: stockAdjustmentType === 'out' ? adjustmentCustomer : undefined 
+            customer: adjustmentCustomer // UPDATED: Kirim customer untuk in maupun out
         } : undefined;
 
         const updated = await updateInventory({ ...initialData, ...formData }, transactionData);
@@ -146,8 +146,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
   let modalBorderClass = "border-gray-700";
   let modalHeaderClass = "bg-gray-900/80 border-gray-700";
   
-  // Gunakan quantity dari formData agar reaktif, atau initialData jika ingin statis.
-  // Biasanya status stok dilihat dari data saat ini.
   if (formData.quantity === 0) {
       modalBorderClass = "border-red-600";
       modalHeaderClass = "bg-red-900/90 border-red-700";
@@ -277,11 +275,15 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
 
                                 {/* BAGIAN FORM SESUAI TIPE (IN / OUT) */}
                                 {stockAdjustmentType === 'in' ? (
-                                    // --- TAMPILAN MASUK (Sesuai Gambar 1) ---
-                                    <div className="grid grid-cols-2 gap-3 pt-1">
+                                    // --- TAMPILAN MASUK (UPDATED: Ada Customer di tengah) ---
+                                    <div className="grid grid-cols-3 gap-3 pt-1">
                                         <div>
                                             <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><ShoppingBag size={10}/> Via / Sumber</label>
                                             <input type="text" placeholder="Tokopedia" value={adjustmentEcommerce} onChange={(e) => setAdjustmentEcommerce(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><User size={10}/> Customer</label>
+                                            <input type="text" placeholder="Nama..." value={adjustmentCustomer} onChange={(e) => setAdjustmentCustomer(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
                                         </div>
                                         <div>
                                             <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><Calendar size={10}/> Tempo</label>
@@ -289,7 +291,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                                         </div>
                                     </div>
                                 ) : (
-                                    // --- TAMPILAN KELUAR (Sesuai Gambar 2) ---
+                                    // --- TAMPILAN KELUAR ---
                                     <div className="space-y-3 pt-1">
                                         <div>
                                             <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><User size={10}/> Penerima / Customer</label>
