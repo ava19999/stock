@@ -10,7 +10,7 @@ import { analyzeResiImage } from '../../services/geminiService';
 import * as XLSX from 'xlsx';
 import { 
   ScanBarcode, Loader2, Upload, Camera, Send, ChevronDown, Check, 
-  CheckSquare, Square, Plus, Trash2, Search, XCircle 
+  CheckSquare, Square, Plus, Trash2, Search, XCircle, FileSpreadsheet, AlertTriangle 
 } from 'lucide-react';
 
 const STORE_LIST = ['MJM', 'LARIS', 'BJW'];
@@ -43,16 +43,18 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 100;
 
-  // Inline Edit & Autocomplete
-  const [editingCell, setEditingCell] = useState<{id: number, field: string} | null>(null);
+  // Autocomplete & Navigation State
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
   const [activeSearchId, setActiveSearchId] = useState<number | null>(null);
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(-1); 
   const [popupPos, setPopupPos] = useState<{ top?: number; bottom?: number; left: number; width: number } | null>(null);
 
   // Refs
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cellRefs = useRef<(HTMLInputElement | HTMLTextAreaElement | null)[]>([]); 
+  const activeItemRef = useRef<HTMLDivElement>(null); 
 
   // --- EFFECTS ---
   useEffect(() => {
@@ -62,27 +64,155 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
   }, []);
 
   useEffect(() => {
+      // Auto Check hanya untuk yang benar-benar 'Siap Kirim'
       const autoChecked = scanLogs.filter(log => log.status === 'Siap Kirim').map(log => log.resi);
       setSelectedResis(autoChecked);
   }, [scanLogs]);
 
   useEffect(() => setCurrentPage(1), [searchTerm]);
 
+  useEffect(() => {
+    if (highlightedIndex >= 0 && activeItemRef.current) {
+        activeItemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [highlightedIndex]);
+
   const loadScanLogs = async () => { setScanLogs(await fetchScanResiLogs()); };
 
-  // --- HANDLERS UTAMA ---
+  // --- HELPER ---
+  const handleNumberChange = (id: number, field: string, value: string) => {
+      const cleanValue = value.replace(/[^0-9]/g, '');
+      const numValue = cleanValue === '' ? 0 : parseInt(cleanValue, 10);
+      setScanLogs(prev => prev.map(log => log.id === id ? { ...log, [field]: numValue } : log));
+  };
+
+  const checkIsComplete = (log: ScanResiLog): boolean => {
+      return (
+          !!log.part_number && log.part_number !== '-' && log.part_number.trim() !== '' &&
+          !!log.nama_barang && log.nama_barang !== '-' &&
+          (log.quantity || 0) > 0 &&
+          !!log.customer && log.customer !== '-'
+      );
+  };
+
+  // --- HANDLERS NAVIGASI ---
+  const handleGridKeyDown = (e: React.KeyboardEvent, currentIndex: number, totalCols: number = 5) => {
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      let nextIndex = currentIndex;
+      switch (e.key) {
+          case 'ArrowRight': nextIndex = currentIndex + 1; break;
+          case 'ArrowLeft': nextIndex = currentIndex - 1; break;
+          case 'ArrowUp': e.preventDefault(); nextIndex = currentIndex - totalCols; break;
+          case 'ArrowDown': e.preventDefault(); nextIndex = currentIndex + totalCols; break;
+          case 'Enter': e.preventDefault(); nextIndex = currentIndex + 1; break;
+          default: return;
+      }
+      const target = cellRefs.current[nextIndex];
+      if (target) {
+          target.focus();
+          if ('select' in target) { setTimeout(() => (target as HTMLInputElement).select(), 0); }
+      }
+  };
+
+  const handlePartNumberKeyDown = (e: React.KeyboardEvent, id: number, globalRefIndex: number) => {
+      if (suggestions.length > 0 && activeSearchId === id) {
+          if (e.key === 'ArrowDown') { e.preventDefault(); setHighlightedIndex(prev => (prev < suggestions.length - 1 ? prev + 1 : 0)); return; }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlightedIndex(prev => (prev > 0 ? prev - 1 : suggestions.length - 1)); return; }
+          else if (e.key === 'Enter') {
+              if (highlightedIndex >= 0 && suggestions[highlightedIndex]) {
+                  e.preventDefault(); handleSuggestionClick(id, suggestions[highlightedIndex]); return;
+              }
+          } else if (e.key === 'Escape') { setActiveSearchId(null); setSuggestions([]); return; }
+      }
+      handleGridKeyDown(e, globalRefIndex);
+  };
+
+  // --- HANDLER BARCODE (LOGIKA UTAMA STATUS DI SINI) ---
   const handleBarcodeInput = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       const scannedCode = barcodeInput.trim();
       if (!scannedCode) return;
       setIsSavingLog(true);
-      if (await addScanResiLog(scannedCode, selectedMarketplace, selectedStore)) {
-          await loadScanLogs(); 
-          setBarcodeInput('');
-      } else { onShowToast("Gagal menyimpan data.", 'error'); }
+
+      const existingLog = scanLogs.find(l => l.resi === scannedCode);
+
+      if (existingLog) {
+          // KUNCI: Status HANYA berubah saat di-SCAN
+          
+          // Cek kelengkapan data saat ini
+          const isComplete = checkIsComplete(existingLog);
+          
+          if (isComplete) {
+              // Jika data lengkap, Ubah jadi SIAP KIRIM (apapun status sebelumnya)
+              if (existingLog.status !== 'Siap Kirim') {
+                  await updateScanResiLogField(existingLog.id!, 'status', 'Siap Kirim');
+                  setScanLogs(prev => prev.map(l => l.id === existingLog.id ? { ...l, status: 'Siap Kirim' } : l));
+                  onShowToast(`Resi ${scannedCode} OK -> Siap Kirim`, 'success');
+              } else {
+                  onShowToast(`Resi ${scannedCode} sudah Siap Kirim`, 'info');
+              }
+          } else {
+              // Jika data TIDAK lengkap, Ubah jadi PENDING (Data Kurang)
+              // Meskipun status awalnya 'Order Masuk', karena sudah discan fisik -> jadi Pending
+              if (existingLog.status !== 'Pending') {
+                   await updateScanResiLogField(existingLog.id!, 'status', 'Pending');
+                   setScanLogs(prev => prev.map(l => l.id === existingLog.id ? { ...l, status: 'Pending' } : l));
+              }
+              onShowToast(`Resi ${scannedCode} Data Masih Kurang!`, 'error');
+          }
+
+          // Update timestamp agar ketahuan barusan discan
+          await addScanResiLog(scannedCode, selectedMarketplace, selectedStore); 
+
+      } else {
+          // Barang benar-benar baru (belum ada di CSV)
+          if (await addScanResiLog(scannedCode, selectedMarketplace, selectedStore)) {
+              await loadScanLogs();
+              onShowToast(`Resi ${scannedCode} Baru (Pending).`, 'success');
+          } else {
+              onShowToast("Gagal menyimpan data.", 'error');
+          }
+      }
+
+      setBarcodeInput('');
       setIsSavingLog(false);
     }
+  };
+
+  // --- HANDLER EDIT DATA (BERSIH DARI LOGIKA STATUS) ---
+  const handleUpdateField = async (id: number, field: string, value: any) => {
+    try {
+      const currentLog = scanLogs.find(l => l.id === id);
+      if (!currentLog) return;
+
+      let updatedLog = { ...currentLog, [field]: value };
+
+      if (field === 'quantity') {
+          const newQuantity = parseFloat(value) || 0;
+          const newHargaTotal = currentLog.harga_satuan * newQuantity;
+          updatedLog = { ...updatedLog, quantity: newQuantity, harga_total: newHargaTotal };
+          setScanLogs(prev => prev.map(log => log.id === id ? updatedLog : log));
+          await updateScanResiLogField(id, 'quantity', newQuantity);
+          await updateScanResiLogField(id, 'harga_total', newHargaTotal);
+      } else if (field === 'harga_total') {
+          const newTotal = parseFloat(value) || 0;
+          const newSatuan = updatedLog.quantity > 0 ? newTotal / updatedLog.quantity : 0;
+          updatedLog = { ...updatedLog, harga_total: newTotal, harga_satuan: newSatuan };
+          setScanLogs(prev => prev.map(log => log.id === id ? updatedLog : log));
+          await updateScanResiLogField(id, 'harga_total', newTotal);
+          await updateScanResiLogField(id, 'harga_satuan', newSatuan);
+      } else {
+          setScanLogs(prev => prev.map(log => log.id === id ? updatedLog : log));
+          await updateScanResiLogField(id, field, value);
+      }
+
+      // PERHATIKAN:
+      // Di sini TIDAK ADA lagi kode pengecekan status.
+      // Jadi mau datanya sudah lengkap atau belum, status TIDAK AKAN BERUBAH.
+      // Status hanya berubah jika User melakukan SCAN BARCODE.
+
+    } catch (error) { onShowToast(`Gagal update ${field}`, 'error'); loadScanLogs(); }
   };
 
   const handleProcessKirim = async () => {
@@ -102,55 +232,28 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
     setIsProcessingShipment(false);
   };
 
-  const handleUpdateField = async (id: number, field: string, value: any) => {
-    try {
-      setScanLogs(prev => prev.map(log => log.id === id ? { ...log, [field]: value } : log));
-      if (field === 'quantity') {
-        const log = scanLogs.find(l => l.id === id);
-        if (log) {
-          const newQuantity = parseFloat(value) || 0;
-          const newHargaTotal = log.harga_satuan * newQuantity;
-          setScanLogs(prev => prev.map(log => log.id === id ? { ...log, harga_total: newHargaTotal } : log));
-          await updateScanResiLogField(id, 'quantity', newQuantity);
-          await updateScanResiLogField(id, 'harga_total', newHargaTotal);
-          onShowToast(`Qty diperbarui & total dihitung ulang`, 'success');
-          return;
-        }
-      }
-      await updateScanResiLogField(id, field, value);
-      onShowToast(`${field} diperbarui`, 'success');
-    } catch (error) { onShowToast(`Gagal update ${field}`, 'error'); loadScanLogs(); }
-  };
-
   const handleDuplicate = async (id: number) => {
     setIsDuplicating(id);
-    if (await duplicateScanResiLog(id)) {
-        onShowToast("Item diduplikasi & harga dibagi.", 'success');
-        await loadScanLogs();
-    } else { onShowToast("Gagal menduplikasi.", 'error'); }
+    if (await duplicateScanResiLog(id)) { onShowToast("Duplikasi Berhasil", 'success'); await loadScanLogs(); } 
+    else { onShowToast("Gagal duplikasi", 'error'); }
     setIsDuplicating(null);
   };
 
   const handleDeleteLog = async (id: number) => {
-    if (window.confirm("Yakin ingin menghapus item ini?")) {
-        if (await deleteScanResiLog(id)) {
-            onShowToast("Item dihapus.", 'success');
-            await loadScanLogs();
-        } else { onShowToast("Gagal menghapus.", 'error'); }
+    if (window.confirm("Hapus item ini?")) {
+        if (await deleteScanResiLog(id)) { onShowToast("Item dihapus.", 'success'); await loadScanLogs(); } 
+        else { onShowToast("Gagal menghapus.", 'error'); }
     }
   };
 
-  // --- AUTOCOMPLETE LOGIC ---
+  // --- AUTOCOMPLETE ---
   const updateAutocompleteState = (id: number, value: string, element?: HTMLElement) => {
-    setActiveSearchId(id);
+    setActiveSearchId(id); setHighlightedIndex(-1);
     if (element) {
         const rect = element.getBoundingClientRect();
-        const viewportHeight = window.innerHeight;
-        const spaceBelow = viewportHeight - rect.bottom;
-        const requiredSpace = 220; 
+        const spaceBelow = window.innerHeight - rect.bottom;
         let newPos: { top?: number; bottom?: number; left: number; width: number } = { left: rect.left, width: Math.max(rect.width, 250) };
-        if (spaceBelow < requiredSpace && rect.top > requiredSpace) newPos.bottom = viewportHeight - rect.top; 
-        else newPos.top = rect.bottom; 
+        if (spaceBelow < 220 && rect.top > 220) newPos.bottom = window.innerHeight - rect.top; else newPos.top = rect.bottom; 
         setPopupPos(newPos);
     }
     if (value && value.length >= 2) {
@@ -167,11 +270,17 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
 
   const handleSuggestionClick = async (id: number, item: InventoryItem) => {
     setScanLogs(prev => prev.map(log => log.id === id ? { ...log, part_number: item.partNumber } : log));
-    await updateScanResiLogField(id, 'part_number', item.partNumber);
+    await handleUpdateField(id, 'part_number', item.partNumber);
     setActiveSearchId(null); setSuggestions([]);
+    
+    const rowIndex = scanLogs.slice((currentPage -1)*itemsPerPage, currentPage*itemsPerPage).findIndex(r => r.id === id);
+    if(rowIndex !== -1) {
+        const nextInputIndex = (rowIndex * 5) + 2; 
+        setTimeout(() => cellRefs.current[nextInputIndex]?.focus(), 50);
+    }
   };
 
-  // --- FILE & CAMERA HANDLERS ---
+  // --- FILE & CAMERA ---
   const readFileAsBase64 = (file: File): Promise<string> => {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -188,12 +297,22 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
       const compressed = await compressImage(await readFileAsBase64(file));
       const analysis = await analyzeResiImage(compressed);
       if (analysis && analysis.resi) {
-         if(await addScanResiLog(analysis.resi, selectedMarketplace, selectedStore)) {
-             await loadScanLogs(); onShowToast(`Resi ${analysis.resi} tersimpan.`);
-         }
+         setBarcodeInput(analysis.resi);
+         // Simulate Scan
+         const mockEvent = { key: 'Enter', preventDefault: () => {} } as React.KeyboardEvent<HTMLInputElement>;
+         handleBarcodeInput(mockEvent);
       } else { onShowToast("Resi tidak terbaca.", 'error'); }
     } catch (error) { console.error(error); } 
     finally { setAnalyzing(false); if (cameraInputRef.current) cameraInputRef.current.value = ''; }
+  };
+
+  const parseIndonesianNumber = (str: any) => {
+      if (!str) return 0;
+      const stringVal = String(str);
+      const cleanThousand = stringVal.replace(/\./g, ''); 
+      const cleanDecimal = cleanThousand.replace(/,/g, '.');
+      const finalStr = cleanDecimal.replace(/[^0-9.-]/g, '');
+      return parseFloat(finalStr) || 0;
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -218,6 +337,7 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
             const wsname = wb.SheetNames[0];
             const ws = wb.Sheets[wsname];
             const data: any[] = XLSX.utils.sheet_to_json(ws, { raw: false });
+            
             const updates = data.map((row: any) => {
                 const getVal = (keys: string[]) => {
                     for (let k of keys) {
@@ -226,13 +346,17 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
                         if (lowerKey) return row[lowerKey];
                     } return null;
                 };
-                const resiRaw = getVal(['No. Resi', 'No. Pesanan', 'Resi', 'Order ID']);
-                let partNoRaw = getVal(['No. Referensi', 'Part Number', 'Part No', 'Kode Barang']);
-                const produkRaw = getVal(['Nama Produk', 'Nama Barang', 'Product Name']);
+
+                const resiRaw = getVal(['No. Resi', 'No. Pesanan', 'Resi']);
+                let partNoRaw = getVal(['No. Referensi', 'SKU Induk', 'Part Number', 'Kode Barang']);
+                const produkRaw = getVal(['Nama Produk', 'Nama Barang']);
+                const customerRaw = getVal(['Username (Pembeli)', 'Username', 'Pembeli', 'Nama Penerima']);
+                const totalHargaProdukRaw = getVal(['Total Harga Produk']);
+                const hargaSatuanRaw = getVal(['Harga', 'Harga Satuan', 'Price']);
                 
-                // (Logic parsing excel dipersingkat tapi fungsi sama)
                 const produkNameClean = String(produkRaw || '').trim();
                 const produkLower = produkNameClean.toLowerCase();
+                
                 if ((!partNoRaw || partNoRaw === '-' || partNoRaw === '') && produkNameClean) {
                     const foundByExactName = inventoryMap.get(produkLower);
                     if (foundByExactName) partNoRaw = foundByExactName;
@@ -247,14 +371,35 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
                 }
 
                 if (resiRaw) {
-                    const qty = parseFloat(String(getVal(['Jumlah', 'Qty'])).replace(/[^0-9,.-]/g, '').replace(',', '.') || '0');
-                    const hrg = parseFloat(String(getVal(['Harga', 'Price'])).replace(/[^0-9,.-]/g, '').replace(',', '.') || '0');
+                    const qty = parseIndonesianNumber(getVal(['Jumlah', 'Qty', 'Kuantitas']));
+                    let finalHargaTotal = 0;
+                    let finalHargaSatuan = 0;
+
+                    if (totalHargaProdukRaw) {
+                         finalHargaTotal = parseIndonesianNumber(totalHargaProdukRaw);
+                         finalHargaSatuan = qty > 0 ? (finalHargaTotal / qty) : 0;
+                    } else {
+                         finalHargaSatuan = parseIndonesianNumber(hargaSatuanRaw);
+                         finalHargaTotal = finalHargaSatuan * qty;
+                    }
+
+                    // Pastikan Status Awal CSV adalah 'Order Masuk'
+                    // Kecuali jika resi ini SUDAH ADA di database sebelumnya (sudah discan)
+                    // Maka logika status ditangani oleh importScanResiFromExcel di backend atau dibiarkan
+                    // Untuk amannya, kita set default 'Order Masuk' jika belum ada.
+                    // (Logika merge status ada di backend atau handled here if we check logs)
+                    
                     return {
-                        resi: String(resiRaw).trim(), toko: selectedStore, ecommerce: selectedMarketplace,
-                        customer: getVal(['Username', 'Pembeli']) ? String(getVal(['Username', 'Pembeli'])).trim() : '-',
+                        resi: String(resiRaw).trim(), 
+                        toko: selectedStore, 
+                        ecommerce: selectedMarketplace, 
+                        customer: customerRaw ? String(customerRaw).trim() : '-',
                         part_number: (partNoRaw && partNoRaw !== '-') ? String(partNoRaw).trim() : null,
                         nama_barang: produkRaw ? String(produkRaw).trim() : '-',
-                        quantity: qty, harga_satuan: hrg, harga_total: qty * hrg, status: 'Pending'
+                        quantity: qty, 
+                        harga_satuan: finalHargaSatuan, 
+                        harga_total: finalHargaTotal, 
+                        status: 'Order Masuk' 
                     };
                 } return null;
             }).filter(item => item !== null);
@@ -262,7 +407,7 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
             if (updates.length > 0) {
                 const result = await importScanResiFromExcel(updates);
                 if (result.success) {
-                    onShowToast(`Berhasil import ${updates.length - result.skippedCount} data`, 'success');
+                    onShowToast(`Import ${updates.length - result.skippedCount} Data Berhasil`, 'success');
                     await loadScanLogs();
                 } else onShowToast("Gagal update DB", 'error');
             } else onShowToast("Tidak ada data valid", 'error');
@@ -355,9 +500,9 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
                             <th className="px-4 py-3 border-b border-gray-700">Via</th>
                             <th className="px-4 py-3 border-b border-gray-700">Pelanggan</th>
                             <th className="px-4 py-3 border-b border-gray-700 min-w-[150px]">Part.No (Edit)</th>
-                            <th className="px-4 py-3 border-b border-gray-700">Barang</th>
+                            <th className="px-4 py-3 border-b border-gray-700 min-w-[250px]">Barang</th>
                             <th className="px-4 py-3 border-b border-gray-700 text-center">Qty</th>
-                            <th className="px-4 py-3 border-b border-gray-700 text-right">Total</th>
+                            <th className="px-4 py-3 border-b border-gray-700 text-right min-w-[150px]">Total (Edit)</th>
                             <th className="px-4 py-3 border-b border-gray-700 text-center">Status</th>
                             <th className="px-4 py-3 border-b border-gray-700 text-center w-10">+</th>
                             <th className="px-4 py-3 border-b border-gray-700 text-center w-10">Hapus</th>
@@ -367,7 +512,12 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
                         {scanCurrentItems.map((log, idx) => {
                             const isSold = log.status === 'Terjual';
                             const isReady = log.status === 'Siap Kirim';
+                            const isPending = log.status === 'Pending';
+                            const isOrderMasuk = log.status === 'Order Masuk';
+                            
                             const isSelected = selectedResis.includes(log.resi);
+                            const globalRefBase = idx * 5; 
+
                             return (
                                 <tr key={log.id || idx} className={`transition-colors ${isSold ? 'bg-gray-900/50 opacity-60' : (isSelected ? 'bg-blue-900/20' : 'hover:bg-gray-700/50')}`}>
                                     <td className="px-4 py-3 text-center">
@@ -378,30 +528,97 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
                                     <td className="px-4 py-3 text-gray-400 font-semibold">{log.toko || '-'}</td>
                                     <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-gray-700 text-gray-300 border-gray-600">{log.ecommerce}</span></td>
                                     
-                                    {/* Inline Edit Cells (Condensed for brevity) */}
-                                    <td className="px-4 py-3">{editingCell?.id === log.id && editingCell?.field === 'customer' ? (
-                                        <input className="w-full bg-gray-700 border-b border-blue-500 text-gray-100 p-1 text-xs" value={log.customer||''} onChange={(e)=>setScanLogs(prev=>prev.map(l=>l.id===log.id?{...l,customer:e.target.value}:l))} onBlur={(e)=>{handleUpdateField(log.id!,'customer',e.target.value);setEditingCell(null)}} onKeyDown={(e)=>{if(e.key==='Enter'){handleUpdateField(log.id!,'customer',(e.target as HTMLInputElement).value);setEditingCell(null)}}} autoFocus />
-                                    ) : <div className="cursor-text text-gray-300 font-medium hover:text-blue-300" onClick={()=>!isSold && setEditingCell({id:log.id!,field:'customer'})}>{log.customer||'-'}</div>}</td>
+                                    {/* COL 0: CUSTOMER */}
+                                    <td className="px-4 py-3">
+                                        {!isSold ? (
+                                            <input 
+                                                ref={el => { cellRefs.current[globalRefBase + 0] = el; }}
+                                                className="w-full bg-transparent border-b border-transparent focus:border-blue-500 outline-none text-gray-100 p-1 text-xs focus:bg-gray-700/50 transition-colors" 
+                                                value={log.customer||''} 
+                                                onChange={(e)=>setScanLogs(prev=>prev.map(l=>l.id===log.id?{...l,customer:e.target.value}:l))} 
+                                                onBlur={(e)=>handleUpdateField(log.id!,'customer',e.target.value)} 
+                                                onKeyDown={(e)=>handleGridKeyDown(e, globalRefBase + 0)}
+                                            />
+                                        ) : <span className="text-gray-400">{log.customer||'-'}</span>}
+                                    </td>
                                     
-                                    <td className="px-4 py-3 relative"><div className="flex items-center gap-1 relative">{!isSold ? (<input className="bg-transparent border-b border-transparent focus:border-blue-500 outline-none w-full font-mono text-gray-300" placeholder="Part No" value={log.part_number||''} onChange={(e)=>handlePartNumberInput(log.id!,e.target.value,e)} onFocus={(e)=>updateAutocompleteState(log.id!,e.target.value,e.target)} onBlur={(e)=>setTimeout(async()=>{if(activeSearchId===log.id)setActiveSearchId(null);await updateScanResiLogField(log.id!,'part_number',e.target.value)},200)}/>) : <span className="font-mono text-gray-400">{log.part_number}</span>}{!!log.part_number && <Search size={10} className="text-blue-400 flex-shrink-0"/>}</div></td>
+                                    {/* COL 1: PART NUMBER */}
+                                    <td className="px-4 py-3 relative">
+                                        <div className="flex items-center gap-1 relative">
+                                            {!isSold ? (
+                                                <input 
+                                                    ref={el => { cellRefs.current[globalRefBase + 1] = el; }}
+                                                    className="bg-transparent border-b border-transparent focus:border-blue-500 outline-none w-full font-mono text-gray-300 p-1 text-xs focus:bg-gray-700/50 transition-colors" 
+                                                    placeholder="Part No" 
+                                                    value={log.part_number||''} 
+                                                    onChange={(e)=>handlePartNumberInput(log.id!,e.target.value,e)} 
+                                                    onFocus={(e)=>updateAutocompleteState(log.id!,e.target.value,e.target)} 
+                                                    onKeyDown={(e)=>handlePartNumberKeyDown(e, log.id!, globalRefBase + 1)}
+                                                    onBlur={(e)=>setTimeout(async()=>{if(activeSearchId===log.id)setActiveSearchId(null);await handleUpdateField(log.id!,'part_number',e.target.value)},200)}
+                                                />
+                                            ) : <span className="font-mono text-gray-400">{log.part_number}</span>}
+                                            {!!log.part_number && <Search size={10} className="text-blue-400 flex-shrink-0"/>}
+                                        </div>
+                                    </td>
 
-                                    <td className="px-4 py-3 text-gray-400 whitespace-normal">{editingCell?.id === log.id && editingCell?.field === 'nama_barang' ? (
-                                        <input className="w-full bg-gray-700 border-b border-blue-500 text-gray-100 p-1 text-xs" value={log.nama_barang||''} onChange={(e)=>setScanLogs(prev=>prev.map(l=>l.id===log.id?{...l,nama_barang:e.target.value}:l))} onBlur={(e)=>{handleUpdateField(log.id!,'nama_barang',e.target.value);setEditingCell(null)}} onKeyDown={(e)=>{if(e.key==='Enter'){handleUpdateField(log.id!,'nama_barang',(e.target as HTMLInputElement).value);setEditingCell(null)}}} autoFocus />
-                                    ) : <div className="cursor-text hover:text-blue-300" onClick={()=>!isSold && setEditingCell({id:log.id!,field:'nama_barang'})}>{log.nama_barang||'-'}</div>}</td>
+                                    {/* COL 2: NAMA BARANG (TEXTAREA) */}
+                                    <td className="px-4 py-3">
+                                        {!isSold ? (
+                                            <textarea
+                                                ref={el => { cellRefs.current[globalRefBase + 2] = el; }}
+                                                rows={3} 
+                                                className="w-full bg-transparent border border-transparent focus:border-blue-500 outline-none text-gray-100 p-1 text-xs focus:bg-gray-700/50 transition-colors resize-none overflow-hidden" 
+                                                value={log.nama_barang||''} 
+                                                onChange={(e)=>setScanLogs(prev=>prev.map(l=>l.id===log.id?{...l,nama_barang:e.target.value}:l))} 
+                                                onBlur={(e)=>handleUpdateField(log.id!,'nama_barang',e.target.value)} 
+                                                onKeyDown={(e)=>handleGridKeyDown(e, globalRefBase + 2)}
+                                            />
+                                        ) : <span className="text-gray-400 block max-h-20 overflow-y-auto">{log.nama_barang||'-'}</span>}
+                                    </td>
 
-                                    <td className="px-4 py-3 text-center">{editingCell?.id === log.id && editingCell?.field === 'quantity' ? (
-                                        <input type="number" className="w-full bg-gray-700 border-b border-blue-500 text-gray-100 p-1 text-xs text-center" value={log.quantity||0} onChange={(e)=>setScanLogs(prev=>prev.map(l=>l.id===log.id?{...l,quantity:parseFloat(e.target.value)||0}:l))} onBlur={(e)=>{handleUpdateField(log.id!,'quantity',parseFloat(e.target.value)||0);setEditingCell(null)}} onKeyDown={(e)=>{if(e.key==='Enter'){handleUpdateField(log.id!,'quantity',parseFloat((e.target as HTMLInputElement).value)||0);setEditingCell(null)}}} autoFocus />
-                                    ) : <div className="cursor-text text-gray-400 hover:text-blue-300" onClick={()=>!isSold && setEditingCell({id:log.id!,field:'quantity'})}>{log.quantity||'-'}</div>}</td>
+                                    {/* COL 3: QUANTITY */}
+                                    <td className="px-4 py-3 text-center align-top">
+                                        {!isSold ? (
+                                            <input 
+                                                ref={el => { cellRefs.current[globalRefBase + 3] = el; }}
+                                                type="text" 
+                                                inputMode="numeric"
+                                                className="w-full bg-transparent border-b border-transparent focus:border-blue-500 outline-none text-gray-100 p-1 text-xs text-center focus:bg-gray-700/50 transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                                                value={log.quantity||''} 
+                                                onChange={(e)=>handleNumberChange(log.id!, 'quantity', e.target.value)} 
+                                                onBlur={(e)=>handleUpdateField(log.id!,'quantity', parseFloat(e.target.value)||0)} 
+                                                onKeyDown={(e)=>handleGridKeyDown(e, globalRefBase + 3)}
+                                                placeholder="0"
+                                            />
+                                        ) : <span className="text-gray-400">{log.quantity||'-'}</span>}
+                                    </td>
 
-                                    <td className="px-4 py-3 text-gray-200 font-bold text-right">{log.harga_total ? formatRupiah(log.harga_total) : '-'}</td>
+                                    {/* COL 4: TOTAL (WIDER) */}
+                                    <td className="px-4 py-3 text-right align-top">
+                                        {!isSold ? (
+                                            <input 
+                                                ref={el => { cellRefs.current[globalRefBase + 4] = el; }}
+                                                type="text" 
+                                                inputMode="numeric"
+                                                className="w-full bg-transparent border-b border-transparent focus:border-blue-500 outline-none text-gray-100 p-1 text-xs text-right focus:bg-gray-700/50 transition-colors font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none min-w-[120px]" 
+                                                value={log.harga_total||''} 
+                                                onChange={(e)=>handleNumberChange(log.id!, 'harga_total', e.target.value)} 
+                                                onBlur={(e)=>handleUpdateField(log.id!,'harga_total', parseFloat(e.target.value)||0)} 
+                                                onKeyDown={(e)=>handleGridKeyDown(e, globalRefBase + 4)}
+                                                placeholder="0"
+                                            />
+                                        ) : <span className="text-gray-200 font-bold">{log.harga_total ? formatRupiah(log.harga_total) : '-'}</span>}
+                                    </td>
                                     
-                                    <td className="px-4 py-3 text-center whitespace-nowrap">
+                                    <td className="px-4 py-3 text-center whitespace-nowrap align-top">
                                         {isSold ? <span className="text-gray-400 font-bold bg-gray-700 px-2 py-0.5 rounded-full text-[10px]">Terjual</span> : 
                                          isReady ? <span className="text-green-400 font-bold bg-green-900/30 px-2 py-0.5 rounded-full border border-green-800 text-[10px] flex items-center justify-center gap-1"><Check size={10}/> Siap</span> :
-                                         <span className="text-red-400 font-bold bg-red-900/30 px-2 py-0.5 rounded-full border border-red-800 text-[10px] flex items-center justify-center gap-1"><XCircle size={10}/> Data Kurang</span>}
+                                         isPending ? <span className="text-red-400 font-bold bg-red-900/30 px-2 py-0.5 rounded-full border border-red-800 text-[10px] flex items-center justify-center gap-1"><XCircle size={10}/> Data Kurang</span> :
+                                         <span className="text-yellow-400 font-bold bg-yellow-900/30 px-2 py-0.5 rounded-full border border-yellow-800 text-[10px] flex items-center justify-center gap-1"><FileSpreadsheet size={10}/> Order Masuk</span>
+                                         }
                                     </td>
-                                    <td className="px-4 py-3 text-center">{!isSold && <button onClick={()=>handleDuplicate(log.id!)} className="p-1 hover:bg-gray-600 rounded text-blue-400">{isDuplicating===log.id?<Loader2 size={16} className="animate-spin"/>:<Plus size={16}/>}</button>}</td>
-                                    <td className="px-4 py-3 text-center">{!isSold && <button onClick={()=>handleDeleteLog(log.id!)} className="p-1 hover:bg-red-900/50 rounded text-red-400"><Trash2 size={16}/></button>}</td>
+                                    <td className="px-4 py-3 text-center align-top">{!isSold && <button onClick={()=>handleDuplicate(log.id!)} className="p-1 hover:bg-gray-600 rounded text-blue-400">{isDuplicating===log.id?<Loader2 size={16} className="animate-spin"/>:<Plus size={16}/>}</button>}</td>
+                                    <td className="px-4 py-3 text-center align-top">{!isSold && <button onClick={()=>handleDeleteLog(log.id!)} className="p-1 hover:bg-red-900/50 rounded text-red-400"><Trash2 size={16}/></button>}</td>
                                 </tr>
                             )
                         })}
@@ -411,11 +628,18 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
            )}
         </div>
 
-        {/* AUTOCOMPLETE POPUP */}
+        {/* AUTOCOMPLETE POPUP (KEYBOARD NAVIGATION SUPPORTED) */}
         {activeSearchId !== null && suggestions.length > 0 && popupPos && (
           <div className="fixed z-[9999] bg-gray-800 border border-gray-600 rounded-lg shadow-2xl max-h-48 overflow-y-auto ring-1 ring-black/50" style={{ top: popupPos.top !== undefined ? `${popupPos.top}px` : 'auto', bottom: popupPos.bottom !== undefined ? `${popupPos.bottom}px` : 'auto', left: `${popupPos.left}px`, width: `${popupPos.width}px` }}>
               {suggestions.map((item, idx) => (
-                  <div key={idx} onMouseDown={(e) => { e.preventDefault(); handleSuggestionClick(activeSearchId, item); }} className="px-3 py-2 text-xs hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0 group transition-colors">
+                  <div 
+                      key={idx} 
+                      ref={idx === highlightedIndex ? activeItemRef : null}
+                      onMouseDown={(e) => { e.preventDefault(); handleSuggestionClick(activeSearchId, item); }} 
+                      className={`px-3 py-2 text-xs cursor-pointer border-b border-gray-700 last:border-0 group transition-colors ${
+                          idx === highlightedIndex ? 'bg-gray-700 border-l-2 border-orange-400' : 'hover:bg-gray-700'
+                      }`}
+                  >
                       <div className="font-bold text-orange-400 font-mono text-sm group-hover:text-orange-300">{item.partNumber}</div>
                       <div className="text-gray-500 truncate group-hover:text-gray-300 text-[10px]">{item.name}</div>
                   </div>

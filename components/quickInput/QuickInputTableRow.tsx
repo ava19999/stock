@@ -32,6 +32,15 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
     const COLS = 8;
     const baseRefIndex = globalIndex * COLS;
 
+    // Helper untuk menangani input angka (mencegah huruf masuk)
+    const handleNumberChange = (field: keyof QuickInputRow, value: string) => {
+        // Hanya ambil angka
+        const cleanValue = value.replace(/[^0-9]/g, '');
+        // Konversi ke number (jika kosong jadi 0)
+        const numValue = cleanValue === '' ? 0 : parseInt(cleanValue, 10);
+        onUpdateRow(row.id, field, numValue);
+    };
+
     useEffect(() => {
         if (activeSearchIndex === index && activeItemRef.current) {
             activeItemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -96,12 +105,14 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
             <td className="px-2 py-1.5">
                 <input
                     ref={el => { inputRefs.current[baseRefIndex + 2] = el; }}
-                    type="number"
-                    min="0"
+                    type="text"
+                    inputMode="numeric"
+                    // Menggunakan || '' agar jika 0 tampil kosong (seperti kolom lain)
                     className={`w-full bg-transparent px-1 py-1 text-xs font-bold text-right font-mono focus:outline-none ${row.operation === 'in' ? 'text-green-400' : 'text-red-400'} ${row.error ? 'text-red-400' : ''}`}
-                    value={row.quantity}
-                    onChange={(e) => onUpdateRow(row.id, 'quantity', parseInt(e.target.value) || 0)}
+                    value={row.quantity || ''}
+                    onChange={(e) => handleNumberChange('quantity', e.target.value)}
                     onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 2)}
+                    placeholder="0"
                 />
             </td>
 
@@ -109,10 +120,11 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
             <td className="px-2 py-1.5">
                 <input
                     ref={el => { inputRefs.current[baseRefIndex + 3] = el; }}
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
                     className="w-full bg-transparent px-1 py-1 text-xs font-mono text-right text-orange-300 focus:outline-none focus:text-orange-400 placeholder-gray-600"
                     value={row.hargaModal || ''}
-                    onChange={(e) => onUpdateRow(row.id, 'hargaModal', parseInt(e.target.value) || 0)}
+                    onChange={(e) => handleNumberChange('hargaModal', e.target.value)}
                     onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 3)}
                     placeholder="0"
                 />
@@ -122,10 +134,11 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
             <td className="px-2 py-1.5">
                 <input
                     ref={el => { inputRefs.current[baseRefIndex + 4] = el; }}
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
                     className="w-full bg-transparent px-1 py-1 text-xs font-mono text-right text-blue-300 focus:outline-none focus:text-blue-400 placeholder-gray-600"
                     value={row.hargaJual || ''}
-                    onChange={(e) => onUpdateRow(row.id, 'hargaJual', parseInt(e.target.value) || 0)}
+                    onChange={(e) => handleNumberChange('hargaJual', e.target.value)}
                     onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 4)}
                     placeholder="0"
                 />
