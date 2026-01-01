@@ -14,11 +14,14 @@ interface QuickInputTableProps {
     onSelectItem: (id: number, item: InventoryItem) => void;
     onUpdateRow: (id: number, field: keyof QuickInputRow, value: any) => void;
     onRemoveRow: (id: number) => void;
+    highlightedIndex: number;
+    onSearchKeyDown: (e: React.KeyboardEvent, id: number) => void;
+    onGridKeyDown: (e: React.KeyboardEvent, globalRefIndex: number) => void; // PROP BARU
 }
 
 export const QuickInputTable: React.FC<QuickInputTableProps> = ({
     currentRows, startIndex, activeSearchIndex, suggestions, inputRefs,
-    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow
+    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown
 }) => {
     return (
         <div className="flex-1 overflow-auto p-2">
@@ -29,7 +32,6 @@ export const QuickInputTable: React.FC<QuickInputTableProps> = ({
                             <th className="px-2 py-2 w-8 text-center">#</th>
                             <th className="px-2 py-2 w-48">Part Number</th>
                             <th className="px-2 py-2">Nama Barang</th>
-                            <th className="px-2 py-2 w-28 text-center">Tipe</th>
                             <th className="px-2 py-2 w-16 text-right">Qty</th>
                             <th className="px-2 py-2 w-28 text-right">Modal</th>
                             <th className="px-2 py-2 w-28 text-right">Jual</th>
@@ -54,6 +56,9 @@ export const QuickInputTable: React.FC<QuickInputTableProps> = ({
                                 onSelectItem={onSelectItem}
                                 onUpdateRow={onUpdateRow}
                                 onRemoveRow={onRemoveRow}
+                                highlightedIndex={highlightedIndex}
+                                onSearchKeyDown={onSearchKeyDown}
+                                onGridKeyDown={onGridKeyDown}
                             />
                         ))}
                     </tbody>

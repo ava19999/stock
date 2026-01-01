@@ -1,5 +1,5 @@
 // FILE: src/components/quickInput/QuickInputTableRow.tsx
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { QuickInputRow } from './types';
 import { InventoryItem } from '../../types';
 import { checkIsRowComplete } from './quickInputUtils';
@@ -7,8 +7,8 @@ import { Loader2, AlertCircle, Check, Trash2 } from 'lucide-react';
 
 interface QuickInputTableRowProps {
     row: QuickInputRow;
-    index: number;         // Index lokal (0-99) untuk styling/logic
-    globalIndex: number;   // Index global untuk refs
+    index: number;
+    globalIndex: number;
     activeSearchIndex: number | null;
     suggestions: InventoryItem[];
     inputRefs: React.MutableRefObject<(HTMLInputElement | null)[]>;
@@ -16,13 +16,27 @@ interface QuickInputTableRowProps {
     onSelectItem: (id: number, item: InventoryItem) => void;
     onUpdateRow: (id: number, field: keyof QuickInputRow, value: any) => void;
     onRemoveRow: (id: number) => void;
+    highlightedIndex: number;
+    onSearchKeyDown: (e: React.KeyboardEvent, id: number) => void;
+    onGridKeyDown: (e: React.KeyboardEvent, globalRefIndex: number) => void;
 }
 
 export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
     row, index, globalIndex, activeSearchIndex, suggestions, inputRefs,
-    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow
+    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown
 }) => {
     const isComplete = checkIsRowComplete(row);
+    const activeItemRef = useRef<HTMLDivElement>(null);
+
+    // Konstanta jumlah kolom untuk perhitungan index ref
+    const COLS = 8;
+    const baseRefIndex = globalIndex * COLS;
+
+    useEffect(() => {
+        if (activeSearchIndex === index && activeItemRef.current) {
+            activeItemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+    }, [highlightedIndex, activeSearchIndex, index]);
 
     return (
         <tr className={`hover:bg-gray-700/20 border-b border-gray-700/50 ${row.error ? 'bg-red-900/10' : ''}`}>
@@ -30,22 +44,30 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                 {globalIndex + 1}
             </td>
 
+            {/* KOLOM 0: Part Number */}
             <td className="px-2 py-1.5 relative">
                 <div className="relative">
                     <input
-                        ref={el => { inputRefs.current[globalIndex * 6] = el; }}
+                        ref={el => { inputRefs.current[baseRefIndex + 0] = el; }}
                         type="text"
                         className={`w-full bg-transparent px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:text-blue-400 font-bold placeholder-gray-600 ${row.error ? 'text-red-400' : ''}`}
                         value={row.partNumber}
                         onChange={(e) => onPartNumberChange(row.id, e.target.value)}
+                        onKeyDown={(e) => onSearchKeyDown(e, row.id)} // Khusus PartNumber punya handler sendiri
                         placeholder="Cari..."
+                        autoComplete="off"
                     />
                     {activeSearchIndex === index && suggestions.length > 0 && (
                         <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto border border-gray-600">
                             {suggestions.map((item, idx) => (
                                 <div
                                     key={idx}
-                                    className="px-3 py-2 hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-0"
+                                    ref={idx === highlightedIndex ? activeItemRef : null}
+                                    className={`px-3 py-2 cursor-pointer border-b border-gray-700 last:border-0 transition-colors ${
+                                        idx === highlightedIndex 
+                                        ? 'bg-gray-700 border-l-2 border-orange-400' 
+                                        : 'hover:bg-gray-700'
+                                    }`}
                                     onClick={() => onSelectItem(row.id, item)}
                                 >
                                     <div className="font-bold text-orange-400 font-mono text-xs">{item.partNumber}</div>
@@ -57,80 +79,93 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                 </div>
             </td>
 
-            <td className="px-2 py-1.5">
-                <div className="text-gray-300 font-medium text-xs max-w-[200px] truncate">
-                    {row.namaBarang || '-'}
-                </div>
-            </td>
-
-            <td className="px-2 py-1.5 text-center">
-                <select
-                    className={`w-full bg-transparent px-1 py-1 text-[10px] font-bold focus:outline-none cursor-pointer ${row.operation === 'in' ? 'text-green-400' : 'text-red-400'}`}
-                    value={row.operation}
-                    onChange={(e) => onUpdateRow(row.id, 'operation', e.target.value as 'in' | 'out')}
-                >
-                    <option value="out" className="bg-gray-800 text-red-400">KELUAR</option>
-                    <option value="in" className="bg-gray-800 text-green-400">MASUK</option>
-                </select>
-            </td>
-
+            {/* KOLOM 1: Nama Barang */}
             <td className="px-2 py-1.5">
                 <input
-                    ref={el => { inputRefs.current[(globalIndex * 6) + 2] = el; }}
+                    ref={el => { inputRefs.current[baseRefIndex + 1] = el; }}
+                    type="text"
+                    className="w-full bg-transparent px-1 py-1 text-xs text-gray-300 font-medium focus:outline-none focus:text-blue-400 placeholder-gray-600"
+                    value={row.namaBarang}
+                    onChange={(e) => onUpdateRow(row.id, 'namaBarang', e.target.value)}
+                    onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 1)}
+                    placeholder="Nama Barang"
+                />
+            </td>
+
+            {/* KOLOM 2: Quantity */}
+            <td className="px-2 py-1.5">
+                <input
+                    ref={el => { inputRefs.current[baseRefIndex + 2] = el; }}
                     type="number"
                     min="0"
                     className={`w-full bg-transparent px-1 py-1 text-xs font-bold text-right font-mono focus:outline-none ${row.operation === 'in' ? 'text-green-400' : 'text-red-400'} ${row.error ? 'text-red-400' : ''}`}
                     value={row.quantity}
                     onChange={(e) => onUpdateRow(row.id, 'quantity', parseInt(e.target.value) || 0)}
+                    onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 2)}
                 />
             </td>
 
+            {/* KOLOM 3: Harga Modal */}
             <td className="px-2 py-1.5">
                 <input
+                    ref={el => { inputRefs.current[baseRefIndex + 3] = el; }}
                     type="number"
                     className="w-full bg-transparent px-1 py-1 text-xs font-mono text-right text-orange-300 focus:outline-none focus:text-orange-400 placeholder-gray-600"
                     value={row.hargaModal || ''}
                     onChange={(e) => onUpdateRow(row.id, 'hargaModal', parseInt(e.target.value) || 0)}
+                    onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 3)}
                     placeholder="0"
                 />
             </td>
 
+            {/* KOLOM 4: Harga Jual */}
             <td className="px-2 py-1.5">
                 <input
+                    ref={el => { inputRefs.current[baseRefIndex + 4] = el; }}
                     type="number"
                     className="w-full bg-transparent px-1 py-1 text-xs font-mono text-right text-blue-300 focus:outline-none focus:text-blue-400 placeholder-gray-600"
                     value={row.hargaJual || ''}
                     onChange={(e) => onUpdateRow(row.id, 'hargaJual', parseInt(e.target.value) || 0)}
+                    onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 4)}
                     placeholder="0"
                 />
             </td>
 
+            {/* KOLOM 5: Via */}
             <td className="px-2 py-1.5">
                 <input
+                    ref={el => { inputRefs.current[baseRefIndex + 5] = el; }}
                     type="text"
                     className="w-full bg-transparent px-1 py-1 text-xs text-gray-300 focus:outline-none focus:text-blue-400 placeholder-gray-600"
                     value={row.via}
                     onChange={(e) => onUpdateRow(row.id, 'via', e.target.value)}
+                    onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 5)}
                     placeholder="Via"
                 />
             </td>
 
+            {/* KOLOM 6: Customer */}
             <td className="px-2 py-1.5">
                 <input
+                    ref={el => { inputRefs.current[baseRefIndex + 6] = el; }}
                     type="text"
                     className="w-full bg-transparent px-1 py-1 text-xs text-gray-300 focus:outline-none focus:text-blue-400 placeholder-gray-600"
                     value={row.customer}
                     onChange={(e) => onUpdateRow(row.id, 'customer', e.target.value)}
+                    onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 6)}
                     placeholder="Customer"
                 />
             </td>
 
+            {/* KOLOM 7: Resi/Tempo */}
             <td className="px-2 py-1.5">
                 <input
+                    ref={el => { inputRefs.current[baseRefIndex + 7] = el; }}
                     type="text"
                     className="w-full bg-transparent px-1 py-1 text-xs text-gray-300 focus:outline-none focus:text-blue-400 placeholder-gray-600"
                     value={row.resiTempo}
                     onChange={(e) => onUpdateRow(row.id, 'resiTempo', e.target.value)}
+                    onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 7)}
                     placeholder="Ket..."
                 />
             </td>

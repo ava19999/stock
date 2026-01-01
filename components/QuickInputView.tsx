@@ -19,23 +19,111 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const [rows, setRows] = useState<QuickInputRow[]>([]);
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
   const [isSavingAll, setIsSavingAll] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [activeTab, setActiveTab] = useState<'in' | 'out'>('out');
   
   const itemsPerPage = 100;
+  const COLUMNS_COUNT = 8; // UPDATE: Total kolom input per baris
   const searchTimeoutRef = useRef<NodeJS.Timeout>();
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // --- INITIALIZATION ---
   useEffect(() => {
     if (rows.length === 0) {
-      const initialRows = Array.from({ length: 10 }).map((_, index) => createEmptyRow(index + 1));
+      const initialRows = Array.from({ length: 10 }).map((_, index) => ({
+          ...createEmptyRow(index + 1),
+          operation: activeTab
+      }));
       setRows(initialRows);
       setTimeout(() => { inputRefs.current[0]?.focus(); }, 100);
     }
   }, []);
 
   // --- HANDLERS ---
+  const handleTabChange = (tab: 'in' | 'out') => {
+      setActiveTab(tab);
+      setRows(prev => prev.map(row => ({ ...row, operation: tab })));
+      // Refocus ke elemen pertama setelah ganti tab
+      setTimeout(() => { inputRefs.current[0]?.focus(); }, 50);
+  };
+
+  // HANDLER 1: Navigasi Dropdown Search (Khusus Part Number)
+  const handleSearchKeyDown = (e: React.KeyboardEvent, id: number) => {
+    // Jika dropdown aktif, handle navigasi dropdown
+    if (suggestions.length > 0 && activeSearchIndex !== null) {
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setHighlightedIndex(prev => (prev < suggestions.length - 1 ? prev + 1 : 0));
+            return;
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setHighlightedIndex(prev => (prev > 0 ? prev - 1 : suggestions.length - 1));
+            return;
+        } else if (e.key === 'Enter') {
+            if (highlightedIndex >= 0 && suggestions[highlightedIndex]) {
+                e.preventDefault();
+                handleSelectItem(id, suggestions[highlightedIndex]);
+                return;
+            }
+        }
+    }
+    
+    // Jika dropdown TIDAK aktif, lempar ke navigasi grid biasa
+    const rowIndex = rows.findIndex(r => r.id === id);
+    // Part Number ada di kolom offset 0
+    handleGridKeyDown(e, rowIndex * COLUMNS_COUNT + 0); 
+  };
+
+  // HANDLER 2: Navigasi Grid (Excel Style)
+  const handleGridKeyDown = (e: React.KeyboardEvent, currentIndex: number) => {
+    // Ignore jika modifier key ditekan (Ctrl/Alt/Shift) kecuali Shift+Tab
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+    let nextIndex = currentIndex;
+    const totalInputs = rows.length * COLUMNS_COUNT;
+
+    switch (e.key) {
+        case 'ArrowRight':
+            if ((e.target as HTMLInputElement).selectionStart === (e.target as HTMLInputElement).value.length) {
+                e.preventDefault();
+                nextIndex = currentIndex + 1;
+            }
+            break;
+        case 'ArrowLeft':
+            if ((e.target as HTMLInputElement).selectionStart === 0) {
+                e.preventDefault();
+                nextIndex = currentIndex - 1;
+            }
+            break;
+        case 'ArrowUp':
+            e.preventDefault();
+            nextIndex = currentIndex - COLUMNS_COUNT;
+            break;
+        case 'ArrowDown':
+            e.preventDefault();
+            nextIndex = currentIndex + COLUMNS_COUNT;
+            break;
+        case 'Enter':
+            e.preventDefault();
+            nextIndex = currentIndex + 1;
+            break;
+        default:
+            return;
+    }
+
+    // Focus ke elemen baru jika valid
+    if (nextIndex >= 0 && nextIndex < totalInputs) {
+        const target = inputRefs.current[nextIndex];
+        if (target) {
+            target.focus();
+            // Select all text saat pindah fokus biar gampang edit
+            setTimeout(() => target.select(), 0); 
+        }
+    }
+  };
+
   const handlePartNumberChange = (id: number, value: string) => {
     setRows(prev => prev.map(row => row.id === id ? { ...row, partNumber: value.toUpperCase() } : row));
     const rowIndex = rows.findIndex(r => r.id === id);
@@ -46,10 +134,12 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         const matches = items.filter(item => item.partNumber && item.partNumber.toLowerCase().includes(lowerVal)).slice(0, 10);
         setSuggestions(matches);
         setActiveSearchIndex(rowIndex);
+        setHighlightedIndex(-1);
       }, 300);
     } else {
       setSuggestions([]);
       setActiveSearchIndex(null);
+      setHighlightedIndex(-1);
     }
   };
 
@@ -59,17 +149,28 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     } : row));
     setSuggestions([]);
     setActiveSearchIndex(null);
+    setHighlightedIndex(-1);
+    
+    // Auto focus ke kolom Quantity (index ke-2) setelah pilih barang
     const rowIndex = rows.findIndex(r => r.id === id);
-    const qtyInput = inputRefs.current[(rowIndex * 6) + 2]; 
-    qtyInput?.focus();
+    const qtyInputIndex = (rowIndex * COLUMNS_COUNT) + 2;
+    setTimeout(() => {
+        inputRefs.current[qtyInputIndex]?.focus();
+        inputRefs.current[qtyInputIndex]?.select();
+    }, 50);
   };
 
   const addNewRow = () => {
     const maxId = rows.length > 0 ? Math.max(...rows.map(r => r.id)) : 0;
-    setRows(prev => [...prev, createEmptyRow(maxId + 1)]);
+    setRows(prev => [...prev, { ...createEmptyRow(maxId + 1), operation: activeTab }]);
     const newTotalPages = Math.ceil((rows.length + 1) / itemsPerPage);
     if (newTotalPages > currentPage) setCurrentPage(newTotalPages);
-    setTimeout(() => { const newIndex = rows.length; inputRefs.current[newIndex * 6]?.focus(); }, 100);
+    
+    // Focus ke baris baru
+    setTimeout(() => { 
+        const newIndex = rows.length * COLUMNS_COUNT; 
+        inputRefs.current[newIndex]?.focus(); 
+    }, 100);
   };
 
   const removeRow = (id: number) => { setRows(prev => prev.filter(row => row.id !== id)); };
@@ -89,9 +190,11 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         updateRow(row.id, 'isLoading', false);
         return false;
       }
+      
       const transactionData = { type: row.operation, qty: row.quantity, ecommerce: row.via, resiTempo: row.resiTempo, customer: row.customer, price: row.operation === 'in' ? row.hargaModal : row.hargaJual };
       const updatedItem = await updateInventory({
         ...existingItem,
+        name: row.namaBarang,
         quantity: row.operation === 'in' ? existingItem.quantity + row.quantity : Math.max(0, existingItem.quantity - row.quantity),
         costPrice: row.hargaModal || existingItem.costPrice,
         price: row.hargaJual || existingItem.price,
@@ -131,7 +234,10 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     
     const remainingRows = rows.length - successCount;
     if (remainingRows === 0) {
-       const initialRows = Array.from({ length: 10 }).map((_, index) => createEmptyRow(index + 1));
+       const initialRows = Array.from({ length: 10 }).map((_, index) => ({
+           ...createEmptyRow(index + 1), 
+           operation: activeTab 
+       }));
        setRows(initialRows);
     }
     setIsSavingAll(false);
@@ -149,7 +255,9 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         onAddRow={addNewRow} 
         onSaveAll={saveAllRows} 
         isSaving={isSavingAll} 
-        validCount={validRowsCount} 
+        validCount={validRowsCount}
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
       />
 
       <QuickInputTable
@@ -162,6 +270,9 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         onSelectItem={handleSelectItem}
         onUpdateRow={updateRow}
         onRemoveRow={removeRow}
+        highlightedIndex={highlightedIndex}
+        onSearchKeyDown={handleSearchKeyDown} // Khusus Part Number
+        onGridKeyDown={handleGridKeyDown}     // Untuk semua kolom lain
       />
 
       <QuickInputFooter 

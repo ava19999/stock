@@ -7,7 +7,7 @@ export const createEmptyRow = (id: number): QuickInputRow => ({
     namaBarang: '',
     hargaModal: 0,
     hargaJual: 0,
-    quantity: 1,
+    quantity: 0, // UPDATED: Default quantity jadi 0
     operation: 'out',
     via: '',
     customer: '',
