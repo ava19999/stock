@@ -6,12 +6,12 @@ import { ItemForm } from './components/ItemForm';
 import { ShopView } from './components/ShopView';
 import { OrderManagement } from './components/OrderManagement';
 import { CustomerOrderView } from './components/CustomerOrderView';
-import { QuickInputView } from './components/QuickInputView';
-import { InventoryItem, InventoryFormData, CartItem, Order, StockHistory } from './types';
+// QuickInputView tidak ada di file lib/App.tsx asli Anda, jadi saya tidak menambahkannya agar sesuai struktur asli.
+import { InventoryItem, InventoryFormData, CartItem, Order, OrderStatus, StockHistory } from './types';
 
 // --- IMPORT LOGIKA ---
 import { 
-  fetchInventory, addInventory, updateInventory, deleteInventory, getItemById, getItemByPartNumber, 
+  fetchInventory, addInventory, updateInventory, deleteInventory, getItemByPartNumber, 
   fetchOrders, saveOrder, updateOrderStatusService,
   fetchHistory,
   addBarangMasuk, addBarangKeluar,
@@ -22,13 +22,14 @@ import { generateId } from './utils';
 import { 
   Home, Package, ShieldCheck, User, CheckCircle, XCircle, 
   ClipboardList, LogOut, ArrowRight, CloudLightning, KeyRound, 
-  ShoppingCart, Car, Plus
+  ShoppingCart, Car
 } from 'lucide-react';
 
 const CUSTOMER_ID_KEY = 'stockmaster_my_customer_id';
 const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 
-type ActiveView = 'shop' | 'inventory' | 'quick_input' | 'orders';
+// Dihapus 'chat' dari ActiveView
+type ActiveView = 'shop' | 'inventory' | 'orders';
 
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
@@ -49,6 +50,7 @@ const AppContent: React.FC = () => {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [history, setHistory] = useState<StockHistory[]>([]);
+  // State chatSessions dihapus
   const [loading, setLoading] = useState(false); 
   const [activeView, setActiveView] = useState<ActiveView>('shop');
   
@@ -93,6 +95,8 @@ const AppContent: React.FC = () => {
 
         const historyData = await fetchHistory();
         setHistory(historyData);
+
+        // Fetch chat dihapus
 
         // Update trigger agar Dashboard me-reload tabelnya
         setRefreshTrigger(prev => prev + 1);
@@ -340,8 +344,11 @@ const AppContent: React.FC = () => {
       }
   };
 
+  // Fungsi handleSendMessage dihapus
+
   const pendingOrdersCount = orders.filter(o => o.status === 'pending').length;
   const myPendingOrdersCount = orders.filter(o => o.customerName === loginName && o.status === 'pending').length;
+  // unreadChatCount dihapus
 
   if (loading && items.length === 0) return <div className="flex flex-col h-screen items-center justify-center bg-gray-900 font-sans text-gray-400 space-y-6"><div className="relative"><div className="w-16 h-16 border-4 border-gray-700 border-t-blue-500 rounded-full animate-spin"></div><div className="absolute inset-0 flex items-center justify-center"><CloudLightning size={20} className="text-blue-500 animate-pulse" /></div></div><div className="text-center space-y-1"><p className="font-medium text-gray-200">Menghubungkan Database</p><p className="text-xs">Sinkronisasi Supabase...</p></div></div>;
 
@@ -390,7 +397,6 @@ const AppContent: React.FC = () => {
                   <>
                     <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-purple-900/30 text-purple-300 ring-1 ring-purple-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><ShoppingCart size={18}/> Beranda</button>
                     <button onClick={() => setActiveView('inventory')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='inventory'?'bg-purple-900/30 text-purple-300 ring-1 ring-purple-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><Package size={18}/> Gudang</button>
-                    <button onClick={() => setActiveView('quick_input')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='quick_input'?'bg-green-900/30 text-green-300 ring-1 ring-green-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><Plus size={18}/> Input Barang</button>
                     <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-purple-900/30 text-purple-300 ring-1 ring-purple-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><ClipboardList size={18}/> Manajemen Pesanan {pendingOrdersCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{pendingOrdersCount}</span>}</button>
                   </>
               ) : (
@@ -414,7 +420,7 @@ const AppContent: React.FC = () => {
             items={items} 
             orders={orders} 
             history={history} 
-            refreshTrigger={refreshTrigger}
+            refreshTrigger={refreshTrigger} // <-- PASS PROP INI
             onViewOrders={() => setActiveView('orders')} 
             onAddNew={() => { setEditItem(null); setIsEditing(true); }} 
             onEdit={(item) => { setEditItem(item); setIsEditing(true); }} 
@@ -422,20 +428,11 @@ const AppContent: React.FC = () => {
           />
         )}
         
-        {/* --- QUICK INPUT VIEW --- */}
-        {activeView === 'quick_input' && isAdmin && (
-          <QuickInputView 
-            items={items}
-            onRefresh={refreshData}
-            showToast={showToast}
-          />
-        )}
-        
         {/* --- ORDER MANAGEMENT DENGAN LOADING STATE --- */}
         {activeView === 'orders' && isAdmin && (
           <OrderManagement 
               orders={orders} 
-              isLoading={loading}
+              isLoading={loading} // <-- PASS STATUS LOADING
               onUpdateStatus={handleUpdateStatus} 
               onProcessReturn={handleProcessReturn} 
               onRefresh={refreshData} 
@@ -443,6 +440,8 @@ const AppContent: React.FC = () => {
         )}
         
         {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
+        
+        {/* ChatView dihapus */}
         
         {isEditing && isAdmin && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in">
@@ -454,12 +453,12 @@ const AppContent: React.FC = () => {
       </div>
 
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-gray-800 border-t border-gray-700 pb-safe z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.2)]">
-        <div className={`grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-2'} h-16`}>
+        {/* Grid disesuaikan karena tombol chat dihapus: Admin 4->3, User 3->2 */}
+        <div className={`grid ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'} h-16`}>
             {isAdmin ? (
                 <>
                     <button onClick={()=>setActiveView('shop')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='shop'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}><ShoppingCart size={22} className={activeView==='shop'?'fill-purple-900/50':''} /><span className="text-[10px] font-medium">Beranda</span></button>
                     <button onClick={()=>setActiveView('inventory')} className={`flex flex-col items-center justify-center gap-1 ${activeView==='inventory'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}><Package size={22} className={activeView==='inventory'?'fill-purple-900/50':''} /><span className="text-[10px] font-medium">Gudang</span></button>
-                    <button onClick={()=>setActiveView('quick_input')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='quick_input'?'text-green-400':'text-gray-500 hover:text-gray-300'}`}><div className="relative"><Plus size={22} className={activeView==='quick_input'?'fill-green-900/50':''} /></div><span className="text-[10px] font-medium">Input</span></button>
                     <button onClick={()=>setActiveView('orders')} className={`relative flex flex-col items-center justify-center gap-1 ${activeView==='orders'?'text-purple-400':'text-gray-500 hover:text-gray-300'}`}><div className="relative"><ClipboardList size={22} className={activeView==='orders'?'fill-purple-900/50':''} />{pendingOrdersCount>0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-gray-900"></span>}</div><span className="text-[10px] font-medium">Pesanan</span></button>
                 </>
             ) : (
