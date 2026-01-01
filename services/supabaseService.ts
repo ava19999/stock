@@ -1,5 +1,5 @@
 // FILE: src/services/supabaseService.ts
-import { supabase } from '@/lib/supabase';
+import { supabase } from '../lib/supabase';
 import { 
   InventoryItem, 
   InventoryFormData, 
