@@ -70,8 +70,33 @@ export const ShopView: React.FC<ShopViewProps> = ({
 
   useEffect(() => { loadShopData(); }, [page]); 
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onloadend = () => { setTempBannerImg(reader.result as string); if (bannerInputRef.current) bannerInputRef.current.value = ''; }; reader.readAsDataURL(file); };
-  const handleCropConfirm = async (base64: string) => { setTempBannerImg(null); setIsUploadingBanner(true); try { const compressed = await compressImage(base64); await onUpdateBanner(compressed); } catch (error) { console.error("Gagal upload banner", error); alert("Gagal memproses gambar banner"); } finally { setIsUploadingBanner(false); } };
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { 
+      const file = e.target.files?.[0]; 
+      if (!file) return; 
+      const reader = new FileReader(); 
+      reader.onloadend = () => { 
+          setTempBannerImg(reader.result as string); 
+          if (bannerInputRef.current) bannerInputRef.current.value = ''; 
+      }; 
+      reader.readAsDataURL(file); 
+  };
+
+  // --- PERBAIKAN: Set Resolusi 1280px dan Kualitas 90% ---
+  const handleCropConfirm = async (base64: string) => { 
+      setTempBannerImg(null); 
+      setIsUploadingBanner(true); 
+      try { 
+          // FIX: Gunakan resolusi 1280 (HD) dan kualitas 0.9 agar tidak pecah
+          const compressed = await compressImage(base64, 1280, 0.90); 
+          await onUpdateBanner(compressed); 
+      } catch (error) { 
+          console.error("Gagal upload banner", error); 
+          alert("Gagal memproses gambar banner"); 
+      } finally { 
+          setIsUploadingBanner(false); 
+      } 
+  };
+
   const handleCheckoutConfirm = (finalName: string) => {
       onCheckout(finalName);
       setIsCheckoutModalOpen(false);
@@ -114,7 +139,10 @@ export const ShopView: React.FC<ShopViewProps> = ({
         setPage={setPage} 
       />
 
-      <button onClick={() => setIsCartOpen(true)} className="fixed bottom-20 right-4 sm:bottom-8 sm:right-8 bg-gray-100 text-gray-900 p-4 rounded-full shadow-xl hover:bg-blue-600 hover:text-white hover:scale-105 active:scale-95 transition-all z-40 flex items-center justify-center group"><ShoppingCart size={24} />{cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-gray-800 shadow-sm">{cartItemCount}</span>}</button>
+      <button onClick={() => setIsCartOpen(true)} className="fixed bottom-20 right-4 sm:bottom-8 sm:right-8 bg-gray-100 text-gray-900 p-4 rounded-full shadow-xl hover:bg-blue-600 hover:text-white hover:scale-105 active:scale-95 transition-all z-40 flex items-center justify-center group">
+        <ShoppingCart size={24} />
+        {cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-gray-800 shadow-sm">{cartItemCount}</span>}
+      </button>
       
       <ShopCartModal 
         isOpen={isCartOpen}

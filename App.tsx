@@ -124,9 +124,46 @@ const AppContent: React.FC = () => {
       setIsEditing(false); setEditItem(null); setLoading(false);
   };
 
+  // --- FIX: FUNGSI UPDATE BANNER YANG SUDAH DIPERBAIKI ---
   const handleUpdateBanner = async (base64: string) => {
-      const bannerData: any = { partNumber: BANNER_PART_NUMBER, name: 'SYSTEM BANNER PROMO', application: 'DO NOT DELETE', brand: 'SYS', price: 0, costPrice: 0, ecommerce: '', quantity: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, shelf: 'SYSTEM', imageUrl: base64 };
-      if (await (bannerUrl ? updateInventory(bannerData) : addInventory(bannerData))) { setBannerUrl(base64); showToast('Banner diperbarui!'); } else { showToast('Gagal update banner', 'error'); }
+      // 1. Cek dulu apakah banner sudah ada di database untuk mendapatkan ID-nya
+      const existingItem = await getItemByPartNumber(BANNER_PART_NUMBER);
+
+      const bannerData: any = { 
+          partNumber: BANNER_PART_NUMBER, 
+          name: 'SYSTEM BANNER PROMO', 
+          application: 'DO NOT DELETE', 
+          brand: 'SYS', 
+          price: 0, 
+          costPrice: 0, 
+          ecommerce: '', 
+          quantity: 0, 
+          initialStock: 0, 
+          qtyIn: 0, 
+          qtyOut: 0, 
+          shelf: 'SYSTEM', 
+          imageUrl: base64 
+      };
+
+      let success = false;
+
+      if (existingItem) {
+          // Jika sudah ada, gunakan ID yang ditemukan untuk update
+          const updateData = { ...bannerData, id: existingItem.id };
+          const result = await updateInventory(updateData);
+          success = !!result;
+      } else {
+          // Jika belum ada, buat baru
+          const result = await addInventory(bannerData);
+          success = !!result;
+      }
+
+      if (success) { 
+          setBannerUrl(base64); 
+          showToast('Banner diperbarui!'); 
+      } else { 
+          showToast('Gagal update banner', 'error'); 
+      }
   };
   
   const handleDelete = async (id: string) => {
@@ -205,8 +242,6 @@ const AppContent: React.FC = () => {
   const handleUpdateStatus = async (orderId: string, newStatus: OrderStatus) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
-      // ... (Logika status update dipersingkat untuk App.tsx, logikanya sama persis dengan yang lama)
-      // Karena logika ini panjang, bisa juga dipecah ke helper service, tapi sesuai permintaan "jangan ubah logika", saya biarkan di sini tapi dipadatkan.
       
       let pureName = order.customerName; let resiVal = '-'; let shopVal = ''; let ecommerceVal = 'APLIKASI';
       const resiMatch = pureName.match(/\(Resi: (.*?)\)/); if (resiMatch) { resiVal = resiMatch[1]; pureName = pureName.replace(/\(Resi:.*?\)/, ''); }
