@@ -36,11 +36,6 @@ const getWIBISOStringFromTimestamp = (timestamp: number): string => {
     return `${wibTime.getFullYear()}-${pad(wibTime.getMonth() + 1)}-${pad(wibTime.getDate())}T${pad(wibTime.getHours())}:${pad(wibTime.getMinutes())}:${pad(wibTime.getSeconds())}.${pad3(wibTime.getMilliseconds())}`;
 };
 
-const getWIBDateString = (timestamp: number): string => {
-    const wibTime = new Date(timestamp + (7 * 3600000));
-    return wibTime.toISOString().split('T')[0];
-};
-
 const parseTimestamp = (dateString: string | null | undefined): number | null => {
     if (!dateString) return null; 
     const time = new Date(dateString).getTime();
@@ -103,15 +98,18 @@ const fetchLatestCostPrices = async (partNumbers?: string[]) => {
     return priceMap;
 };
 
+// Ambil harga dari list_harga_jual
 const fetchLatestSellingPrices = async (partNumbers?: string[]) => {
-    let query = supabase.from('barang_keluar').select('part_number, harga_satuan').order('created_at', { ascending: false, nullsFirst: false });
+    let query = supabase.from('list_harga_jual').select('part_number, harga');
     if (partNumbers && partNumbers.length > 0) { query = query.in('part_number', partNumbers); }
     const { data, error } = await query;
     if (error || !data) return {};
     const priceMap: Record<string, number> = {};
     data.forEach((row: any) => {
-        if (row.part_number && priceMap[row.part_number] === undefined) {
-            priceMap[row.part_number] = Number(row.harga_satuan) || 0;
+        if (row.part_number) {
+            if (priceMap[row.part_number] === undefined) {
+                 priceMap[row.part_number] = Number(row.harga) || 0;
+            }
         }
     });
     return priceMap;
@@ -128,6 +126,7 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
   return (baseData || []).map((item) => {
       const mapped = mapBaseItem(item);
       if (costMap[item.part_number] !== undefined) mapped.costPrice = costMap[item.part_number];
+      // Map Harga Jual dari list_harga_jual
       if (sellMap[item.part_number] !== undefined) mapped.price = sellMap[item.part_number];
       return mapped;
   });
@@ -137,17 +136,42 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
   const { data, error } = await supabase.from(TABLE_NAME).select('*').eq('id', id).single();
   if (error || !data) return null;
   const mapped = mapBaseItem(data);
+  
   const { data: costData } = await supabase.from('barang_masuk').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false, nullsFirst: false }).limit(1).single();
   if (costData) mapped.costPrice = Number(costData.harga_satuan) || 0;
-  const { data: sellData } = await supabase.from('barang_keluar').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false, nullsFirst: false }).limit(1).single();
-  if (sellData) mapped.price = Number(sellData.harga_satuan) || 0;
+  
+  // Ambil harga tunggal dari list_harga_jual
+  const { data: sellData } = await supabase.from('list_harga_jual').select('harga').eq('part_number', mapped.partNumber).limit(1).single();
+  if (sellData) mapped.price = Number(sellData.harga) || 0;
+  
   return mapped;
 };
 
+// --- PERBAIKAN UTAMA: AMBIL DATA LENGKAP SAAT VALIDASI ---
 export const getItemByPartNumber = async (partNumber: string): Promise<InventoryItem | null> => {
   const { data, error } = await supabase.from(TABLE_NAME).select('*').eq('part_number', partNumber).limit(1).single();
   if (error || !data) return null;
   const mapped = mapBaseItem(data);
+
+  // Ambil Cost Price (Harga Beli) Terakhir agar tidak 0
+  const { data: costData } = await supabase.from('barang_masuk')
+    .select('harga_satuan')
+    .eq('part_number', mapped.partNumber)
+    .order('created_at', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  
+  if (costData) mapped.costPrice = Number(costData.harga_satuan) || 0;
+  
+  // Ambil Selling Price (Harga Jual) dari list_harga_jual agar tidak 0
+  const { data: sellData } = await supabase.from('list_harga_jual')
+    .select('harga')
+    .eq('part_number', mapped.partNumber)
+    .limit(1)
+    .maybeSingle();
+
+  if (sellData) mapped.price = Number(sellData.harga) || 0;
+  
   return mapped;
 };
 
@@ -232,6 +256,26 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
     image_url: item.imageUrl, date: wibNow 
   }]).select().single();
   if (error) { handleDbError("Tambah Barang ke Base", error); return null; }
+
+  // --- LOGIKA SIMPAN HARGA KE LIST_HARGA_JUAL (AMAN TANPA UNIQUE KEY) ---
+  if (item.partNumber && item.price !== undefined) {
+      const { data: existing } = await supabase.from('list_harga_jual')
+          .select('id')
+          .eq('part_number', item.partNumber)
+          .maybeSingle();
+
+      if (existing) {
+          const { error: updateErr } = await supabase.from('list_harga_jual')
+              .update({ harga: item.price, name: item.name })
+              .eq('part_number', item.partNumber);
+          if(updateErr) console.error("Gagal update harga:", updateErr);
+      } else {
+          const { error: insertErr } = await supabase.from('list_harga_jual')
+              .insert([{ part_number: item.partNumber, name: item.name, harga: item.price }]);
+          if(insertErr) console.error("Gagal insert harga baru:", insertErr);
+      }
+  }
+
   if (item.quantity > 0 && data) {
       await addBarangMasuk({
           created_at: wibNow, tempo: '', keterangan: 'Stok Awal', ecommerce: 'Stok Awal', 
@@ -252,11 +296,43 @@ export const updateInventory = async (item: InventoryItem, transaction?: { type:
       if (transaction.type === 'in') finalQty += txQty; else finalQty -= txQty;
   } else { finalQty = item.quantity; }
   const wibNow = getWIBISOString();
+  
+  // Update data Base (Perbaikan imageUrl mapping)
   const { data: updatedData, error } = await supabase.from(TABLE_NAME).update({
     name: item.name, brand: item.brand, application: item.application,
-    shelf: item.shelf, quantity: finalQty, image_url: item.image_url, date: wibNow 
+    shelf: item.shelf, quantity: finalQty, 
+    image_url: item.imageUrl, // Pastikan property name benar
+    date: wibNow 
   }).eq('id', item.id).select();
+  
   if (error || !updatedData || updatedData.length === 0) { handleDbError("Update Barang Base", error); return null; }
+  
+  // --- LOGIKA UPDATE HARGA KE LIST_HARGA_JUAL (AMAN TANPA UNIQUE KEY) ---
+  if (item.partNumber && item.price !== undefined && item.price > 0) {
+      const { data: existing } = await supabase.from('list_harga_jual')
+          .select('id')
+          .eq('part_number', item.partNumber)
+          .limit(1)
+          .maybeSingle();
+
+      if (existing) {
+          const { error: updateErr } = await supabase.from('list_harga_jual')
+              .update({ harga: item.price, name: item.name })
+              .eq('part_number', item.partNumber);
+              
+          if (updateErr) console.error("Gagal update list_harga_jual:", updateErr);
+      } else {
+          const { error: insertErr } = await supabase.from('list_harga_jual')
+              .insert([{ 
+                  part_number: item.partNumber, 
+                  name: item.name, 
+                  harga: item.price 
+              }]);
+
+          if (insertErr) console.error("Gagal insert ke list_harga_jual:", insertErr);
+      }
+  }
+
   const baseUpdated = updatedData[0];
   if (transaction && transaction.qty > 0) {
       const txQty = Number(transaction.qty);

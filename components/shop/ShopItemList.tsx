@@ -2,7 +2,7 @@
 import React from 'react';
 import { InventoryItem } from '../../types';
 import { formatRupiah } from '../../utils';
-import { Loader2, Search, Car, Crown, Tag, Plus } from 'lucide-react';
+import { Loader2, Search, Car, Tag, Plus } from 'lucide-react';
 
 interface ShopItemListProps {
     loading: boolean;
@@ -15,7 +15,7 @@ interface ShopItemListProps {
 }
 
 export const ShopItemList: React.FC<ShopItemListProps> = ({ 
-    loading, shopItems, viewMode, isAdmin, isKingFano, adminPriceMode, onAddToCart 
+    loading, shopItems, viewMode, onAddToCart 
 }) => {
     if (loading) {
         return (
@@ -33,21 +33,14 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
         return (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-6 mt-4">
                 {shopItems.map((item) => {
-                    const isSpecialView = isAdmin ? (adminPriceMode === 'kingFano') : isKingFano;
-                    const useSpecialPrice = isSpecialView && item.kingFanoPrice && item.kingFanoPrice > 0;
-                    const displayPrice = useSpecialPrice ? item.kingFanoPrice : item.price;
+                    // Harga langsung diambil dari item.price (list_harga_jual)
+                    const displayPrice = item.price;
                     
                     return (
                     <div key={item.id} className="group bg-gray-800 rounded-xl shadow-none hover:shadow-lg border border-gray-700 overflow-hidden flex flex-col transition-all duration-300 transform hover:-translate-y-1 hover:border-gray-600">
                         <div className="aspect-square w-full bg-gray-700 relative overflow-hidden">
                             {item.imageUrl ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}} /> : <div className="w-full h-full flex flex-col items-center justify-center text-gray-600"><Car size={32}/><span className="text-[10px] mt-1">No Image</span></div>}
                             <div className="absolute top-2 right-2 bg-black/70 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold text-gray-200 shadow-sm border border-gray-600">{item.quantity} Unit</div>
-                            
-                            {useSpecialPrice && (
-                                <div className="absolute top-2 left-2 bg-purple-600 text-white px-2 py-1 rounded-lg text-[10px] font-bold shadow-sm flex items-center gap-1 border border-purple-400">
-                                    <Crown size={10} fill="white"/> SPECIAL
-                                </div>
-                            )}
                         </div>
                         <div className="p-3 flex-1 flex flex-col">
                             <div className="flex items-center gap-1.5 mb-1.5"><Tag size={10} className="text-blue-400" /><span className="text-xs font-mono text-gray-400 uppercase tracking-wider truncate">{item.partNumber || '-'}</span></div>
@@ -61,7 +54,8 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
                             <p className="text-xs text-gray-500 line-clamp-2 mb-3 leading-relaxed flex-1">{item.description}</p>
                             <div className="mt-auto pt-3 border-t border-gray-700 flex flex-col justify-between gap-2">
                                 <div className="flex flex-col">
-                                    <span className={`text-sm font-extrabold ${useSpecialPrice ? 'text-purple-400' : 'text-gray-100'}`}>{formatRupiah(displayPrice)}</span>
+                                    <span className="text-[10px] text-gray-400 mb-0.5">Harga Umum</span>
+                                    <span className="text-sm font-extrabold text-gray-100">{formatRupiah(displayPrice)}</span>
                                 </div>
                                 <button onClick={() => onAddToCart({ ...item, customPrice: displayPrice })} className="bg-gray-100 text-gray-900 py-2 px-3 rounded-lg hover:bg-blue-600 hover:text-white active:scale-95 transition-all flex items-center justify-center space-x-1.5 w-full shadow-sm font-bold"><Plus size={14} /><span className="text-[10px] sm:text-xs uppercase tracking-wide">Keranjang</span></button>
                             </div>
@@ -76,9 +70,7 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
     return (
         <div className="flex flex-col gap-3 mt-4">
             {shopItems.map((item) => {
-                const isSpecialView = isAdmin ? (adminPriceMode === 'kingFano') : isKingFano;
-                const useSpecialPrice = isSpecialView && item.kingFanoPrice && item.kingFanoPrice > 0;
-                const displayPrice = useSpecialPrice ? item.kingFanoPrice : item.price;
+                const displayPrice = item.price;
 
                 return (
                 <div key={item.id} className="bg-gray-800 rounded-xl p-3 shadow-sm border border-gray-700 flex gap-3 hover:border-gray-600 transition-colors">
@@ -98,7 +90,8 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
                             </div>
                             <div className="flex justify-between items-end mt-2">
                                 <div>
-                                    <span className={`text-sm font-extrabold ${useSpecialPrice ? 'text-purple-400' : 'text-gray-100'}`}>{formatRupiah(displayPrice)}</span>
+                                    <span className="text-[10px] text-gray-400 block mb-0.5">Harga Umum</span>
+                                    <span className="text-sm font-extrabold text-gray-100">{formatRupiah(displayPrice)}</span>
                                 </div>
                                 <button onClick={() => onAddToCart({ ...item, customPrice: displayPrice })} className="bg-gray-100 text-gray-900 p-2 rounded-lg hover:bg-blue-600 hover:text-white active:scale-95 transition-all shadow-sm flex items-center gap-1"><Plus size={14} /><span className="text-[10px] font-bold">Beli</span></button>
                             </div>

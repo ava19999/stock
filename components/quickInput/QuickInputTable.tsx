@@ -12,11 +12,12 @@ interface QuickInputTableProps {
     inputRefs: React.MutableRefObject<(HTMLInputElement | null)[]>;
     onPartNumberChange: (id: number, val: string) => void;
     onSelectItem: (id: number, item: InventoryItem) => void;
-    onUpdateRow: (id: number, field: keyof QuickInputRow, value: any) => void;
+    // UPDATE TIPE DISINI:
+    onUpdateRow: (id: number, updates: any, value?: any) => void; 
     onRemoveRow: (id: number) => void;
     highlightedIndex: number;
     onSearchKeyDown: (e: React.KeyboardEvent, id: number) => void;
-    onGridKeyDown: (e: React.KeyboardEvent, globalRefIndex: number) => void; // PROP BARU
+    onGridKeyDown: (e: React.KeyboardEvent, globalRefIndex: number) => void;
 }
 
 export const QuickInputTable: React.FC<QuickInputTableProps> = ({
@@ -33,7 +34,7 @@ export const QuickInputTable: React.FC<QuickInputTableProps> = ({
                             <th className="px-2 py-2 w-48">Part Number</th>
                             <th className="px-2 py-2">Nama Barang</th>
                             <th className="px-2 py-2 w-16 text-right">Qty</th>
-                            <th className="px-2 py-2 w-28 text-right">Modal</th>
+                            <th className="px-2 py-2 w-36 text-right">Total Modal</th> {/* Label Diubah */}
                             <th className="px-2 py-2 w-28 text-right">Jual</th>
                             <th className="px-2 py-2 w-24">Via</th>
                             <th className="px-2 py-2 w-32">Customer</th>

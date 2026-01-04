@@ -37,15 +37,13 @@ export const ShopView: React.FC<ShopViewProps> = ({
     onCheckout, 
     onUpdateBanner 
 }) => {
-  // --- STATE ---
   const [shopItems, setShopItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [adminPriceMode, setAdminPriceMode] = useState<'retail' | 'kingFano'>('retail');
-  const [showAdminPriceMenu, setShowAdminPriceMenu] = useState(false);
+  
   const [isCartOpen, setIsCartOpen] = useState(false); 
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false); 
   const [isUploadingBanner, setIsUploadingBanner] = useState(false); 
@@ -54,7 +52,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
   const bannerInputRef = useRef<HTMLInputElement>(null); 
   const cartItemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
 
-  // --- DATA LOADING ---
   const loadShopData = useCallback(async () => {
     setLoading(true);
     const { data, count } = await fetchShopItems(page, 20, searchTerm, 'Semua');
@@ -73,7 +70,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
 
   useEffect(() => { loadShopData(); }, [page]); 
 
-  // --- HANDLERS ---
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onloadend = () => { setTempBannerImg(reader.result as string); if (bannerInputRef.current) bannerInputRef.current.value = ''; }; reader.readAsDataURL(file); };
   const handleCropConfirm = async (base64: string) => { setTempBannerImg(null); setIsUploadingBanner(true); try { const compressed = await compressImage(base64); await onUpdateBanner(compressed); } catch (error) { console.error("Gagal upload banner", error); alert("Gagal memproses gambar banner"); } finally { setIsUploadingBanner(false); } };
   const handleCheckoutConfirm = (finalName: string) => {
@@ -82,7 +78,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   };
 
   return (
-    <div className="relative min-h-full pb-20 bg-gray-900 text-gray-100" onClick={() => setShowAdminPriceMenu(false)}>
+    <div className="relative min-h-full pb-20 bg-gray-900 text-gray-100">
       {tempBannerImg && <ImageCropper imageSrc={tempBannerImg} onConfirm={handleCropConfirm} onCancel={() => setTempBannerImg(null)} />}
       
       <ShopBanner 
@@ -98,10 +94,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
         searchTerm={searchTerm} 
         setSearchTerm={setSearchTerm}
         isAdmin={isAdmin}
-        adminPriceMode={adminPriceMode}
-        setAdminPriceMode={setAdminPriceMode}
-        showAdminPriceMenu={showAdminPriceMenu}
-        setShowAdminPriceMenu={setShowAdminPriceMenu}
         viewMode={viewMode}
         setViewMode={setViewMode}
       />
@@ -112,7 +104,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
         viewMode={viewMode}
         isAdmin={isAdmin}
         isKingFano={isKingFano}
-        adminPriceMode={adminPriceMode}
+        adminPriceMode={'retail'} // Placeholder
         onAddToCart={onAddToCart}
       />
 
@@ -122,7 +114,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
         setPage={setPage} 
       />
 
-      {/* FLOAT BUTTON */}
       <button onClick={() => setIsCartOpen(true)} className="fixed bottom-20 right-4 sm:bottom-8 sm:right-8 bg-gray-100 text-gray-900 p-4 rounded-full shadow-xl hover:bg-blue-600 hover:text-white hover:scale-105 active:scale-95 transition-all z-40 flex items-center justify-center group"><ShoppingCart size={24} />{cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-gray-800 shadow-sm">{cartItemCount}</span>}</button>
       
       <ShopCartModal 

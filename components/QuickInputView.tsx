@@ -25,7 +25,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const [activeTab, setActiveTab] = useState<'in' | 'out'>('out');
   
   const itemsPerPage = 100;
-  const COLUMNS_COUNT = 8; // UPDATE: Total kolom input per baris
+  const COLUMNS_COUNT = 8; 
   const searchTimeoutRef = useRef<NodeJS.Timeout>();
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
@@ -34,7 +34,8 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     if (rows.length === 0) {
       const initialRows = Array.from({ length: 10 }).map((_, index) => ({
           ...createEmptyRow(index + 1),
-          operation: activeTab
+          operation: activeTab,
+          totalModal: 0 // Inisialisasi field totalModal
       }));
       setRows(initialRows);
       setTimeout(() => { inputRefs.current[0]?.focus(); }, 100);
@@ -45,13 +46,10 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const handleTabChange = (tab: 'in' | 'out') => {
       setActiveTab(tab);
       setRows(prev => prev.map(row => ({ ...row, operation: tab })));
-      // Refocus ke elemen pertama setelah ganti tab
       setTimeout(() => { inputRefs.current[0]?.focus(); }, 50);
   };
 
-  // HANDLER 1: Navigasi Dropdown Search (Khusus Part Number)
   const handleSearchKeyDown = (e: React.KeyboardEvent, id: number) => {
-    // Jika dropdown aktif, handle navigasi dropdown
     if (suggestions.length > 0 && activeSearchIndex !== null) {
         if (e.key === 'ArrowDown') {
             e.preventDefault();
@@ -69,16 +67,11 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
             }
         }
     }
-    
-    // Jika dropdown TIDAK aktif, lempar ke navigasi grid biasa
     const rowIndex = rows.findIndex(r => r.id === id);
-    // Part Number ada di kolom offset 0
     handleGridKeyDown(e, rowIndex * COLUMNS_COUNT + 0); 
   };
 
-  // HANDLER 2: Navigasi Grid (Excel Style)
   const handleGridKeyDown = (e: React.KeyboardEvent, currentIndex: number) => {
-    // Ignore jika modifier key ditekan (Ctrl/Alt/Shift) kecuali Shift+Tab
     if (e.ctrlKey || e.altKey || e.metaKey) return;
 
     let nextIndex = currentIndex;
@@ -113,12 +106,10 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
             return;
     }
 
-    // Focus ke elemen baru jika valid
     if (nextIndex >= 0 && nextIndex < totalInputs) {
         const target = inputRefs.current[nextIndex];
         if (target) {
             target.focus();
-            // Select all text saat pindah fokus biar gampang edit
             setTimeout(() => target.select(), 0); 
         }
     }
@@ -145,13 +136,19 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
   const handleSelectItem = (id: number, item: InventoryItem) => {
     setRows(prev => prev.map(row => row.id === id ? {
-        ...row, partNumber: item.partNumber, namaBarang: item.name, hargaModal: item.costPrice || 0, hargaJual: item.price || 0, error: undefined
+        ...row, 
+        partNumber: item.partNumber, 
+        namaBarang: item.name, 
+        hargaModal: item.costPrice || 0, 
+        hargaJual: item.price || 0, 
+        error: undefined,
+        // Set Total Modal = Harga Satuan * 1 (karena default qty di row baru biasanya 0 atau 1)
+        totalModal: (item.costPrice || 0) * (row.quantity || 1)
     } : row));
     setSuggestions([]);
     setActiveSearchIndex(null);
     setHighlightedIndex(-1);
     
-    // Auto focus ke kolom Quantity (index ke-2) setelah pilih barang
     const rowIndex = rows.findIndex(r => r.id === id);
     const qtyInputIndex = (rowIndex * COLUMNS_COUNT) + 2;
     setTimeout(() => {
@@ -162,11 +159,10 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
   const addNewRow = () => {
     const maxId = rows.length > 0 ? Math.max(...rows.map(r => r.id)) : 0;
-    setRows(prev => [...prev, { ...createEmptyRow(maxId + 1), operation: activeTab }]);
+    setRows(prev => [...prev, { ...createEmptyRow(maxId + 1), operation: activeTab, totalModal: 0 }]);
     const newTotalPages = Math.ceil((rows.length + 1) / itemsPerPage);
     if (newTotalPages > currentPage) setCurrentPage(newTotalPages);
     
-    // Focus ke baris baru
     setTimeout(() => { 
         const newIndex = rows.length * COLUMNS_COUNT; 
         inputRefs.current[newIndex]?.focus(); 
@@ -175,8 +171,19 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
   const removeRow = (id: number) => { setRows(prev => prev.filter(row => row.id !== id)); };
 
-  const updateRow = (id: number, field: keyof QuickInputRow, value: any) => {
-    setRows(prev => prev.map(row => row.id === id ? { ...row, [field]: value, error: undefined } : row));
+  // UPDATE: Mendukung partial updates (object) untuk update banyak field sekaligus
+  const updateRow = (id: number, updates: Partial<QuickInputRow> | keyof QuickInputRow, value?: any) => {
+    setRows(prev => prev.map(row => {
+        if (row.id !== id) return row;
+        
+        if (typeof updates === 'string') {
+            // Cara lama (single field)
+            return { ...row, [updates]: value, error: undefined };
+        } else {
+            // Cara baru (multiple fields object)
+            return { ...row, ...updates, error: undefined };
+        }
+    }));
   };
 
   const saveRow = async (row: QuickInputRow) => {
@@ -236,14 +243,14 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     if (remainingRows === 0) {
        const initialRows = Array.from({ length: 10 }).map((_, index) => ({
            ...createEmptyRow(index + 1), 
-           operation: activeTab 
+           operation: activeTab,
+           totalModal: 0 
        }));
        setRows(initialRows);
     }
     setIsSavingAll(false);
   };
 
-  // --- DERIVED STATE ---
   const validRowsCount = rows.filter(r => checkIsRowComplete(r)).length;
   const startIndex = (currentPage - 1) * itemsPerPage;
   const currentRows = rows.slice(startIndex, startIndex + itemsPerPage);
@@ -271,8 +278,8 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         onUpdateRow={updateRow}
         onRemoveRow={removeRow}
         highlightedIndex={highlightedIndex}
-        onSearchKeyDown={handleSearchKeyDown} // Khusus Part Number
-        onGridKeyDown={handleGridKeyDown}     // Untuk semua kolom lain
+        onSearchKeyDown={handleSearchKeyDown}
+        onGridKeyDown={handleGridKeyDown}
       />
 
       <QuickInputFooter 

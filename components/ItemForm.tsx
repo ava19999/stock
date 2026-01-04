@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
 import { fetchPriceHistoryBySource, updateInventory, addInventory } from '../services/supabaseService';
-import { X, Save, Upload, Loader2, Package, Tag, Layers, DollarSign, LayoutGrid, Info, Calendar, Truck, ShoppingBag, User, History, Check, AlertCircle, ArrowLeft, Camera } from 'lucide-react';
-import { compressImage } from '../utils';
+import { X, Save, Upload, Loader2, Package, Layers, DollarSign, History, AlertCircle, ArrowLeft, Camera, ShoppingBag, User, Calendar, Truck } from 'lucide-react';
+import { compressImage, formatRupiah } from '../utils';
 
 interface ItemFormProps {
   initialData?: InventoryItem;
@@ -51,10 +51,13 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     }
   }, [initialData]);
 
+  // Handle perubahan field (Kembali ke standar)
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    
     setFormData(prev => ({
       ...prev,
+      // Konversi ke number untuk field angka
       [name]: (name === 'price' || name === 'costPrice' || name === 'quantity') 
         ? parseFloat(value) || 0 
         : value
@@ -87,8 +90,8 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     setLoadingPrice(false);
   };
 
-  const selectPrice = (price: number) => {
-      setFormData(prev => ({ ...prev, costPrice: price }));
+  const selectPrice = (unitPrice: number) => {
+      setFormData(prev => ({ ...prev, costPrice: unitPrice }));
       setShowPricePopup(false);
   };
 
@@ -99,7 +102,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
 
     try {
       if (isEditMode && initialData) {
-        // Validation for Stock Adjustment
         const qtyAdj = Number(adjustmentQty);
         if (stockAdjustmentType !== 'none' && qtyAdj <= 0) {
             setError(`Mohon isi jumlah stok yang valid (lebih dari 0).`);
@@ -107,7 +109,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
             return;
         }
 
-        // Build Transaction Object
         const transactionData = (stockAdjustmentType !== 'none' && qtyAdj > 0) ? {
             type: stockAdjustmentType === 'in' ? 'in' as const : 'out' as const,
             qty: qtyAdj,
@@ -117,12 +118,10 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         } : undefined;
 
         const updated = await updateInventory({ ...initialData, ...formData }, transactionData);
-        
         if (updated) onSuccess(updated);
         else setError("Gagal update database.");
 
       } else {
-        // Add Mode
         const newId = await addInventory(formData);
         if (newId) onSuccess();
         else setError("Gagal tambah barang.");
@@ -135,30 +134,25 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     }
   };
 
-  // Calculate projected stock
   const projectedStock = isEditMode ? (
       stockAdjustmentType === 'in' ? (Number(formData.quantity) + (Number(adjustmentQty) || 0)) :
       stockAdjustmentType === 'out' ? (Number(formData.quantity) - (Number(adjustmentQty) || 0)) :
       formData.quantity
   ) : formData.quantity;
 
-  // --- LOGIKA WARNA MODAL BERDASARKAN STOK (UPDATED) ---
   let modalBorderClass = "border-gray-700";
   let modalHeaderClass = "bg-gray-900/80 border-gray-700";
   
   if (formData.quantity === 0) {
-      // Stok Habis (Merah)
       modalBorderClass = "border-red-600";
       modalHeaderClass = "bg-red-900/90 border-red-700";
   } else if (formData.quantity < 4) {
-      // Stok Tipis (Kuning - UPDATED DARI ORANGE)
       modalBorderClass = "border-yellow-600";
       modalHeaderClass = "bg-yellow-900/90 border-yellow-700";
   }
 
   return (
     <div className="fixed inset-0 z-[80] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
-      {/* Container Responsif: Full di HP, Modal di PC */}
       <div className={`bg-gray-800 w-full h-[95vh] md:h-auto md:max-h-[90vh] md:max-w-4xl rounded-t-3xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden border ${modalBorderClass} transition-colors duration-300`}>
         
         {/* HEADER */}
@@ -261,7 +255,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                        
                        {stockAdjustmentType !== 'none' && (
                            <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
-                                {/* BARIS 1: JUMLAH & ESTIMASI */}
                                 <div className="flex gap-4 items-end">
                                     <div className="flex-1">
                                         <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">
@@ -275,7 +268,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                                     </div>
                                 </div>
 
-                                {/* BAGIAN FORM SESUAI TIPE (IN / OUT) */}
                                 {stockAdjustmentType === 'in' ? (
                                     <div className="grid grid-cols-3 gap-3 pt-1">
                                         <div>
@@ -317,23 +309,44 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                {/* 3. HARGA */}
                <div className="bg-gray-700 p-4 rounded-2xl border border-gray-600 space-y-4">
                   <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1"><DollarSign size={12}/> Harga</h3>
+                  
+                  {/* KEMBALI KE HARGA SATUAN (STANDARD) */}
                   <div className="relative">
-                      <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Harga Modal (HPP)</label>
+                      <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Harga Modal (Satuan)</label>
                       <div className="flex gap-2 mt-1">
-                        <input type="number" name="costPrice" value={formData.costPrice} onChange={handleChange} className="flex-1 px-3 py-2 bg-orange-900/20 text-orange-300 font-mono font-bold text-sm rounded-lg border border-orange-900/50 focus:ring-2 focus:ring-orange-800 outline-none placeholder-orange-800" placeholder="0"/>
+                        <input 
+                            type="number" 
+                            name="costPrice"
+                            value={formData.costPrice} 
+                            onChange={handleChange} 
+                            className="flex-1 px-3 py-2 bg-orange-900/20 text-orange-300 font-mono font-bold text-sm rounded-lg border border-orange-900/50 focus:ring-2 focus:ring-orange-800 outline-none placeholder-orange-800" 
+                        />
                         <button type="button" onClick={handleCheckPrices} className="px-3 py-2 bg-gray-800 border border-gray-600 text-gray-400 rounded-lg hover:bg-gray-600 hover:text-white"><History size={18}/></button>
                       </div>
+                      
+                      {/* POPUP HISTORY */}
                       {showPricePopup && (
                         <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 shadow-xl border border-gray-600 rounded-xl z-20 max-h-40 overflow-y-auto">
-                           {priceHistory.map((ph, idx) => (
-                               <div key={idx} onClick={() => selectPrice(ph.price)} className="p-2.5 border-b border-gray-700 text-xs flex justify-between hover:bg-gray-700 cursor-pointer">
-                                   <div><div className="font-bold text-gray-200">{ph.source}</div><div className="text-[10px] text-gray-500">{ph.date}</div></div>
-                                   <div className="font-mono font-bold text-blue-400 self-center">Rp {ph.price.toLocaleString()}</div>
+                           {priceHistory.length > 0 ? (
+                               priceHistory.map((ph, idx) => (
+                               <div key={idx} onClick={() => selectPrice(ph.price)} className="p-2.5 border-b border-gray-700 text-xs flex justify-between hover:bg-gray-700 cursor-pointer items-center">
+                                   <div>
+                                       <div className="font-bold text-blue-300 mb-0.5">{ph.source}</div>
+                                       <div className="text-[10px] text-gray-500">{ph.date}</div>
+                                   </div>
+                                   <div className="font-mono font-bold text-gray-200">{formatRupiah(ph.price)}</div>
                                </div>
-                           ))}
+                               ))
+                           ) : (
+                               <div className="p-3 text-center text-xs text-gray-500">Belum ada riwayat</div>
+                           )}
+                           <div className="p-2 sticky bottom-0 bg-gray-800/95 border-t border-gray-700">
+                               <button onClick={() => setShowPricePopup(false)} className="w-full py-1.5 text-[10px] text-gray-400 hover:text-gray-200 font-bold uppercase">Tutup</button>
+                           </div>
                         </div>
                       )}
                   </div>
+
                   <div>
                     <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Harga Jual</label>
                     <input type="number" name="price" value={formData.price} onChange={handleChange} className="w-full mt-1 px-3 py-2 bg-blue-900/20 text-blue-300 font-mono font-bold text-sm rounded-lg border border-blue-900/50 focus:ring-2 focus:ring-blue-800 outline-none" />

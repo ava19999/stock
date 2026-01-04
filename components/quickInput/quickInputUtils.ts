@@ -7,7 +7,7 @@ export const createEmptyRow = (id: number): QuickInputRow => ({
     namaBarang: '',
     hargaModal: 0,
     hargaJual: 0,
-    quantity: 0, // UPDATED: Default quantity jadi 0
+    quantity: 0, 
     operation: 'out',
     via: '',
     customer: '',
@@ -15,12 +15,23 @@ export const createEmptyRow = (id: number): QuickInputRow => ({
 });
 
 export const checkIsRowComplete = (row: QuickInputRow) => {
+    // Definisi "Harus Diisi":
+    // - Part Number & Nama Barang (String tidak kosong)
+    // - Quantity (Harus > 0) -> Wajib diisi agar masuk log transaksi
+    // - Harga Modal (Harus > 0) -> Wajib diisi
+    // - Via (String tidak kosong)
+    // - Resi/Tempo (String tidak kosong)
+    
+    // Definisi "Boleh Kosong":
+    // - Harga Jual (Boleh 0)
+    // - Customer (Boleh string kosong)
+
     return (
         !!row.partNumber && 
         !!row.namaBarang && 
-        row.quantity > 0 && 
+        row.quantity > 0 &&   // PERUBAHAN: Qty Wajib > 0
+        row.hargaModal > 0 && // Harga Modal Wajib > 0
         row.via.trim().length > 0 && 
-        row.customer.trim().length > 0 && 
         row.resiTempo.trim().length > 0
     );
 };

@@ -1,12 +1,14 @@
 // FILE: src/components/quickInput/QuickInputTableRow.tsx
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { QuickInputRow } from './types';
 import { InventoryItem } from '../../types';
 import { checkIsRowComplete } from './quickInputUtils';
-import { Loader2, AlertCircle, Check, Trash2 } from 'lucide-react';
+import { fetchPriceHistoryBySource } from '../../services/supabaseService'; // Import service history
+import { formatRupiah } from '../../utils';
+import { Loader2, AlertCircle, Check, Trash2, History, X } from 'lucide-react';
 
 interface QuickInputTableRowProps {
-    row: QuickInputRow;
+    row: QuickInputRow & { totalModal?: number }; // Extend tipe lokal
     index: number;
     globalIndex: number;
     activeSearchIndex: number | null;
@@ -14,7 +16,7 @@ interface QuickInputTableRowProps {
     inputRefs: React.MutableRefObject<(HTMLInputElement | null)[]>;
     onPartNumberChange: (id: number, val: string) => void;
     onSelectItem: (id: number, item: InventoryItem) => void;
-    onUpdateRow: (id: number, field: keyof QuickInputRow, value: any) => void;
+    onUpdateRow: (id: number, updates: any, value?: any) => void;
     onRemoveRow: (id: number) => void;
     highlightedIndex: number;
     onSearchKeyDown: (e: React.KeyboardEvent, id: number) => void;
@@ -28,17 +30,86 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
     const isComplete = checkIsRowComplete(row);
     const activeItemRef = useRef<HTMLDivElement>(null);
 
-    // Konstanta jumlah kolom untuk perhitungan index ref
+    // State untuk History Popup
+    const [showHistory, setShowHistory] = useState(false);
+    const [historyData, setHistoryData] = useState<any[]>([]);
+    const [loadingHistory, setLoadingHistory] = useState(false);
+
+    // Constants
     const COLS = 8;
     const baseRefIndex = globalIndex * COLS;
 
-    // Helper untuk menangani input angka (mencegah huruf masuk)
+    // --- LOGIC CALCULASI TOTAL & UNIT ---
+    
+    // 1. Saat Qty Berubah -> Hitung Ulang Unit (Modal Satuan)
+    // Rumus: Unit = TotalSaatIni / QtyBaru
+    const handleQtyChange = (valStr: string) => {
+        const cleanVal = valStr.replace(/[^0-9]/g, '');
+        const newQty = cleanVal === '' ? 0 : parseInt(cleanVal, 10);
+        
+        // Ambil total modal saat ini (default 0)
+        const currentTotal = row.totalModal || 0;
+        
+        // Hitung harga satuan baru
+        const newUnitPrice = newQty > 0 ? (currentTotal / newQty) : 0;
+
+        onUpdateRow(row.id, {
+            quantity: newQty,
+            hargaModal: newUnitPrice
+        });
+    };
+
+    // 2. Saat Total Modal Berubah -> Hitung Ulang Unit (Modal Satuan)
+    // Rumus: Unit = TotalBaru / QtySaatIni
+    const handleTotalModalChange = (valStr: string) => {
+        const cleanVal = valStr.replace(/[^0-9]/g, '');
+        const newTotal = cleanVal === '' ? 0 : parseInt(cleanVal, 10);
+        
+        const currentQty = row.quantity > 0 ? row.quantity : 1;
+        const newUnitPrice = newTotal / currentQty;
+
+        onUpdateRow(row.id, {
+            totalModal: newTotal,
+            hargaModal: newUnitPrice
+        });
+    };
+
+    // Helper umum
     const handleNumberChange = (field: keyof QuickInputRow, value: string) => {
-        // Hanya ambil angka
         const cleanValue = value.replace(/[^0-9]/g, '');
-        // Konversi ke number (jika kosong jadi 0)
         const numValue = cleanValue === '' ? 0 : parseInt(cleanValue, 10);
         onUpdateRow(row.id, field, numValue);
+    };
+
+    // --- LOGIC HISTORY ---
+    const handleShowHistory = async () => {
+        if (!row.partNumber) return;
+        if (showHistory) {
+            setShowHistory(false);
+            return;
+        }
+        
+        setShowHistory(true);
+        setLoadingHistory(true);
+        try {
+            const data = await fetchPriceHistoryBySource(row.partNumber);
+            setHistoryData(data);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setLoadingHistory(false);
+        }
+    };
+
+    const handleSelectHistory = (unitPrice: number) => {
+        const qty = row.quantity > 0 ? row.quantity : 1;
+        const newTotal = unitPrice * qty;
+        
+        onUpdateRow(row.id, {
+            hargaModal: unitPrice,
+            totalModal: newTotal
+        });
+        setShowHistory(false);
     };
 
     useEffect(() => {
@@ -62,7 +133,7 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                         className={`w-full bg-transparent px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:text-blue-400 font-bold placeholder-gray-600 ${row.error ? 'text-red-400' : ''}`}
                         value={row.partNumber}
                         onChange={(e) => onPartNumberChange(row.id, e.target.value)}
-                        onKeyDown={(e) => onSearchKeyDown(e, row.id)} // Khusus PartNumber punya handler sendiri
+                        onKeyDown={(e) => onSearchKeyDown(e, row.id)}
                         placeholder="Cari..."
                         autoComplete="off"
                     />
@@ -101,33 +172,70 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                 />
             </td>
 
-            {/* KOLOM 2: Quantity */}
+            {/* KOLOM 2: Quantity (Logic Update) */}
             <td className="px-2 py-1.5">
                 <input
                     ref={el => { inputRefs.current[baseRefIndex + 2] = el; }}
                     type="text"
                     inputMode="numeric"
-                    // Menggunakan || '' agar jika 0 tampil kosong (seperti kolom lain)
                     className={`w-full bg-transparent px-1 py-1 text-xs font-bold text-right font-mono focus:outline-none ${row.operation === 'in' ? 'text-green-400' : 'text-red-400'} ${row.error ? 'text-red-400' : ''}`}
                     value={row.quantity || ''}
-                    onChange={(e) => handleNumberChange('quantity', e.target.value)}
+                    onChange={(e) => handleQtyChange(e.target.value)}
                     onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 2)}
                     placeholder="0"
                 />
             </td>
 
-            {/* KOLOM 3: Harga Modal */}
-            <td className="px-2 py-1.5">
-                <input
-                    ref={el => { inputRefs.current[baseRefIndex + 3] = el; }}
-                    type="text"
-                    inputMode="numeric"
-                    className="w-full bg-transparent px-1 py-1 text-xs font-mono text-right text-orange-300 focus:outline-none focus:text-orange-400 placeholder-gray-600"
-                    value={row.hargaModal || ''}
-                    onChange={(e) => handleNumberChange('hargaModal', e.target.value)}
-                    onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 3)}
-                    placeholder="0"
-                />
+            {/* KOLOM 3: Modal (INPUT TOTAL) + HISTORY ICON */}
+            <td className="px-2 py-1.5 relative group/modal">
+                <div className="flex items-center">
+                    <input
+                        ref={el => { inputRefs.current[baseRefIndex + 3] = el; }}
+                        type="text"
+                        inputMode="numeric"
+                        // Tampilkan Total Modal. Jika undefined, fallback ke 0.
+                        value={row.totalModal || ''} 
+                        onChange={(e) => handleTotalModalChange(e.target.value)}
+                        onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 3)}
+                        className="w-full bg-transparent px-1 py-1 text-xs font-mono text-right text-orange-300 focus:outline-none focus:text-orange-400 placeholder-gray-600"
+                        placeholder="Total..."
+                        title={`Satuan: ${formatRupiah(row.hargaModal)}`}
+                    />
+                    <button 
+                        onClick={handleShowHistory}
+                        className="ml-1 p-1 text-gray-600 hover:text-orange-400 transition-colors opacity-0 group-hover/modal:opacity-100 focus:opacity-100"
+                        title="Riwayat Harga"
+                    >
+                        <History size={10} />
+                    </button>
+                </div>
+
+                {/* DROPDOWN HISTORY */}
+                {showHistory && (
+                    <div className="absolute top-full left-0 mt-1 w-48 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-30 overflow-hidden">
+                        <div className="flex justify-between items-center p-2 bg-gray-900 border-b border-gray-700">
+                            <span className="text-[9px] font-bold text-gray-400 uppercase">Riwayat Harga</span>
+                            <button onClick={() => setShowHistory(false)}><X size={10} className="text-gray-500 hover:text-white"/></button>
+                        </div>
+                        <div className="max-h-32 overflow-y-auto">
+                            {loadingHistory ? (
+                                <div className="p-2 text-center text-gray-500"><Loader2 size={12} className="animate-spin inline"/></div>
+                            ) : historyData.length === 0 ? (
+                                <div className="p-2 text-center text-[10px] text-gray-500">Kosong</div>
+                            ) : (
+                                historyData.map((h, i) => (
+                                    <div key={i} onClick={() => handleSelectHistory(h.price)} className="px-2 py-1.5 hover:bg-gray-700 cursor-pointer flex justify-between items-center border-b border-gray-700/50 last:border-0">
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] text-blue-300 font-bold">{h.source}</span>
+                                            <span className="text-[8px] text-gray-500">{h.date}</span>
+                                        </div>
+                                        <span className="text-[10px] font-mono font-bold text-gray-200">{formatRupiah(h.price)}</span>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                )}
             </td>
 
             {/* KOLOM 4: Harga Jual */}
