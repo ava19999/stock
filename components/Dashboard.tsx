@@ -62,7 +62,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setLoading(true);
     // @ts-ignore
     const { data, count } = await fetchInventoryPaginated(page, 50, debouncedSearch, filterType, debouncedBrand, debouncedApp);
-    setLocalItems(data);
+    
+    // --- MODIFIKASI: Filter item banner agar tidak muncul di list ---
+    const filteredData = data.filter((item: InventoryItem) => item.partNumber !== 'SYSTEM-BANNER-PROMO');
+    setLocalItems(filteredData);
+    // ---------------------------------------------------------------
+
     setTotalPages(Math.ceil(count / 50));
     setLoading(false);
   }, [page, debouncedSearch, filterType, debouncedBrand, debouncedApp]);
