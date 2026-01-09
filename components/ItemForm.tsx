@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
 import { fetchPriceHistoryBySource, updateInventory, addInventory } from '../services/supabaseService';
-import { X, Save, Upload, Loader2, Package, Layers, DollarSign, History, AlertCircle, ArrowLeft, Camera, ShoppingBag, User, Calendar, Truck } from 'lucide-react';
+import { X, Save, Upload, Loader2, Package, Layers, DollarSign, History, AlertCircle, ArrowLeft, Plus, ShoppingBag, User, Calendar, Truck } from 'lucide-react';
 import { compressImage, formatRupiah } from '../utils';
 
 interface ItemFormProps {
@@ -14,12 +14,13 @@ interface ItemFormProps {
 export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuccess }) => {
   const isEditMode = !!initialData;
   
-  // Base Form State
+  // Base Form State (Modified to include images array)
   const [formData, setFormData] = useState<InventoryFormData>({
     partNumber: '', name: '', brand: '', application: '',
     quantity: 0, shelf: '', price: 0, costPrice: 0,
-    ecommerce: '', imageUrl: '', initialStock: 0,
-    qtyIn: 0, qtyOut: 0
+    ecommerce: '', imageUrl: '', 
+    images: [], // <-- Tambahan: Array foto
+    initialStock: 0, qtyIn: 0, qtyOut: 0
   });
 
   // Stock Adjustment State
@@ -31,6 +32,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
 
   // UI State
   const [loading, setLoading] = useState(false);
+  // Image preview sekarang mengacu ke foto pertama di array images
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showPricePopup, setShowPricePopup] = useState(false);
@@ -44,39 +46,73 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         partNumber: initialData.partNumber, name: initialData.name, brand: initialData.brand,
         application: initialData.application, quantity: initialData.quantity, shelf: initialData.shelf,
         price: initialData.price, costPrice: initialData.costPrice, ecommerce: initialData.ecommerce || '',
-        imageUrl: initialData.imageUrl, initialStock: initialData.initialStock,
+        imageUrl: initialData.imageUrl, 
+        images: initialData.images || (initialData.imageUrl ? [initialData.imageUrl] : []), // Load existing images
+        initialStock: initialData.initialStock,
         qtyIn: initialData.qtyIn, qtyOut: initialData.qtyOut
       });
-      setImagePreview(initialData.imageUrl);
+      setImagePreview(initialData.imageUrl || (initialData.images && initialData.images[0]) || null);
     }
   }, [initialData]);
 
-  // Handle perubahan field (Kembali ke standar)
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    
     setFormData(prev => ({
       ...prev,
-      // Konversi ke number untuk field angka
       [name]: (name === 'price' || name === 'costPrice' || name === 'quantity') 
         ? parseFloat(value) || 0 
         : value
     }));
   };
 
+  // Logic Upload Multiple Images
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      setLoading(true);
       try {
-        const compressed = await compressImage(file);
-        setFormData(prev => ({ ...prev, imageUrl: compressed }));
-        setImagePreview(compressed);
+        const newImages: string[] = [...formData.images];
+        // Batasi maksimal 10 foto
+        const slotsAvailable = 10 - newImages.length;
+        if (slotsAvailable <= 0) {
+            setError("Maksimal 10 foto.");
+            setLoading(false);
+            return;
+        }
+
+        const filesToProcess = Array.from(files).slice(0, slotsAvailable);
+
+        for (const file of filesToProcess) {
+            const compressed = await compressImage(file);
+            newImages.push(compressed);
+        }
+        
+        setFormData(prev => ({ 
+            ...prev, 
+            images: newImages, 
+            imageUrl: newImages[0] || '' // Set foto pertama sbg thumbnail
+        }));
+        setImagePreview(newImages[0]);
         setError(null);
       } catch (err) {
         console.error(err);
-        setError("Gagal memproses gambar. Pastikan format file didukung.");
+        setError("Gagal memproses gambar.");
+      } finally {
+        setLoading(false);
+        // Reset input value agar bisa pilih file yang sama lagi jika perlu
+        if (fileInputRef.current) fileInputRef.current.value = '';
       }
     }
+  };
+
+  const removePhoto = (index: number) => {
+      const newImages = formData.images.filter((_, i) => i !== index);
+      setFormData(prev => ({
+          ...prev,
+          images: newImages,
+          imageUrl: newImages[0] || ''
+      }));
+      setImagePreview(newImages[0] || null);
   };
 
   const handleCheckPrices = async () => {
@@ -117,7 +153,14 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
             customer: adjustmentCustomer 
         } : undefined;
 
-        const updated = await updateInventory({ ...initialData, ...formData }, transactionData);
+        // Spread initialData then formData to update fields
+        const updated = await updateInventory({ 
+            ...initialData, 
+            ...formData, 
+            // Pastikan kirim images array yang baru
+            images: formData.images 
+        }, transactionData);
+        
         if (updated) onSuccess(updated);
         else setError("Gagal update database.");
 
@@ -179,29 +222,58 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
 
           <div className="flex flex-col lg:flex-row gap-6">
             
-            {/* KOLOM KIRI: GAMBAR & STOCK AWAL */}
+            {/* KOLOM KIRI: IMAGE GALLERY & STOCK AWAL */}
             <div className="w-full lg:w-1/3 flex flex-col gap-4">
+              {/* Main Preview */}
               <div 
-                onClick={() => fileInputRef.current?.click()}
-                className={`aspect-video lg:aspect-square w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-all relative overflow-hidden group shadow-sm bg-gray-700 ${imagePreview ? 'border-blue-500' : 'border-gray-600 hover:border-gray-500'}`}
+                className={`aspect-video lg:aspect-square w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center transition-all relative overflow-hidden group shadow-sm bg-gray-700 ${formData.images.length > 0 ? 'border-blue-500' : 'border-gray-600 hover:border-gray-500'}`}
               >
-                {imagePreview ? (
+                {formData.images.length > 0 ? (
                   <>
-                    <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Camera size={24} className="text-white"/>
+                    <img src={formData.images[0]} alt="Preview" className="w-full h-full object-cover" />
+                    <div 
+                        className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Plus size={32} className="text-white"/>
+                      <span className="text-white text-xs font-bold mt-1">Tambah / Ganti</span>
                     </div>
                   </>
                 ) : (
-                  <div className="text-center p-4">
+                  <div className="text-center p-4 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
                     <div className="w-12 h-12 bg-gray-600 rounded-full flex items-center justify-center mx-auto mb-2 text-gray-400 shadow-sm border border-gray-500">
                       <Upload size={20} />
                     </div>
                     <span className="text-xs font-bold text-gray-400">Upload Foto</span>
+                    <p className="text-[10px] text-gray-500 mt-1">Max 10 foto</p>
                   </div>
                 )}
-                <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" className="hidden" />
+                <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" multiple className="hidden" />
               </div>
+
+              {/* Thumbnails Grid */}
+              {formData.images.length > 0 && (
+                  <div className="grid grid-cols-5 gap-2">
+                      {formData.images.map((img, idx) => (
+                          <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-gray-600 group/thumb">
+                              <img src={img} className="w-full h-full object-cover" />
+                              <button 
+                                  type="button"
+                                  onClick={() => removePhoto(idx)}
+                                  className="absolute inset-0 bg-red-900/80 flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity text-white"
+                              >
+                                  <X size={16} />
+                              </button>
+                          </div>
+                      ))}
+                      {formData.images.length < 10 && (
+                           <div className="aspect-square rounded-lg border border-dashed border-gray-600 flex items-center justify-center relative hover:bg-gray-700 cursor-pointer text-gray-500 hover:text-white transition-colors">
+                               <Plus size={20} />
+                               <input type="file" multiple onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*" />
+                           </div>
+                      )}
+                  </div>
+              )}
               
               {!isEditMode && (
                   <div className="bg-blue-900/20 p-4 rounded-xl border border-blue-900/40">
