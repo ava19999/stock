@@ -1,7 +1,7 @@
 // FILE: src/components/ItemForm.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
-import { fetchPriceHistoryBySource, updateInventory, addInventory } from '../services/supabaseService';
+import { fetchPriceHistoryBySource, updateInventory, addInventory, saveItemImages } from '../services/supabaseService';
 import { X, Save, Upload, Loader2, Package, Layers, DollarSign, History, AlertCircle, ArrowLeft, Plus, ShoppingBag, User, Calendar, Truck } from 'lucide-react';
 import { compressImage, formatRupiah } from '../utils';
 
@@ -14,12 +14,12 @@ interface ItemFormProps {
 export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuccess }) => {
   const isEditMode = !!initialData;
   
-  // Base Form State (Modified to include images array)
+  // Base Form State
   const [formData, setFormData] = useState<InventoryFormData>({
     partNumber: '', name: '', brand: '', application: '',
     quantity: 0, shelf: '', price: 0, costPrice: 0,
     ecommerce: '', imageUrl: '', 
-    images: [], // <-- Tambahan: Array foto
+    images: [], 
     initialStock: 0, qtyIn: 0, qtyOut: 0
   });
 
@@ -32,7 +32,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
 
   // UI State
   const [loading, setLoading] = useState(false);
-  // Image preview sekarang mengacu ke foto pertama di array images
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showPricePopup, setShowPricePopup] = useState(false);
@@ -47,10 +46,12 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         application: initialData.application, quantity: initialData.quantity, shelf: initialData.shelf,
         price: initialData.price, costPrice: initialData.costPrice, ecommerce: initialData.ecommerce || '',
         imageUrl: initialData.imageUrl, 
-        images: initialData.images || (initialData.imageUrl ? [initialData.imageUrl] : []), // Load existing images
+        // SAFETY CHECK: Gunakan fallback ke array kosong
+        images: initialData.images || (initialData.imageUrl ? [initialData.imageUrl] : []), 
         initialStock: initialData.initialStock,
         qtyIn: initialData.qtyIn, qtyOut: initialData.qtyOut
       });
+      // Safety check untuk preview juga
       setImagePreview(initialData.imageUrl || (initialData.images && initialData.images[0]) || null);
     }
   }, [initialData]);
@@ -65,14 +66,12 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     }));
   };
 
-  // Logic Upload Multiple Images
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
       setLoading(true);
       try {
         const newImages: string[] = [...formData.images];
-        // Batasi maksimal 10 foto
         const slotsAvailable = 10 - newImages.length;
         if (slotsAvailable <= 0) {
             setError("Maksimal 10 foto.");
@@ -90,7 +89,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         setFormData(prev => ({ 
             ...prev, 
             images: newImages, 
-            imageUrl: newImages[0] || '' // Set foto pertama sbg thumbnail
+            imageUrl: newImages[0] || '' 
         }));
         setImagePreview(newImages[0]);
         setError(null);
@@ -99,7 +98,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         setError("Gagal memproses gambar.");
       } finally {
         setLoading(false);
-        // Reset input value agar bisa pilih file yang sama lagi jika perlu
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
     }
@@ -153,11 +151,9 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
             customer: adjustmentCustomer 
         } : undefined;
 
-        // Spread initialData then formData to update fields
         const updated = await updateInventory({ 
             ...initialData, 
             ...formData, 
-            // Pastikan kirim images array yang baru
             images: formData.images 
         }, transactionData);
         
@@ -198,7 +194,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     <div className="fixed inset-0 z-[80] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
       <div className={`bg-gray-800 w-full h-[95vh] md:h-auto md:max-h-[90vh] md:max-w-4xl rounded-t-3xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden border ${modalBorderClass} transition-colors duration-300`}>
         
-        {/* HEADER */}
         <div className={`px-5 py-4 border-b flex justify-between items-center backdrop-blur-md sticky top-0 z-10 ${modalHeaderClass} transition-colors duration-300`}>
           <div className="flex items-center gap-3">
              <button onClick={onCancel} className="md:hidden p-2 -ml-2 hover:bg-gray-700 rounded-full text-gray-300">
@@ -216,15 +211,12 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
           </button>
         </div>
 
-        {/* FORM BODY */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 custom-scrollbar pb-24 md:pb-6 bg-gray-800">
           {error && <div className="bg-red-900/30 text-red-400 p-3 rounded-xl flex items-center gap-2 text-xs border border-red-900/50 mb-5 font-bold"><AlertCircle size={16} />{error}</div>}
 
           <div className="flex flex-col lg:flex-row gap-6">
             
-            {/* KOLOM KIRI: IMAGE GALLERY & STOCK AWAL */}
             <div className="w-full lg:w-1/3 flex flex-col gap-4">
-              {/* Main Preview */}
               <div 
                 className={`aspect-video lg:aspect-square w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center transition-all relative overflow-hidden group shadow-sm bg-gray-700 ${formData.images.length > 0 ? 'border-blue-500' : 'border-gray-600 hover:border-gray-500'}`}
               >
@@ -251,7 +243,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                 <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" multiple className="hidden" />
               </div>
 
-              {/* Thumbnails Grid */}
               {formData.images.length > 0 && (
                   <div className="grid grid-cols-5 gap-2">
                       {formData.images.map((img, idx) => (
@@ -283,9 +274,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
               )}
             </div>
 
-            {/* KOLOM KANAN: INPUT FIELDS */}
             <div className="flex-1 space-y-5">
-               {/* 1. INFO UTAMA */}
                <div className="space-y-4">
                   <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-700 pb-1 mb-2">Info Produk</h3>
                   <div className="relative">
@@ -314,7 +303,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                   </div>
                </div>
 
-               {/* 2. UPDATE STOK */}
                {isEditMode && (
                    <div className="bg-blue-900/20 p-4 rounded-2xl border border-blue-900/40">
                        <h3 className="text-sm font-bold text-blue-300 flex items-center gap-1.5 mb-3"><History size={16}/> Mutasi Stok</h3>
@@ -378,11 +366,9 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                    </div>
                )}
 
-               {/* 3. HARGA */}
                <div className="bg-gray-700 p-4 rounded-2xl border border-gray-600 space-y-4">
                   <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1"><DollarSign size={12}/> Harga</h3>
                   
-                  {/* KEMBALI KE HARGA SATUAN (STANDARD) */}
                   <div className="relative">
                       <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Harga Modal (Satuan)</label>
                       <div className="flex gap-2 mt-1">
@@ -396,7 +382,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                         <button type="button" onClick={handleCheckPrices} className="px-3 py-2 bg-gray-800 border border-gray-600 text-gray-400 rounded-lg hover:bg-gray-600 hover:text-white"><History size={18}/></button>
                       </div>
                       
-                      {/* POPUP HISTORY */}
                       {showPricePopup && (
                         <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 shadow-xl border border-gray-600 rounded-xl z-20 max-h-40 overflow-y-auto">
                            {priceHistory.length > 0 ? (
@@ -428,7 +413,6 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
           </div>
         </form>
 
-        {/* FOOTER ACTIONS */}
         <div className="p-4 bg-gray-800 border-t border-gray-700 flex gap-3 sticky bottom-0 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.2)] safe-area-bottom">
             <button onClick={onCancel} className="flex-1 py-3 bg-gray-700 border border-gray-600 text-gray-300 font-bold rounded-xl hover:bg-gray-600 text-sm">Batal</button>
             <button onClick={handleSubmit} disabled={loading} className="flex-[2] py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center justify-center gap-2 disabled:opacity-70 text-sm shadow-lg shadow-blue-900/50">

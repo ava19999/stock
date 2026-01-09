@@ -37,13 +37,19 @@ export const ShopView: React.FC<ShopViewProps> = ({
     onCheckout, 
     onUpdateBanner 
 }) => {
+  // State Data
   const [shopItems, setShopItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
+  
+  // State Filter & Pagination
+  const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState(''); // Anti-kedip
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [category, setCategory] = useState('All'); // Default 'All' agar tidak error filter
   
+  // State Modal & Upload
   const [isCartOpen, setIsCartOpen] = useState(false); 
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false); 
   const [isUploadingBanner, setIsUploadingBanner] = useState(false); 
@@ -51,25 +57,44 @@ export const ShopView: React.FC<ShopViewProps> = ({
   
   const bannerInputRef = useRef<HTMLInputElement>(null); 
   const cartItemCount = cart.reduce((sum, item) => sum + item.cartQuantity, 0);
+  
+  // PERBAIKAN 1: Limit 50 Item
+  const limit = 50; 
 
-  const loadShopData = useCallback(async () => {
-    setLoading(true);
-    const { data, count } = await fetchShopItems(page, 20, searchTerm, 'Semua');
-    setShopItems(data);
-    setTotalPages(Math.ceil(count / 20));
-    setLoading(false);
-  }, [page, searchTerm]); 
-
+  // PERBAIKAN 2: Debounce Search (Mencegah Kedip / Loop)
   useEffect(() => {
     const timer = setTimeout(() => {
-        setPage(1); 
-        loadShopData();
+        setPage(1); // Reset ke halaman 1 saat search berubah
+        setDebouncedSearch(searchTerm);
     }, 500);
     return () => clearTimeout(timer);
-  }, [searchTerm]); 
+  }, [searchTerm]);
 
-  useEffect(() => { loadShopData(); }, [page]); 
+  // PERBAIKAN 3: Load Data Stable
+  useEffect(() => {
+    const loadData = async () => {
+        setLoading(true);
+        try {
+            // PERBAIKAN 4: Ganti 'Semua' jadi 'All' agar filter di Supabase jalan
+            const safeCategory = category === 'Semua' ? 'All' : category; 
+            
+            const { data, count } = await fetchShopItems(page, limit, debouncedSearch, safeCategory);
+            
+            setShopItems(data || []);
+            const safeCount = count || 0;
+            setTotalPages(safeCount > 0 ? Math.ceil(safeCount / limit) : 1);
+        } catch (err) {
+            console.error("Gagal load shop items:", err);
+            setShopItems([]);
+        } finally {
+            setLoading(false);
+        }
+    };
 
+    loadData();
+  }, [page, debouncedSearch, category]); // Hanya jalan jika ini berubah
+
+  // --- Banner Upload Handlers ---
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { 
       const file = e.target.files?.[0]; 
       if (!file) return; 
@@ -81,12 +106,10 @@ export const ShopView: React.FC<ShopViewProps> = ({
       reader.readAsDataURL(file); 
   };
 
-  // --- PERBAIKAN: Set Resolusi 1280px dan Kualitas 90% ---
   const handleCropConfirm = async (base64: string) => { 
       setTempBannerImg(null); 
       setIsUploadingBanner(true); 
       try { 
-          // FIX: Gunakan resolusi 1280 (HD) dan kualitas 0.9 agar tidak pecah
           const compressed = await compressImage(base64, 1280, 0.90); 
           await onUpdateBanner(compressed); 
       } catch (error) { 
@@ -103,47 +126,77 @@ export const ShopView: React.FC<ShopViewProps> = ({
   };
 
   return (
-    <div className="relative min-h-full pb-20 bg-gray-900 text-gray-100">
+    <div className="relative min-h-full pb-20 bg-gray-900 text-gray-100 flex flex-col h-full overflow-hidden">
+      {/* Crop Modal */}
       {tempBannerImg && <ImageCropper imageSrc={tempBannerImg} onConfirm={handleCropConfirm} onCancel={() => setTempBannerImg(null)} />}
       
-      <ShopBanner 
-        bannerUrl={bannerUrl} 
-        isAdmin={isAdmin} 
-        isUploading={isUploadingBanner} 
-        fileInputRef={bannerInputRef}
-        onUploadClick={() => bannerInputRef.current?.click()}
-        onFileSelect={handleFileSelect}
-      />
+      {/* Scrollable Content Area */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+          
+          {/* BANNER (Dikembalikan) */}
+          <div className="px-4 pt-4">
+            <ShopBanner 
+                bannerUrl={bannerUrl} 
+                isAdmin={isAdmin} 
+                isUploading={isUploadingBanner} 
+                fileInputRef={bannerInputRef}
+                onUploadClick={() => bannerInputRef.current?.click()}
+                onFileSelect={handleFileSelect}
+            />
+          </div>
 
-      <ShopFilterBar 
-        searchTerm={searchTerm} 
-        setSearchTerm={setSearchTerm}
-        isAdmin={isAdmin}
-        viewMode={viewMode}
-        setViewMode={setViewMode}
-      />
+          {/* FILTER BAR */}
+          <div className="sticky top-0 z-10 bg-gray-900 px-4 py-2 border-b border-gray-800 shadow-md">
+            <ShopFilterBar 
+                searchTerm={searchTerm} 
+                setSearchTerm={setSearchTerm}
+                isAdmin={isAdmin}
+                viewMode={viewMode}
+                setViewMode={setViewMode}
+                // Jika ShopFilterBar support kategori, tambahkan props ini:
+                // category={category}
+                // onCategoryChange={setCategory}
+            />
+          </div>
 
-      <ShopItemList 
-        loading={loading}
-        shopItems={shopItems}
-        viewMode={viewMode}
-        isAdmin={isAdmin}
-        isKingFano={isKingFano}
-        adminPriceMode={'retail'} // Placeholder
-        onAddToCart={onAddToCart}
-      />
+          {/* LIST BARANG */}
+          <div className="p-4 pb-24">
+            <ShopItemList 
+                loading={loading}
+                // PERBAIKAN 5: Kirim 'items' (bukan shopItems) agar sesuai komponen ShopItemList yang baru
+                items={shopItems} 
+                // Kompatibilitas jika komponen masih pakai prop lama 'shopItems'
+                // @ts-ignore
+                shopItems={shopItems}
+                
+                viewMode={viewMode}
+                isAdmin={isAdmin}
+                isKingFano={isKingFano}
+                // @ts-ignore
+                adminPriceMode={'retail'} 
+                onAddToCart={onAddToCart}
+            />
 
-      <ShopPagination 
-        page={page} 
-        totalPages={totalPages} 
-        setPage={setPage} 
-      />
+            {!loading && shopItems.length > 0 && (
+                <div className="mt-8 flex justify-center">
+                    {/* PERBAIKAN 6: Pagination menggunakan setPage */}
+                    <ShopPagination 
+                        page={page} 
+                        totalPages={totalPages} 
+                        setPage={setPage} 
+                    />
+                </div>
+            )}
+          </div>
+      </div>
 
-      <button onClick={() => setIsCartOpen(true)} className="fixed bottom-20 right-4 sm:bottom-8 sm:right-8 bg-gray-100 text-gray-900 p-4 rounded-full shadow-xl hover:bg-blue-600 hover:text-white hover:scale-105 active:scale-95 transition-all z-40 flex items-center justify-center group">
+      {/* Floating Cart Button */}
+      <button onClick={() => setIsCartOpen(true)} className="fixed bottom-6 right-6 sm:bottom-8 sm:right-8 bg-blue-600 text-white p-4 rounded-full shadow-2xl hover:bg-blue-500 hover:scale-105 active:scale-95 transition-all z-40 flex items-center justify-center group border-2 border-blue-400">
         <ShoppingCart size={24} />
-        {cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-gray-800 shadow-sm">{cartItemCount}</span>}
+        {cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-gray-900 shadow-sm">{cartItemCount}</span>}
       </button>
       
+      {/* Modals */}
       <ShopCartModal 
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}

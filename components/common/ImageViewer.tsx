@@ -12,10 +12,6 @@ interface ImageViewerProps {
 export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex = 0, isOpen, onClose }) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
 
-  // Reset index saat modal dibuka pertama kali (optional, tergantung behavior)
-  // Tapi React state mempertahankan state, jadi kita set useEffect jika perlu.
-  // Sederhananya, kita andalkan parent reset key atau images berubah.
-  
   // Jika tidak ada gambar atau modal tertutup, return null
   if (!isOpen || !images || images.length === 0) return null;
 

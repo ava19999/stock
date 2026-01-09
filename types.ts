@@ -10,8 +10,8 @@ export interface InventoryItem {
   shelf: string;
   price: number;
   costPrice: number;
-  imageUrl: string;
-  images?: string[];     // <--- UBAH JADI OPSIONAL (tambah tanda tanya ?)
+  imageUrl: string;      // Foto utama
+  images?: string[];     // <--- OPSIONAL (tanda tanya ?) Mencegah blank screen
   ecommerce: string;
   initialStock: number;
   qtyIn: number;
@@ -31,13 +31,12 @@ export interface InventoryFormData {
   costPrice: number;
   ecommerce: string;
   imageUrl: string;
-  images: string[];      // Di form tetap wajib array (kosong gapapa)
+  images: string[];      // Di form kita inisialisasi sebagai array kosong, jadi aman
   initialStock: number;
   qtyIn: number;
   qtyOut: number;
 }
 
-// ... (Interface lainnya biarkan sama, yang penting InventoryItem di atas) ...
 export interface StockHistory {
   id: string;
   itemId: string;
