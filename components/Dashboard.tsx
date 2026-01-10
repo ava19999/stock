@@ -1,7 +1,7 @@
 // FILE: src/components/Dashboard.tsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
-import { fetchInventoryPaginated, fetchInventoryStats } from '../services/supabaseService';
+import { fetchInventoryPaginated, fetchInventoryStats, fetchInventoryAllFiltered } from '../services/supabaseService';
 import { ItemForm } from './ItemForm';
 import { DashboardStats } from './DashboardStats';
 import { DashboardFilterBar } from './DashboardFilterBar';
@@ -25,6 +25,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   // --- STATE ---
   const [localItems, setLocalItems] = useState<InventoryItem[]>([]);
+  const [allItems, setAllItems] = useState<InventoryItem[]>([]); // Store all items when sorting
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -59,14 +60,30 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return () => clearTimeout(timer);
   }, [searchTerm, brandSearch, appSearch]);
 
+  // Reset page when filters or sort changes
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, filterType, debouncedBrand, debouncedApp, priceSort]);
+
   const loadData = useCallback(async () => {
     setLoading(true);
-    // @ts-ignore
-    const { data, count } = await fetchInventoryPaginated(page, 50, debouncedSearch, filterType, debouncedBrand, debouncedApp);
-    setLocalItems(data);
-    setTotalPages(Math.ceil(count / 50));
+    
+    // If price sorting is active, fetch all data
+    if (priceSort !== 'none') {
+      const allData = await fetchInventoryAllFiltered(debouncedSearch, filterType, debouncedBrand, debouncedApp);
+      setAllItems(allData);
+      setTotalPages(Math.ceil(allData.length / 50));
+    } else {
+      // Otherwise, use paginated fetch
+      // @ts-ignore
+      const { data, count } = await fetchInventoryPaginated(page, 50, debouncedSearch, filterType, debouncedBrand, debouncedApp);
+      setLocalItems(data);
+      setAllItems([]); // Clear all items when not sorting
+      setTotalPages(Math.ceil(count / 50));
+    }
+    
     setLoading(false);
-  }, [page, debouncedSearch, filterType, debouncedBrand, debouncedApp]);
+  }, [page, debouncedSearch, filterType, debouncedBrand, debouncedApp, priceSort]);
 
   const loadStats = useCallback(async () => {
     const invStats = await fetchInventoryStats();
@@ -87,9 +104,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // --- SORTING ---
   const sortedItems = useMemo(() => {
-    if (priceSort === 'none') return localItems;
+    // Determine which dataset to use
+    const itemsToSort = priceSort !== 'none' ? allItems : localItems;
     
-    return [...localItems].sort((a, b) => {
+    if (priceSort === 'none') return itemsToSort;
+    
+    // Sort all items by price
+    const sorted = [...itemsToSort].sort((a, b) => {
       const priceA = a.costPrice || a.price || 0;
       const priceB = b.costPrice || b.price || 0;
       
@@ -99,7 +120,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
         return priceB - priceA; // Termahal ke Termurah
       }
     });
-  }, [localItems, priceSort]);
+    
+    // Apply pagination to sorted results
+    const pageSize = 50;
+    const startIdx = (page - 1) * pageSize;
+    const endIdx = startIdx + pageSize;
+    return sorted.slice(startIdx, endIdx);
+  }, [localItems, allItems, priceSort, page]);
 
   // --- HANDLERS ---
   const handleEditClick = (item: InventoryItem) => { setEditingItem(item); setShowItemForm(true); };
