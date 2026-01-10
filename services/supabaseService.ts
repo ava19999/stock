@@ -226,17 +226,40 @@ export const fetchInventoryAllFiltered = async (search: string, filter: string =
 };
 
 // 2. Fetch Shop / Beranda (DENGAN FIX KATEGORI & ORDERING)
-export const fetchShopItems = async (page: number, limit: number, search: string, cat: string) => {
+export const fetchShopItems = async (
+    page: number, 
+    limit: number, 
+    search: string, 
+    cat: string,
+    partNumberSearch?: string,
+    nameSearch?: string,
+    brandSearch?: string,
+    applicationSearch?: string
+) => {
     // Ambil hanya barang yg ada stoknya
     let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' }).gt('quantity', 0);
     
-    // Filter Pencarian
+    // Filter Pencarian Umum (search all fields)
     if (search && search.trim() !== '') {
         const searchTerm = search.trim();
-        query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%`);
+        query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%,brand.ilike.%${searchTerm}%,application.ilike.%${searchTerm}%`);
     }
     
-    // Filter Kategori (Fix Logic)
+    // Filter Individual Fields
+    if (partNumberSearch && partNumberSearch.trim() !== '') {
+        query = query.ilike('part_number', `%${partNumberSearch.trim()}%`);
+    }
+    if (nameSearch && nameSearch.trim() !== '') {
+        query = query.ilike('name', `%${nameSearch.trim()}%`);
+    }
+    if (brandSearch && brandSearch.trim() !== '') {
+        query = query.ilike('brand', `%${brandSearch.trim()}%`);
+    }
+    if (applicationSearch && applicationSearch.trim() !== '') {
+        query = query.ilike('application', `%${applicationSearch.trim()}%`);
+    }
+    
+    // Filter Kategori (Fix Logic) - Keep for backward compatibility
     if (cat && cat !== 'All' && cat.trim() !== '') {
         const categoryTerm = cat.trim();
         query = query.or(`brand.ilike.%${categoryTerm}%,application.ilike.%${categoryTerm}%`);
