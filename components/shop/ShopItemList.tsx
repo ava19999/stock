@@ -128,6 +128,13 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
                   <h3 className="text-xs font-bold text-gray-200 line-clamp-2 leading-relaxed min-h-[2.5em]" title={item.name}>
                     {item.name}
                   </h3>
+                  {item.application && (
+                    <div className="mt-1">
+                      <span className="text-[9px] bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded border border-blue-900/50 inline-block">
+                        {item.application}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-auto pt-3 border-t border-gray-700 flex items-center justify-between">
@@ -191,11 +198,18 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
                 <h3 className="text-sm font-bold text-gray-200 truncate mb-1" title={item.name}>
                   {item.name}
                 </h3>
-                {item.brand && (
-                  <span className="text-[9px] bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded border border-gray-600 inline-block">
-                    {item.brand}
-                  </span>
-                )}
+                <div className="flex flex-wrap gap-1">
+                  {item.brand && (
+                    <span className="text-[9px] bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded border border-gray-600 inline-block">
+                      {item.brand}
+                    </span>
+                  )}
+                  {item.application && (
+                    <span className="text-[9px] bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded border border-blue-900/50 inline-block">
+                      {item.application}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* HARGA & TOMBOL */}
