@@ -11,6 +11,7 @@ import { ShopItemList } from './shop/ShopItemList';
 import { ShopPagination } from './shop/ShopPagination';
 import { ShopCartModal } from './shop/ShopCartModal';
 import { ShopCheckoutModal } from './shop/ShopCheckoutModal';
+import { ReceiptModal } from './shop/ReceiptModal';
 
 interface ShopViewProps { 
     items: InventoryItem[]; 
@@ -59,6 +60,8 @@ export const ShopView: React.FC<ShopViewProps> = ({
   // State Modal & Upload
   const [isCartOpen, setIsCartOpen] = useState(false); 
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false); 
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [receiptData, setReceiptData] = useState<{customerName: string; tempo: string; note: string} | null>(null);
   const [isUploadingBanner, setIsUploadingBanner] = useState(false); 
   const [tempBannerImg, setTempBannerImg] = useState<string | null>(null);
   
@@ -140,9 +143,19 @@ export const ShopView: React.FC<ShopViewProps> = ({
       } 
   };
 
-  const handleCheckoutConfirm = (finalName: string) => {
+  const handleCheckoutConfirm = (finalName: string, tempo: string, note: string) => {
+      // Extract customer name from finalName (it's the first part before any parentheses)
+      const customerName = finalName.split(' (')[0];
+      
+      // Save receipt data
+      setReceiptData({ customerName, tempo, note });
+      
+      // Process the order
       onCheckout(finalName);
+      
+      // Close checkout modal and open receipt modal
       setIsCheckoutModalOpen(false);
+      setIsReceiptModalOpen(true);
   };
 
   return (
@@ -223,6 +236,15 @@ export const ShopView: React.FC<ShopViewProps> = ({
         isOpen={isCheckoutModalOpen}
         onClose={() => setIsCheckoutModalOpen(false)}
         onConfirm={handleCheckoutConfirm}
+      />
+
+      <ReceiptModal 
+        isOpen={isReceiptModalOpen}
+        onClose={() => setIsReceiptModalOpen(false)}
+        cart={cart}
+        customerName={receiptData?.customerName || ''}
+        tempo={receiptData?.tempo || ''}
+        note={receiptData?.note || ''}
       />
     </div>
   );

@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 interface ShopCheckoutModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onConfirm: (finalName: string) => void;
+    onConfirm: (finalName: string, tempo: string, note: string) => void;
 }
 
 export const ShopCheckoutModal: React.FC<ShopCheckoutModalProps> = ({ isOpen, onClose, onConfirm }) => {
@@ -21,7 +21,7 @@ export const ShopCheckoutModal: React.FC<ShopCheckoutModalProps> = ({ isOpen, on
             if(tempoInput.trim()) finalName += ` (Tempo: ${tempoInput})`;
             if(noteInput.trim()) finalName += ` (Note: ${noteInput})`;
             
-            onConfirm(finalName);
+            onConfirm(finalName, tempoInput, noteInput);
             setCustomerNameInput(''); 
             setTempoInput('');
             setNoteInput('');
