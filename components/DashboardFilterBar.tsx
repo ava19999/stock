@@ -1,6 +1,6 @@
 // FILE: src/components/DashboardFilterBar.tsx
 import React from 'react';
-import { Search, Plus, Tag, PenTool, AlertTriangle, AlertCircle, LayoutGrid, List } from 'lucide-react';
+import { Search, Plus, Tag, PenTool, AlertTriangle, AlertCircle, LayoutGrid, List, ArrowUpDown } from 'lucide-react';
 
 interface DashboardFilterBarProps {
   searchTerm: string;
@@ -13,6 +13,8 @@ interface DashboardFilterBarProps {
   setFilterType: (val: 'all' | 'low' | 'empty') => void;
   viewMode: 'grid' | 'list';
   setViewMode: (val: 'grid' | 'list') => void;
+  priceSort: 'none' | 'asc' | 'desc';
+  setPriceSort: (val: 'none' | 'asc' | 'desc') => void;
   onAddNew: () => void;
 }
 
@@ -22,6 +24,7 @@ export const DashboardFilterBar: React.FC<DashboardFilterBarProps> = ({
   appSearch, setAppSearch,
   filterType, setFilterType,
   viewMode, setViewMode,
+  priceSort, setPriceSort,
   onAddNew
 }) => {
   return (
@@ -53,6 +56,20 @@ export const DashboardFilterBar: React.FC<DashboardFilterBarProps> = ({
                 <PenTool className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
                 <input type="text" placeholder="Filter Aplikasi..." value={appSearch} onChange={(e) => setAppSearch(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-gray-700 border border-gray-600 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500/50 outline-none text-white placeholder-gray-500" />
             </div>
+        </div>
+
+        {/* Filter Harga (BARU) */}
+        <div className="relative mb-2">
+            <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+            <select 
+                value={priceSort} 
+                onChange={(e) => setPriceSort(e.target.value as 'none' | 'asc' | 'desc')} 
+                className="w-full pl-9 pr-3 py-2 bg-gray-700 border border-gray-600 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500/50 outline-none text-white appearance-none cursor-pointer"
+            >
+                <option value="none">Urutkan Harga...</option>
+                <option value="asc">Harga: Termurah ke Termahal</option>
+                <option value="desc">Harga: Termahal ke Termurah</option>
+            </select>
         </div>
 
         {/* Filter Buttons & View Mode */}

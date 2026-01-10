@@ -1,5 +1,5 @@
 // FILE: src/components/Dashboard.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
 import { fetchInventoryPaginated, fetchInventoryStats } from '../services/supabaseService';
 import { ItemForm } from './ItemForm';
@@ -38,6 +38,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [debouncedApp, setDebouncedApp] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'low' | 'empty'>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [priceSort, setPriceSort] = useState<'none' | 'asc' | 'desc'>('none');
   
   // Data States
   const [stats, setStats] = useState({ totalItems: 0, totalStock: 0, totalAsset: 0, todayIn: 0, todayOut: 0 });
@@ -84,6 +85,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => { loadData(); }, [loadData, refreshTrigger]);
   useEffect(() => { loadStats(); }, [loadStats, refreshTrigger]);
 
+  // --- SORTING ---
+  const sortedItems = useMemo(() => {
+    if (priceSort === 'none') return localItems;
+    
+    return [...localItems].sort((a, b) => {
+      const priceA = a.costPrice || a.price || 0;
+      const priceB = b.costPrice || b.price || 0;
+      
+      if (priceSort === 'asc') {
+        return priceA - priceB; // Termurah ke Termahal
+      } else {
+        return priceB - priceA; // Termahal ke Termurah
+      }
+    });
+  }, [localItems, priceSort]);
+
   // --- HANDLERS ---
   const handleEditClick = (item: InventoryItem) => { setEditingItem(item); setShowItemForm(true); };
   const handleAddNewClick = () => { setEditingItem(undefined); setShowItemForm(true); };
@@ -119,6 +136,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         appSearch={appSearch} setAppSearch={setAppSearch}
         filterType={filterType} setFilterType={setFilterType}
         viewMode={viewMode} setViewMode={setViewMode}
+        priceSort={priceSort} setPriceSort={setPriceSort}
         onAddNew={handleAddNewClick}
       />
 
@@ -126,7 +144,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <div className="p-4">
         <InventoryList 
           loading={loading}
-          items={localItems}
+          items={sortedItems}
           viewMode={viewMode}
           page={page}
           totalPages={totalPages}
