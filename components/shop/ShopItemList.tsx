@@ -120,17 +120,17 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
               <div className="p-3 flex flex-col flex-1">
                 <div className="mb-1">
                   <div className="flex justify-between items-start mb-1">
-                      <span className="text-[10px] font-bold text-gray-500 font-mono bg-gray-900 px-1 rounded border border-gray-800">
+                      <span className="text-[10px] md:text-xs font-bold text-gray-500 font-mono bg-gray-900 px-1 rounded border border-gray-800">
                           {item.partNumber}
                       </span>
-                      {item.brand && <span className="text-[9px] bg-gray-700 text-gray-300 px-1 rounded border border-gray-600">{item.brand}</span>}
+                      {item.brand && <span className="text-[9px] md:text-[10px] bg-gray-700 text-gray-300 px-1 rounded border border-gray-600">{item.brand}</span>}
                   </div>
-                  <h3 className="text-xs font-bold text-gray-200 line-clamp-2 leading-relaxed min-h-[2.5em]" title={item.name}>
+                  <h3 className="text-xs md:text-sm font-bold text-gray-200 line-clamp-2 leading-relaxed min-h-[2.5em]" title={item.name}>
                     {item.name}
                   </h3>
                   {item.application && (
                     <div className="mt-1">
-                      <span className="text-[9px] bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded border border-blue-900/50 inline-block">
+                      <span className="text-[9px] md:text-[10px] bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded border border-blue-900/50 inline-block">
                         {item.application}
                       </span>
                     </div>
@@ -138,7 +138,7 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
                 </div>
 
                 <div className="mt-auto pt-3 border-t border-gray-700 flex items-center justify-between">
-                  <div className="text-sm font-extrabold text-blue-400">
+                  <div className="text-sm md:text-base font-extrabold text-blue-400">
                     {formatCompactNumber(item.price)}
                   </div>
                   
@@ -188,24 +188,24 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
               {/* INFO BARANG */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[10px] font-bold text-gray-500 font-mono bg-gray-900 px-1.5 py-0.5 rounded border border-gray-800">
+                  <span className="text-[10px] md:text-xs font-bold text-gray-500 font-mono bg-gray-900 px-1.5 py-0.5 rounded border border-gray-800">
                     {item.partNumber}
                   </span>
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/60 text-white border border-white/10">
+                  <span className="text-[9px] md:text-[10px] font-bold px-1.5 py-0.5 rounded bg-black/60 text-white border border-white/10">
                     {item.quantity} Unit
                   </span>
                 </div>
-                <h3 className="text-sm font-bold text-gray-200 truncate mb-1" title={item.name}>
+                <h3 className="text-sm md:text-base font-bold text-gray-200 truncate mb-1" title={item.name}>
                   {item.name}
                 </h3>
                 <div className="flex flex-wrap gap-1">
                   {item.brand && (
-                    <span className="text-[9px] bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded border border-gray-600 inline-block">
+                    <span className="text-[9px] md:text-[10px] bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded border border-gray-600 inline-block">
                       {item.brand}
                     </span>
                   )}
                   {item.application && (
-                    <span className="text-[9px] bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded border border-blue-900/50 inline-block">
+                    <span className="text-[9px] md:text-[10px] bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded border border-blue-900/50 inline-block">
                       {item.application}
                     </span>
                   )}
@@ -214,7 +214,7 @@ export const ShopItemList: React.FC<ShopItemListProps> = ({
 
               {/* HARGA & TOMBOL */}
               <div className="flex flex-col items-end gap-2 pl-2">
-                <div className="text-base font-extrabold text-blue-400">
+                <div className="text-base md:text-lg font-extrabold text-blue-400">
                   {formatCompactNumber(item.price)}
                 </div>
                 <button 
