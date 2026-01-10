@@ -27,7 +27,7 @@ export const ShopFilterBar: React.FC<ShopFilterBarProps> = ({
     isAdmin, viewMode, setViewMode
 }) => {
     return (
-        <div className="sticky top-[64px] z-30 bg-gray-900/95 backdrop-blur-sm pt-2 pb-2 -mx-2 px-2 md:mx-0 md:px-0 space-y-3 border-b border-gray-800">
+        <div className="sticky top-0 z-30 bg-gray-900/95 backdrop-blur-sm pt-2 pb-2 -mx-2 px-2 md:mx-0 md:px-0 space-y-3 border-b border-gray-800">
             {/* Main Search Box - Search All Fields */}
             <div className="flex gap-2">
                 <div className="relative w-full group">
