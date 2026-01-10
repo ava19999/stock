@@ -61,7 +61,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   const [isCartOpen, setIsCartOpen] = useState(false); 
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false); 
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
-  const [receiptData, setReceiptData] = useState<{customerName: string; tempo: string; note: string} | null>(null);
+  const [receiptData, setReceiptData] = useState<{customerName: string; tempo: string; note: string; finalName?: string} | null>(null);
   const [isUploadingBanner, setIsUploadingBanner] = useState(false); 
   const [tempBannerImg, setTempBannerImg] = useState<string | null>(null);
   
@@ -150,12 +150,21 @@ export const ShopView: React.FC<ShopViewProps> = ({
       // Save receipt data
       setReceiptData({ customerName, tempo, note });
       
-      // Process the order
-      onCheckout(finalName);
+      // DO NOT process the order yet - wait until receipt is closed
+      // Store the finalName for later processing
+      setReceiptData({ customerName, tempo, note, finalName });
       
       // Close checkout modal and open receipt modal
       setIsCheckoutModalOpen(false);
       setIsReceiptModalOpen(true);
+  };
+
+  const handleReceiptClose = () => {
+      // Process the order when receipt is closed
+      if (receiptData?.finalName) {
+          onCheckout(receiptData.finalName);
+      }
+      setIsReceiptModalOpen(false);
   };
 
   return (
@@ -240,7 +249,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
 
       <ReceiptModal 
         isOpen={isReceiptModalOpen}
-        onClose={() => setIsReceiptModalOpen(false)}
+        onClose={handleReceiptClose}
         cart={cart}
         customerName={receiptData?.customerName || ''}
         tempo={receiptData?.tempo || ''}
