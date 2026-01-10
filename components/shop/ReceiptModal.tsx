@@ -2,7 +2,7 @@
 import React, { useRef } from 'react';
 import { CartItem } from '../../types';
 import { formatRupiah } from '../../utils';
-import { X, Download, Share2 } from 'lucide-react';
+import { X, Printer, Share2 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 
 interface ReceiptModalProps {
@@ -54,6 +54,46 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         link.download = `resi-${customerName.replace(/\s+/g, '-')}-${Date.now()}.jpg`;
         link.href = imageData;
         link.click();
+    };
+
+    const handlePrint = () => {
+        // Create a new window with the receipt content
+        const printWindow = window.open('', '_blank', 'width=800,height=600');
+        if (!printWindow || !receiptRef.current) return;
+
+        // Get the receipt HTML
+        const receiptHTML = receiptRef.current.innerHTML;
+        
+        // Write the HTML to the new window with print styles
+        printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Cetak Resi - ${customerName}</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        margin: 20px;
+                        background: white;
+                    }
+                    @media print {
+                        body { margin: 0; }
+                    }
+                </style>
+            </head>
+            <body>
+                ${receiptHTML}
+                <script>
+                    window.onload = function() {
+                        window.print();
+                        // Optionally close after printing
+                        // window.onafterprint = function() { window.close(); };
+                    };
+                </script>
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
     };
 
     const handleShare = async () => {
@@ -171,18 +211,18 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 {/* Action Buttons */}
                 <div className="p-6 bg-gray-900 border-t border-gray-700 grid grid-cols-2 gap-3">
                     <button 
-                        onClick={handleDownload}
+                        onClick={handlePrint}
                         className="py-3 px-4 bg-gray-700 text-gray-100 font-bold rounded-xl hover:bg-gray-600 flex items-center justify-center gap-2"
                     >
-                        <Download size={18} />
-                        Download
+                        <Printer size={18} />
+                        Cetak
                     </button>
                     <button 
                         onClick={handleShare}
                         className="py-3 px-4 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 flex items-center justify-center gap-2"
                     >
                         <Share2 size={18} />
-                        Share
+                        Share WhatsApp
                     </button>
                 </div>
             </div>
