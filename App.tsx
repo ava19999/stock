@@ -32,9 +32,9 @@ const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 
 const AppContent: React.FC = () => {
   // --- STATE ---
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [loginName, setLoginName] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(true);  // langsung authenticated
+  const [isAdmin, setIsAdmin] = useState(true);                  // langsung sebagai admin  
+  const [loginName, setLoginName] = useState('Admin');           // nama default Admin
   const [loginPass, setLoginPass] = useState('');
 
   const [items, setItems] = useState<InventoryItem[]>([]);
