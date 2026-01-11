@@ -7,6 +7,8 @@ interface StoreSelectorProps {
   onSelectStore: (store: StoreType) => void;
 }
 
+const TRANSITION_DELAY_MS = 1500;
+
 export const StoreSelector: React.FC<StoreSelectorProps> = ({ onSelectStore }) => {
   const [selectedStore, setSelectedStore] = useState<StoreType>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -18,7 +20,7 @@ export const StoreSelector: React.FC<StoreSelectorProps> = ({ onSelectStore }) =
     // Simulate loading and transition
     setTimeout(() => {
       onSelectStore(storeId);
-    }, 1500);
+    }, TRANSITION_DELAY_MS);
   };
 
   const stores = Object.values(STORE_CONFIGS);
@@ -105,12 +107,15 @@ export const StoreSelector: React.FC<StoreSelectorProps> = ({ onSelectStore }) =
                       alt={store.fullName}
                       className="w-full h-full object-contain p-4"
                       onError={(e) => {
-                        // Fallback if image fails to load
+                        // Fallback if image fails to load - use textContent instead of innerHTML
                         const target = e.target as HTMLImageElement;
                         target.style.display = 'none';
                         const parent = target.parentElement;
                         if (parent) {
-                          parent.innerHTML = `<span class="text-4xl font-bold text-${store.theme.primary}">${store.name}</span>`;
+                          const fallbackText = document.createElement('span');
+                          fallbackText.className = `text-4xl font-bold text-${store.theme.primary}`;
+                          fallbackText.textContent = store.name;
+                          parent.appendChild(fallbackText);
                         }
                       }}
                     />

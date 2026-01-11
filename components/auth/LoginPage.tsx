@@ -67,11 +67,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ store, onLogin, onBack }) 
                 alt={storeConfig.fullName}
                 className="w-20 h-20 object-contain"
                 onError={(e) => {
+                  // Fallback if image fails to load - use textContent instead of innerHTML
                   const target = e.target as HTMLImageElement;
                   target.style.display = 'none';
                   const parent = target.parentElement;
                   if (parent) {
-                    parent.innerHTML = `<span class="text-3xl font-bold text-${theme.primary}">${storeConfig.name}</span>`;
+                    const fallbackText = document.createElement('span');
+                    fallbackText.className = `text-3xl font-bold text-${theme.primary}`;
+                    fallbackText.textContent = storeConfig.name;
+                    parent.appendChild(fallbackText);
                   }
                 }}
               />

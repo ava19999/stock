@@ -39,7 +39,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   // Save to localStorage whenever state changes
   useEffect(() => {
-    if (selectedStore || userRole || userName) {
+    if (selectedStore && userRole) {
       const state: AuthState = {
         selectedStore,
         userRole,

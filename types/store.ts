@@ -18,7 +18,7 @@ export interface StoreConfig {
   fullName: string;
   logo: string;
   theme: StoreTheme;
-  adminPassword: string;
+  adminPassword: string; // NOTE: In production, move passwords to environment variables or use a secure auth service
 }
 
 export interface AuthState {
