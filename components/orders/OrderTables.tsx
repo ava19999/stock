@@ -2,8 +2,9 @@
 import React, { useState } from 'react';
 import { Order, OrderStatus, ReturRecord, InventoryItem } from '../../types';
 import { formatDate, getOrderDetails, getStatusColor, getStatusLabel } from '../../utils/orderHelpers';
-import { formatRupiah } from '../../utils';
-import { Store, Edit3, ClipboardList, ChevronLeft, ChevronRight, Plus, ShoppingCart, Trash2, X } from 'lucide-react';
+import { formatRupiah, generateId } from '../../utils';
+import { Store, Edit3, ClipboardList, ChevronLeft, ChevronRight, Plus, ShoppingCart, Trash2, X, Loader2 } from 'lucide-react';
+import { getItemByPartNumber, updateInventory, saveOrder } from '../../services/supabaseService';
 
 interface PaginationProps {
     currentPage: number;
@@ -66,6 +67,7 @@ const OfflineOrderForm: React.FC<OfflineOrderFormProps> = ({ items, onRefresh })
     const [searchTerm, setSearchTerm] = useState('');
     const [isPartDropdownOpen, setIsPartDropdownOpen] = useState(false);
     const [validationError, setValidationError] = useState('');
+    const [isProcessing, setIsProcessing] = useState(false);
 
     // Filter items based on search term
     const filteredItems = items.filter(item => 
@@ -170,11 +172,92 @@ const OfflineOrderForm: React.FC<OfflineOrderFormProps> = ({ items, onRefresh })
             return;
         }
 
-        // Here we would call the API to save the order
-        // For now, just show a message
-        alert(`Memproses ${orderItems.length} item ke tab Terjual...`);
-        setOrderItems([]);
-        if (onRefresh) onRefresh();
+        setIsProcessing(true);
+        setValidationError('');
+
+        try {
+            // Process each item: update inventory and add barang_keluar
+            for (const orderItem of orderItems) {
+                // Get the current inventory item
+                const inventoryItem = await getItemByPartNumber(orderItem.partNumber);
+                if (!inventoryItem) {
+                    console.error(`Item not found: ${orderItem.partNumber}`);
+                    continue;
+                }
+
+                // Update inventory with transaction (this will automatically call addBarangKeluar)
+                await updateInventory(inventoryItem, {
+                    type: 'out',
+                    qty: orderItem.qtyKeluar,
+                    ecommerce: 'OFFLINE',
+                    resiTempo: orderItem.tempo,
+                    customer: orderItem.pelanggan,
+                    price: orderItem.hargaSatuan,
+                });
+            }
+
+            // Create a single order record for tracking
+            // Format customer name to include tempo for proper parsing
+            const customerNameWithMeta = `${orderItems[0].pelanggan} (Toko: ${orderItems[0].tempo}) (Via: OFFLINE)`;
+            
+            const orderForSave: Order = {
+                id: generateId(),
+                customerName: customerNameWithMeta,
+                items: orderItems.map(item => {
+                    const inventoryItem = items.find(i => i.partNumber === item.partNumber);
+                    return {
+                        id: inventoryItem?.id || item.id,
+                        partNumber: item.partNumber,
+                        name: item.keteranganBarang,
+                        brand: item.brand,
+                        application: item.aplikasi,
+                        quantity: item.qtyStock,
+                        price: item.hargaSatuan,
+                        cartQuantity: item.qtyKeluar,
+                        customPrice: item.hargaSatuan,
+                        shelf: inventoryItem?.shelf || '',
+                        ecommerce: 'OFFLINE',
+                        imageUrl: inventoryItem?.imageUrl || '',
+                        lastUpdated: Date.now(),
+                        initialStock: inventoryItem?.initialStock || 0,
+                        qtyIn: inventoryItem?.qtyIn || 0,
+                        qtyOut: (inventoryItem?.qtyOut || 0) + item.qtyKeluar,
+                        costPrice: inventoryItem?.costPrice || 0,
+                        kingFanoPrice: 0,
+                    };
+                }),
+                totalAmount: orderItems.reduce((sum, item) => sum + item.totalHarga, 0),
+                status: 'processing', // Mark as 'processing' (Terjual)
+                timestamp: Date.now(),
+            };
+
+            await saveOrder(orderForSave);
+
+            // Clear the form and refresh
+            setOrderItems([]);
+            setCurrentItem({
+                tanggal: new Date().toISOString().split('T')[0],
+                pelanggan: '',
+                tempo: 'CASH',
+                partNumber: '',
+                keteranganBarang: '',
+                brand: '',
+                aplikasi: '',
+                qtyStock: 0,
+                qtyKeluar: 0,
+                hargaSatuan: 0,
+                totalHarga: 0,
+            });
+            setSearchTerm('');
+            
+            if (onRefresh) onRefresh();
+            alert('Pesanan offline berhasil diproses ke tab Terjual!');
+        } catch (error) {
+            console.error('Error processing offline order:', error);
+            setValidationError('Gagal memproses pesanan. Silakan coba lagi.');
+        } finally {
+            setIsProcessing(false);
+        }
     };
 
     const totalAllItems = orderItems.reduce((sum, item) => sum + item.totalHarga, 0);
@@ -339,10 +422,20 @@ const OfflineOrderForm: React.FC<OfflineOrderFormProps> = ({ items, onRefresh })
                     {orderItems.length > 0 && (
                         <button
                             onClick={handleProcessToSold}
-                            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-bold text-xs flex items-center gap-2"
+                            disabled={isProcessing}
+                            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-bold text-xs flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            <ShoppingCart size={16} />
-                            Proses ke Terjual ({orderItems.length} items)
+                            {isProcessing ? (
+                                <>
+                                    <Loader2 size={16} className="animate-spin" />
+                                    Memproses...
+                                </>
+                            ) : (
+                                <>
+                                    <ShoppingCart size={16} />
+                                    Proses ke Terjual ({orderItems.length} items)
+                                </>
+                            )}
                         </button>
                     )}
                 </div>
