@@ -26,9 +26,11 @@ import {
   fetchHistory, addBarangMasuk, addBarangKeluar, updateOrderData 
 } from './services/supabaseService';
 import { generateId } from './utils';
+import { StoreId } from './config/storeConfig';
 
 const CUSTOMER_ID_KEY = 'stockmaster_my_customer_id';
 const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
+const SELECTED_STORE_KEY = 'stockmaster_selected_store';
 
 const AppContent: React.FC = () => {
   // --- STATE ---
@@ -36,6 +38,7 @@ const AppContent: React.FC = () => {
   const [isAdmin, setIsAdmin] = useState(true); // Auto-login as admin
   const [loginName, setLoginName] = useState('ava'); // Admin username
   const [loginPass, setLoginPass] = useState('');
+  const [selectedStore, setSelectedStore] = useState<StoreId>('bjw'); // Default store
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -66,6 +69,13 @@ const AppContent: React.FC = () => {
     setMyCustomerId(cId);
     const savedName = localStorage.getItem('stockmaster_customer_name');
     if(savedName) { setLoginName(savedName); } // Keep authenticated state as true
+    
+    // Load selected store from localStorage
+    const savedStore = localStorage.getItem(SELECTED_STORE_KEY) as StoreId | null;
+    if (savedStore && (savedStore === 'mjm' || savedStore === 'bjw')) {
+      setSelectedStore(savedStore);
+    }
+    
     refreshData();
   }, []);
 
@@ -107,7 +117,20 @@ const AppContent: React.FC = () => {
       else showToast(`Selamat Datang, ${name}!`);
   };
 
-  const handleLogout = () => { setIsAuthenticated(false); setIsAdmin(false); setLoginName(''); setLoginPass(''); localStorage.removeItem('stockmaster_customer_name'); };
+  const handleLogout = () => { 
+    setIsAuthenticated(false); 
+    setIsAdmin(false); 
+    setLoginName(''); 
+    setLoginPass(''); 
+    localStorage.removeItem('stockmaster_customer_name'); 
+    // Don't remove selected store on logout, keep it for next login
+  };
+  
+  // Save selected store to localStorage whenever it changes
+  const handleStoreChange = (store: StoreId) => {
+    setSelectedStore(store);
+    localStorage.setItem(SELECTED_STORE_KEY, store);
+  };
 
   // --- HANDLERS DATA ---
   const handleSaveItem = async (data: InventoryFormData) => {
@@ -293,17 +316,17 @@ const AppContent: React.FC = () => {
   if (loading && items.length === 0) return <div className="flex flex-col h-screen items-center justify-center bg-gray-900 font-sans text-gray-400 space-y-6"><div className="relative"><div className="w-16 h-16 border-4 border-gray-700 border-t-blue-500 rounded-full animate-spin"></div><div className="absolute inset-0 flex items-center justify-center"><CloudLightning size={20} className="text-blue-500 animate-pulse" /></div></div><div className="text-center space-y-1"><p className="font-medium text-gray-200">Menghubungkan Database</p><p className="text-xs">Sinkronisasi Supabase...</p></div></div>;
 
   if (!isAuthenticated) {
-      return <LoginView loginName={loginName} setLoginName={setLoginName} loginPass={loginPass} setLoginPass={setLoginPass} onGlobalLogin={handleGlobalLogin} onGuestLogin={loginAsCustomer} toast={toast} onCloseToast={() => setToast(null)} />;
+      return <LoginView loginName={loginName} setLoginName={setLoginName} loginPass={loginPass} setLoginPass={setLoginPass} onGlobalLogin={handleGlobalLogin} onGuestLogin={loginAsCustomer} toast={toast} onCloseToast={() => setToast(null)} selectedStore={selectedStore} setSelectedStore={handleStoreChange} />;
   }
 
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col font-sans text-gray-100">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       
-      <Header isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} loading={loading} onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} loginName={loginName} onLogout={handleLogout} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} />
+      <Header isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} loading={loading} onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} loginName={loginName} onLogout={handleLogout} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} selectedStore={selectedStore} />
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
-        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
+        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} selectedStore={selectedStore} />}
         {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
         {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}
         {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} isLoading={loading} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
