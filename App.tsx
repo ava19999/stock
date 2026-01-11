@@ -13,14 +13,10 @@ import { QuickInputView } from './components/QuickInputView';
 
 // --- NEW SPLIT COMPONENTS ---
 import { Toast } from './components/common/Toast';
-import { StoreSelector } from './components/auth/StoreSelector';
-import { LoginPage } from './components/auth/LoginPage';
+import { LoginView } from './components/auth/LoginView';
 import { Header } from './components/layout/Header';
 import { MobileNav } from './components/layout/MobileNav';
 import { ActiveView } from './types/ui';
-
-// --- CONTEXT ---
-import { StoreProvider, useStore } from './context/StoreContext';
 
 // --- TYPES & SERVICES ---
 import { InventoryItem, InventoryFormData, CartItem, Order, StockHistory, OrderStatus } from './types';
@@ -35,13 +31,12 @@ const CUSTOMER_ID_KEY = 'stockmaster_my_customer_id';
 const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 
 const AppContent: React.FC = () => {
-  // --- STORE CONTEXT ---
-  const { selectedStore, userRole, userName, setStore, setUserRole, setUserName, logout: logoutStore } = useStore();
-  
   // --- STATE ---
-  const isAuthenticated = selectedStore !== null && userRole !== null;
-  const isAdmin = userRole === 'admin';
-  const loginName = userName;
+  const [isAuthenticated, setIsAuthenticated] = useState(true); // Auto-login enabled
+  const [isAdmin, setIsAdmin] = useState(true); // Auto-login as admin
+  const [loginName, setLoginName] = useState('ava'); // Admin username
+  const [loginPass, setLoginPass] = useState('');
+  const [selectedStore, setSelectedStore] = useState<'mjm' | 'bjw'>('bjw'); // Store selection
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -70,12 +65,20 @@ const AppContent: React.FC = () => {
     let cId = localStorage.getItem(CUSTOMER_ID_KEY);
     if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
     setMyCustomerId(cId);
+    const savedName = localStorage.getItem('stockmaster_customer_name');
+    if(savedName) { setLoginName(savedName); } // Keep authenticated state as true
     
-    // Only refresh data if authenticated
-    if (isAuthenticated) {
-      refreshData();
-    }
-  }, [isAuthenticated]);
+    // Load saved store selection
+    const savedStore = localStorage.getItem('stockmaster_selected_store') as 'mjm' | 'bjw' | null;
+    if (savedStore) { setSelectedStore(savedStore); }
+    
+    refreshData();
+  }, []);
+  
+  // Save store selection to localStorage
+  useEffect(() => {
+    localStorage.setItem('stockmaster_selected_store', selectedStore);
+  }, [selectedStore]);
 
   const refreshData = async () => {
     setLoading(true);
@@ -97,32 +100,25 @@ const AppContent: React.FC = () => {
   };
 
   // --- HANDLERS AUTH ---
-  const handleSelectStore = (store: 'mjm' | 'bjw') => {
-    setStore(store);
+  const handleGlobalLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loginName.toLowerCase() === 'ava' && loginPass === '9193') {
+        setIsAdmin(true); setIsAuthenticated(true); setActiveView('inventory');
+        setMyCustomerId('ADMIN-AVA'); showToast('Login Admin Berhasil'); 
+        refreshData();
+    } else if (loginName.trim() !== '') {
+        loginAsCustomer(loginName);
+    } else { showToast('Masukkan Nama', 'error'); }
   };
 
-  const handleLogin = (role: 'admin' | 'guest', name: string) => {
-    setUserRole(role);
-    setUserName(name);
-    if (role === 'admin') {
-      setActiveView('inventory');
-    } else {
-      setActiveView('shop');
-    }
-    showToast(`Selamat Datang di ${selectedStore?.toUpperCase()}, ${name}!`);
-    refreshData();
+  const loginAsCustomer = (name: string) => {
+      setIsAdmin(false); setIsAuthenticated(true); setActiveView('shop');
+      localStorage.setItem('stockmaster_customer_name', name); 
+      if (name.toLowerCase() === 'king fano') showToast(`Selamat Datang, King Fano! Harga Khusus Aktif.`);
+      else showToast(`Selamat Datang, ${name}!`);
   };
 
-  const handleBackToStoreSelection = () => {
-    setStore(null);
-    setUserRole(null);
-    setUserName('');
-  };
-
-  const handleLogout = () => { 
-    logoutStore(); 
-    setActiveView('inventory');
-  };
+  const handleLogout = () => { setIsAuthenticated(false); setIsAdmin(false); setLoginName(''); setLoginPass(''); localStorage.removeItem('stockmaster_customer_name'); };
 
   // --- HANDLERS DATA ---
   const handleSaveItem = async (data: InventoryFormData) => {
@@ -203,9 +199,7 @@ const AppContent: React.FC = () => {
   };
 
   const doCheckout = async (name: string) => {
-      if (name !== userName && !isAdmin) { 
-        setUserName(name); 
-      }
+      if (name !== loginName && !isAdmin) { setLoginName(name); localStorage.setItem('stockmaster_customer_name', name); }
       const totalAmount = cart.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
       const newOrder: Order = { id: generateId(), customerName: name, items: [...cart], totalAmount: totalAmount, status: 'pending', timestamp: Date.now() };
       
@@ -309,27 +303,37 @@ const AppContent: React.FC = () => {
   // --- RENDERING ---
   if (loading && items.length === 0) return <div className="flex flex-col h-screen items-center justify-center bg-gray-900 font-sans text-gray-400 space-y-6"><div className="relative"><div className="w-16 h-16 border-4 border-gray-700 border-t-blue-500 rounded-full animate-spin"></div><div className="absolute inset-0 flex items-center justify-center"><CloudLightning size={20} className="text-blue-500 animate-pulse" /></div></div><div className="text-center space-y-1"><p className="font-medium text-gray-200">Menghubungkan Database</p><p className="text-xs">Sinkronisasi Supabase...</p></div></div>;
 
-  // Show StoreSelector if no store selected
-  if (!selectedStore) {
-    return <StoreSelector onSelectStore={handleSelectStore} />;
-  }
-
-  // Show LoginPage if store selected but not authenticated
-  if (!isAuthenticated || !userRole) {
-      return (
-        <LoginPage 
-          store={selectedStore} 
-          onLogin={handleLogin} 
-          onBack={handleBackToStoreSelection} 
-        />
-      );
+  if (!isAuthenticated) {
+      return <LoginView 
+        loginName={loginName} 
+        setLoginName={setLoginName} 
+        loginPass={loginPass} 
+        setLoginPass={setLoginPass} 
+        onGlobalLogin={handleGlobalLogin} 
+        onGuestLogin={loginAsCustomer} 
+        toast={toast} 
+        onCloseToast={() => setToast(null)}
+        selectedStore={selectedStore}
+        onStoreChange={setSelectedStore}
+      />;
   }
 
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col font-sans text-gray-100">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       
-      <Header isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} loading={loading} onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} loginName={loginName} onLogout={handleLogout} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} />
+      <Header 
+        isAdmin={isAdmin} 
+        activeView={activeView} 
+        setActiveView={setActiveView} 
+        loading={loading} 
+        onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} 
+        loginName={loginName} 
+        onLogout={handleLogout} 
+        pendingOrdersCount={pendingOrdersCount} 
+        myPendingOrdersCount={myPendingOrdersCount}
+        selectedStore={selectedStore}
+      />
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
@@ -352,11 +356,5 @@ const AppContent: React.FC = () => {
   );
 };
 
-const App = () => (
-  <Router>
-    <StoreProvider>
-      <AppContent />
-    </StoreProvider>
-  </Router>
-);
+const App = () => <Router><AppContent /></Router>;
 export default App;

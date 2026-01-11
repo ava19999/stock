@@ -12,12 +12,17 @@ interface LoginViewProps {
   onGuestLogin: (name: string) => void;
   toast: { msg: string; type: 'success' | 'error' } | null;
   onCloseToast: () => void;
+  selectedStore?: 'mjm' | 'bjw';
+  onStoreChange?: (store: 'mjm' | 'bjw') => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({
   loginName, setLoginName, loginPass, setLoginPass,
-  onGlobalLogin, onGuestLogin, toast, onCloseToast
+  onGlobalLogin, onGuestLogin, toast, onCloseToast,
+  selectedStore = 'bjw', onStoreChange
 }) => {
+  const storeName = selectedStore === 'mjm' ? 'MJM86' : 'BJW';
+  
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4 font-sans relative overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 rounded-full blur-[100px] -mr-20 -mt-20"></div>
@@ -27,13 +32,41 @@ export const LoginView: React.FC<LoginViewProps> = ({
         
         <div className="bg-gray-800/80 backdrop-blur-xl p-8 rounded-3xl shadow-2xl w-full max-w-md border border-gray-700/50 relative z-10">
             <div className="relative z-10">
+                {/* Store Selector */}
+                {onStoreChange && (
+                  <div className="flex gap-2 mb-6">
+                    <button
+                      type="button"
+                      onClick={() => onStoreChange('mjm')}
+                      className={`flex-1 py-2 px-3 rounded-lg text-sm font-semibold transition-all ${
+                        selectedStore === 'mjm' 
+                          ? 'bg-yellow-500 text-gray-900 shadow-lg' 
+                          : 'bg-gray-700/50 text-gray-400 hover:bg-gray-700'
+                      }`}
+                    >
+                      MJM86
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onStoreChange('bjw')}
+                      className={`flex-1 py-2 px-3 rounded-lg text-sm font-semibold transition-all ${
+                        selectedStore === 'bjw' 
+                          ? 'bg-red-500 text-white shadow-lg' 
+                          : 'bg-gray-700/50 text-gray-400 hover:bg-gray-700'
+                      }`}
+                    >
+                      BJW
+                    </button>
+                  </div>
+                )}
+                
                 <div className="flex justify-center mb-6">
                     <div className="bg-gray-700 p-4 rounded-2xl shadow-lg ring-1 ring-gray-600">
                         <Car size={40} className="text-blue-400" strokeWidth={1.5} />
                     </div>
                 </div>
                 <div className="text-center mb-8">
-                    <h1 className="text-4xl font-extrabold text-white tracking-tight mb-1">BJW</h1>
+                    <h1 className="text-4xl font-extrabold text-white tracking-tight mb-1">{storeName}</h1>
                     <p className="text-gray-300 text-lg font-bold uppercase tracking-wider mb-1">Autopart</p>
                     <p className="text-gray-500 text-sm">Sukucadang Mobil</p>
                 </div>
