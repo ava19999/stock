@@ -69,7 +69,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <!DOCTYPE html>
             <html>
             <head>
-                <title>Cetak Resi - ${customerName}</title>
+                <title>BJWAutopart - Resi ${customerName}</title>
                 <style>
                     body {
                         font-family: Arial, sans-serif;
@@ -103,21 +103,21 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         // Convert base64 to blob
         const response = await fetch(imageData);
         const blob = await response.blob();
-        const file = new File([blob], `resi-${customerName}.jpg`, { type: 'image/jpeg' });
+        const file = new File([blob], `BJWAutopart-${customerName}.jpg`, { type: 'image/jpeg' });
 
         if (navigator.share && navigator.canShare?.({ files: [file] })) {
             try {
                 await navigator.share({
                     files: [file],
-                    title: 'Resi Pesanan',
-                    text: `Resi pesanan untuk ${customerName}`,
+                    title: 'BJWAutopart - Resi Pesanan',
+                    text: `Resi pesanan BJWAutopart untuk ${customerName}`,
                 });
             } catch (error) {
                 console.log('Share cancelled or failed:', error);
             }
         } else {
             // Fallback: copy to clipboard or open WhatsApp Web
-            const whatsappText = encodeURIComponent(`Resi Pesanan\nCustomer: ${customerName}\nTotal: ${formatRupiah(cartTotal)}`);
+            const whatsappText = encodeURIComponent(`BJWAutopart - Resi Pesanan\nCustomer: ${customerName}\nTotal: ${formatRupiah(cartTotal)}`);
             window.open(`https://wa.me/?text=${whatsappText}`, '_blank');
         }
     };
@@ -127,7 +127,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose}></div>
             <div className="bg-gray-800 rounded-3xl shadow-2xl w-full max-w-md relative overflow-hidden animate-in zoom-in-95 border border-gray-700 max-h-[90vh] overflow-y-auto">
                 <div className="bg-gray-900 px-6 py-4 border-b border-gray-700 flex justify-between items-center sticky top-0 z-10">
-                    <h3 className="text-lg font-bold text-gray-100">Resi Pesanan</h3>
+                    <h3 className="text-lg font-bold text-gray-100">BJWAutopart - Resi Pesanan</h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-white">
                         <X size={20}/>
                     </button>
@@ -136,42 +136,43 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 {/* Receipt Content */}
                 <div ref={receiptRef} className="bg-white p-6">
                     {/* Header */}
-                    <div className="text-center mb-6 border-b-2 border-gray-800 pb-4">
-                        <h1 className="text-2xl font-bold text-gray-900 mb-1">RESI PESANAN</h1>
-                        <p className="text-sm text-gray-600">{currentDate}</p>
+                    <div className="text-center mb-4 border-b-2 border-gray-800 pb-3">
+                        <h1 className="text-xl font-bold text-gray-900 mb-0.5">BJWAutopart</h1>
+                        <p className="text-xs text-gray-600">{currentDate}</p>
                     </div>
 
                     {/* Customer Info */}
-                    <div className="mb-6 bg-gray-50 p-4 rounded-lg">
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                            <div>
-                                <p className="text-gray-600 font-semibold">Customer:</p>
+                    <div className="mb-4 bg-gray-50 p-3 rounded">
+                        <div className="flex justify-between gap-4 text-xs">
+                            <div className="flex-1">
+                                <p className="text-gray-600 font-semibold mb-0.5">Customer:</p>
                                 <p className="text-gray-900 font-bold">{customerName}</p>
                             </div>
                             {tempo && (
-                                <div>
-                                    <p className="text-gray-600 font-semibold">Tempo:</p>
+                                <div className="flex-1">
+                                    <p className="text-gray-600 font-semibold mb-0.5">Tempo:</p>
                                     <p className="text-gray-900 font-bold">{tempo}</p>
                                 </div>
                             )}
                         </div>
                         {note && (
-                            <div className="mt-3">
-                                <p className="text-gray-600 font-semibold text-sm">Note:</p>
-                                <p className="text-gray-900 text-sm">{note}</p>
+                            <div className="mt-2 pt-2 border-t border-gray-300">
+                                <p className="text-gray-600 font-semibold text-xs mb-0.5">Note:</p>
+                                <p className="text-gray-900 text-xs">{note}</p>
                             </div>
                         )}
                     </div>
 
                     {/* Items Table */}
-                    <div className="mb-6">
-                        <table className="w-full text-sm">
+                    <div className="mb-4">
+                        <table className="w-full text-xs">
                             <thead>
                                 <tr className="border-b-2 border-gray-800">
-                                    <th className="text-left py-2 font-bold text-gray-900">Barang</th>
-                                    <th className="text-center py-2 font-bold text-gray-900">Qty</th>
-                                    <th className="text-right py-2 font-bold text-gray-900">Harga</th>
-                                    <th className="text-right py-2 font-bold text-gray-900">Total</th>
+                                    <th className="text-left py-1.5 font-bold text-gray-900 w-16">Part#</th>
+                                    <th className="text-left py-1.5 font-bold text-gray-900">Keterangan</th>
+                                    <th className="text-center py-1.5 font-bold text-gray-900 w-10">Qty</th>
+                                    <th className="text-right py-1.5 font-bold text-gray-900 w-20">Harga</th>
+                                    <th className="text-right py-1.5 font-bold text-gray-900 w-20">Total</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -180,13 +181,17 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                                     const itemTotal = itemPrice * item.cartQuantity;
                                     return (
                                         <tr key={item.id} className="border-b border-gray-300">
-                                            <td className="py-3">
-                                                <p className="font-semibold text-gray-900">{item.name}</p>
-                                                <p className="text-xs text-gray-600">{item.partNumber}</p>
+                                            <td className="py-2 align-top">
+                                                <p className="text-gray-900 font-mono text-[10px] leading-tight">{item.partNumber}</p>
                                             </td>
-                                            <td className="text-center font-bold text-gray-900">{item.cartQuantity}</td>
-                                            <td className="text-right text-gray-900">{formatRupiah(itemPrice)}</td>
-                                            <td className="text-right font-bold text-gray-900">{formatRupiah(itemTotal)}</td>
+                                            <td className="py-2 align-top">
+                                                <p className="font-semibold text-gray-900 leading-tight">{item.name}</p>
+                                                {item.brand && <p className="text-[10px] text-gray-600 leading-tight">Brand: {item.brand}</p>}
+                                                {item.application && <p className="text-[10px] text-gray-600 leading-tight">Aplikasi: {item.application}</p>}
+                                            </td>
+                                            <td className="text-center font-bold text-gray-900 align-top py-2">{item.cartQuantity}</td>
+                                            <td className="text-right text-gray-900 align-top py-2">{formatRupiah(itemPrice)}</td>
+                                            <td className="text-right font-bold text-gray-900 align-top py-2">{formatRupiah(itemTotal)}</td>
                                         </tr>
                                     );
                                 })}
@@ -195,15 +200,15 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     </div>
 
                     {/* Total */}
-                    <div className="border-t-2 border-gray-800 pt-4">
+                    <div className="border-t-2 border-gray-800 pt-3">
                         <div className="flex justify-between items-center">
-                            <span className="text-xl font-bold text-gray-900">TOTAL:</span>
-                            <span className="text-2xl font-bold text-gray-900">{formatRupiah(cartTotal)}</span>
+                            <span className="text-base font-bold text-gray-900">TOTAL:</span>
+                            <span className="text-lg font-bold text-gray-900">{formatRupiah(cartTotal)}</span>
                         </div>
                     </div>
 
                     {/* Footer */}
-                    <div className="mt-6 text-center text-xs text-gray-600 border-t border-gray-300 pt-4">
+                    <div className="mt-4 text-center text-[10px] text-gray-600 border-t border-gray-300 pt-3">
                         <p>Terima kasih atas pesanan Anda</p>
                     </div>
                 </div>

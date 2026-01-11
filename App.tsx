@@ -33,15 +33,15 @@ const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 const AppContent: React.FC = () => {
   // --- STATE ---
   const [isAuthenticated, setIsAuthenticated] = useState(true); // Auto-login enabled
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [loginName, setLoginName] = useState('Guest'); // Default guest name
+  const [isAdmin, setIsAdmin] = useState(true); // Auto-login as admin
+  const [loginName, setLoginName] = useState('ava'); // Admin username
   const [loginPass, setLoginPass] = useState('');
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [history, setHistory] = useState<StockHistory[]>([]);
   const [loading, setLoading] = useState(false); 
-  const [activeView, setActiveView] = useState<ActiveView>('shop');
+  const [activeView, setActiveView] = useState<ActiveView>('inventory'); // Start at inventory for admin
   
   const [bannerUrl, setBannerUrl] = useState<string>('');
   const [myCustomerId, setMyCustomerId] = useState<string>('');
