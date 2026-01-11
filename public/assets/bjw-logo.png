@@ -1,0 +1,7 @@
+<!-- Placeholder SVG for BJW AUTOPART Logo -->
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <rect width="200" height="200" fill="#1f2937"/>
+  <circle cx="100" cy="100" r="80" fill="#ef4444" opacity="0.2"/>
+  <text x="100" y="90" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#ef4444" text-anchor="middle">BJW</text>
+  <text x="100" y="120" font-family="Arial, sans-serif" font-size="14" fill="#d1d5db" text-anchor="middle">AUTOPART</text>
+</svg>
