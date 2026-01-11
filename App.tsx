@@ -36,6 +36,7 @@ const AppContent: React.FC = () => {
   const [isAdmin, setIsAdmin] = useState(true); // Auto-login as admin
   const [loginName, setLoginName] = useState('ava'); // Admin username
   const [loginPass, setLoginPass] = useState('');
+  const [selectedStore, setSelectedStore] = useState<'mjm' | 'bjw'>('bjw'); // Store selection
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -66,8 +67,18 @@ const AppContent: React.FC = () => {
     setMyCustomerId(cId);
     const savedName = localStorage.getItem('stockmaster_customer_name');
     if(savedName) { setLoginName(savedName); } // Keep authenticated state as true
+    
+    // Load saved store selection
+    const savedStore = localStorage.getItem('stockmaster_selected_store') as 'mjm' | 'bjw' | null;
+    if (savedStore) { setSelectedStore(savedStore); }
+    
     refreshData();
   }, []);
+  
+  // Save store selection to localStorage
+  useEffect(() => {
+    localStorage.setItem('stockmaster_selected_store', selectedStore);
+  }, [selectedStore]);
 
   const refreshData = async () => {
     setLoading(true);
@@ -293,14 +304,36 @@ const AppContent: React.FC = () => {
   if (loading && items.length === 0) return <div className="flex flex-col h-screen items-center justify-center bg-gray-900 font-sans text-gray-400 space-y-6"><div className="relative"><div className="w-16 h-16 border-4 border-gray-700 border-t-blue-500 rounded-full animate-spin"></div><div className="absolute inset-0 flex items-center justify-center"><CloudLightning size={20} className="text-blue-500 animate-pulse" /></div></div><div className="text-center space-y-1"><p className="font-medium text-gray-200">Menghubungkan Database</p><p className="text-xs">Sinkronisasi Supabase...</p></div></div>;
 
   if (!isAuthenticated) {
-      return <LoginView loginName={loginName} setLoginName={setLoginName} loginPass={loginPass} setLoginPass={setLoginPass} onGlobalLogin={handleGlobalLogin} onGuestLogin={loginAsCustomer} toast={toast} onCloseToast={() => setToast(null)} />;
+      return <LoginView 
+        loginName={loginName} 
+        setLoginName={setLoginName} 
+        loginPass={loginPass} 
+        setLoginPass={setLoginPass} 
+        onGlobalLogin={handleGlobalLogin} 
+        onGuestLogin={loginAsCustomer} 
+        toast={toast} 
+        onCloseToast={() => setToast(null)}
+        selectedStore={selectedStore}
+        onStoreChange={setSelectedStore}
+      />;
   }
 
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col font-sans text-gray-100">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       
-      <Header isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} loading={loading} onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} loginName={loginName} onLogout={handleLogout} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} />
+      <Header 
+        isAdmin={isAdmin} 
+        activeView={activeView} 
+        setActiveView={setActiveView} 
+        loading={loading} 
+        onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} 
+        loginName={loginName} 
+        onLogout={handleLogout} 
+        pendingOrdersCount={pendingOrdersCount} 
+        myPendingOrdersCount={myPendingOrdersCount}
+        selectedStore={selectedStore}
+      />
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}

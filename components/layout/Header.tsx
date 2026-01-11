@@ -16,20 +16,40 @@ interface HeaderProps {
   onLogout: () => void;
   pendingOrdersCount: number;
   myPendingOrdersCount: number;
+  selectedStore: 'mjm' | 'bjw';
 }
 
 export const Header: React.FC<HeaderProps> = ({
   isAdmin, activeView, setActiveView, loading, onRefresh,
-  loginName, onLogout, pendingOrdersCount, myPendingOrdersCount
+  loginName, onLogout, pendingOrdersCount, myPendingOrdersCount, selectedStore
 }) => {
+  const storeName = selectedStore === 'mjm' ? 'MJM86' : 'BJW';
+  const logoPath = `/assets/${selectedStore}-logo.png`;
+  
   return (
     <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm backdrop-blur-md bg-gray-800/90">
         <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')}>
-            <div className={`${isAdmin ? 'bg-purple-600' : 'bg-blue-600'} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform`}>
-                {isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />}
+            <div className="bg-gray-700/50 p-2 rounded-xl shadow-md group-hover:scale-105 transition-transform border border-gray-600/50">
+                <img 
+                  src={logoPath} 
+                  alt={storeName}
+                  className="w-10 h-10 object-contain"
+                  onError={(e) => {
+                    // Fallback to icon if image fails
+                    const target = e.target as HTMLImageElement;
+                    target.style.display = 'none';
+                    const parent = target.parentElement;
+                    if (parent) {
+                      const icon = document.createElement('div');
+                      icon.className = `${isAdmin ? 'text-purple-400' : 'text-blue-400'}`;
+                      icon.innerHTML = isAdmin ? '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="m9 12 2 2 4-4"></path></svg>' : '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><circle cx="6" cy="6" r="4"></circle><path d="M2 18h4v4H2z"></path></svg>';
+                      parent.appendChild(icon);
+                    }
+                  }}
+                />
             </div>
             <div>
-                <div className="font-bold leading-none text-gray-100 text-lg">BJW</div>
+                <div className="font-bold leading-none text-gray-100 text-lg">{storeName}</div>
                 <div className="text-[10px] font-bold text-gray-400 leading-none mt-0.5">Autopart</div>
                 <div className="text-[9px] text-gray-500 leading-none">Sukucadang Mobil</div>
                 <div className={`text-[9px] font-bold mt-1 px-1.5 py-0.5 rounded-md inline-block ${isAdmin ? 'bg-purple-900/30 text-purple-300 border border-purple-800' : 'bg-blue-900/30 text-blue-300 border border-blue-800'}`}>
