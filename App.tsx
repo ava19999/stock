@@ -32,9 +32,9 @@ const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 
 const AppContent: React.FC = () => {
   // --- STATE ---
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(true); // Auto-login enabled
   const [isAdmin, setIsAdmin] = useState(false);
-  const [loginName, setLoginName] = useState('');
+  const [loginName, setLoginName] = useState('Guest'); // Default guest name
   const [loginPass, setLoginPass] = useState('');
 
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -65,7 +65,7 @@ const AppContent: React.FC = () => {
     if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
     setMyCustomerId(cId);
     const savedName = localStorage.getItem('stockmaster_customer_name');
-    if(savedName) { setLoginName(savedName); setIsAuthenticated(true); }
+    if(savedName) { setLoginName(savedName); } // Keep authenticated state as true
     refreshData();
   }, []);
 
