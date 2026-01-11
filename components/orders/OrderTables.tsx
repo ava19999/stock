@@ -127,7 +127,7 @@ const OfflineOrderForm: React.FC<OfflineOrderFormProps> = ({ items, onRefresh })
         }
 
         const newItem: OfflineOrderItem = {
-            id: `offline-${Date.now()}-${Math.random()}`,
+            id: generateId(),
             tanggal: currentItem.tanggal || new Date().toISOString().split('T')[0],
             pelanggan: currentItem.pelanggan || '',
             tempo: currentItem.tempo || 'CASH',
@@ -221,9 +221,9 @@ const OfflineOrderForm: React.FC<OfflineOrderFormProps> = ({ items, onRefresh })
                         lastUpdated: Date.now(),
                         initialStock: inventoryItem?.initialStock || 0,
                         qtyIn: inventoryItem?.qtyIn || 0,
-                        qtyOut: (inventoryItem?.qtyOut || 0) + item.qtyKeluar,
+                        qtyOut: inventoryItem?.qtyOut || 0,
                         costPrice: inventoryItem?.costPrice || 0,
-                        kingFanoPrice: 0,
+                        kingFanoPrice: inventoryItem?.price || 0, // Use regular price for offline orders
                     };
                 }),
                 totalAmount: orderItems.reduce((sum, item) => sum + item.totalHarga, 0),
@@ -251,7 +251,7 @@ const OfflineOrderForm: React.FC<OfflineOrderFormProps> = ({ items, onRefresh })
             setSearchTerm('');
             
             if (onRefresh) onRefresh();
-            alert('Pesanan offline berhasil diproses ke tab Terjual!');
+            console.log('Pesanan offline berhasil diproses ke tab Terjual!');
         } catch (error) {
             console.error('Error processing offline order:', error);
             setValidationError('Gagal memproses pesanan. Silakan coba lagi.');
