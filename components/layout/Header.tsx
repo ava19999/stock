@@ -26,19 +26,24 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const storeConfig = getStoreConfig(selectedStore);
   
-  // Dynamic colors based on store
-  const primaryColor = isAdmin 
-    ? 'purple' 
-    : (selectedStore === 'mjm' ? 'yellow' : 'red');
-  const secondaryColor = isAdmin 
-    ? 'purple' 
-    : (selectedStore === 'mjm' ? 'cyan' : 'blue');
+  // Dynamic colors based on store - using complete class names for Tailwind
+  const iconBgClass = isAdmin 
+    ? 'bg-purple-600' 
+    : (selectedStore === 'mjm' ? 'bg-yellow-400' : 'bg-red-500');
+  
+  const navActiveClass = isAdmin 
+    ? 'bg-purple-900/30 text-purple-300 ring-1 ring-purple-800'
+    : (selectedStore === 'mjm' ? 'bg-yellow-900/30 text-yellow-300 ring-1 ring-yellow-800' : 'bg-red-900/30 text-red-300 ring-1 ring-red-800');
+  
+  const badgeClass = isAdmin
+    ? 'bg-purple-900/30 text-purple-300 border border-purple-800'
+    : (selectedStore === 'mjm' ? 'bg-yellow-900/30 text-yellow-300 border border-yellow-800' : 'bg-red-900/30 text-red-300 border border-red-800');
   
   return (
     <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm backdrop-blur-md bg-gray-800/90">
         <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')}>
             {/* Store Logo or Icon */}
-            <div className={`${isAdmin ? 'bg-purple-600' : `bg-${storeConfig.colors.primary}`} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform flex items-center justify-center overflow-hidden`}>
+            <div className={`${iconBgClass} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform flex items-center justify-center overflow-hidden`}>
                 {storeConfig.logo && storeConfig.logo !== '/assets/mjm-logo.png' && storeConfig.logo !== '/assets/bjw-logo.png' ? (
                     <img src={storeConfig.logo} alt={storeConfig.name} className="w-5 h-5 object-contain" onError={(e) => {
                         // Fallback to icon if image fails to load
@@ -55,7 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="font-bold leading-none text-gray-100 text-lg">{storeConfig.name}</div>
                 <div className="text-[10px] font-bold text-gray-400 leading-none mt-0.5">AUTOPART</div>
                 <div className="text-[9px] text-gray-500 leading-none">{storeConfig.subtitle}</div>
-                <div className={`text-[9px] font-bold mt-1 px-1.5 py-0.5 rounded-md inline-block ${isAdmin ? 'bg-purple-900/30 text-purple-300 border border-purple-800' : `bg-${primaryColor}-900/30 text-${primaryColor}-300 border border-${primaryColor}-800`}`}>
+                <div className={`text-[9px] font-bold mt-1 px-1.5 py-0.5 rounded-md inline-block ${badgeClass}`}>
                     {isAdmin ? 'ADMIN ACCESS' : 'STORE FRONT'}
                 </div>
             </div>
@@ -77,8 +82,8 @@ export const Header: React.FC<HeaderProps> = ({
                 </>
             ) : (
                 <>
-                  <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?`bg-${primaryColor}-900/30 text-${primaryColor}-300 ring-1 ring-${primaryColor}-800`:'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><Home size={18}/> Belanja</button>
-                  <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?`bg-${primaryColor}-900/30 text-${primaryColor}-300 ring-1 ring-${primaryColor}-800`:'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}>
+                  <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?navActiveClass:'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><Home size={18}/> Belanja</button>
+                  <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?navActiveClass:'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}>
                     <ClipboardList size={18}/> Pesanan {myPendingOrdersCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-gray-900"></span>}
                   </button>
                 </>

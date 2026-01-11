@@ -46,20 +46,26 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     <div className="space-y-1.5">
                         <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider ml-1">Pilih Toko</label>
                         <div className="grid grid-cols-2 gap-2">
-                            {Object.values(STORE_CONFIG).map((store) => (
-                                <button
-                                    key={store.id}
-                                    type="button"
-                                    onClick={() => setSelectedStore(store.id)}
-                                    className={`py-3 px-4 rounded-xl font-bold transition-all ${
-                                        selectedStore === store.id
-                                            ? `bg-${store.colors.primary} text-gray-900 ring-2 ring-${store.colors.secondary} shadow-lg`
-                                            : 'bg-gray-700/50 text-gray-400 hover:bg-gray-700 border border-gray-600'
-                                    }`}
-                                >
-                                    {store.name}
-                                </button>
-                            ))}
+                            {Object.values(STORE_CONFIG).map((store) => {
+                                const isSelected = selectedStore === store.id;
+                                // Use complete class names for Tailwind
+                                const buttonClass = isSelected
+                                    ? (store.id === 'mjm' 
+                                        ? 'bg-yellow-400 text-gray-900 ring-2 ring-cyan-400 shadow-lg'
+                                        : 'bg-red-500 text-white ring-2 ring-blue-500 shadow-lg')
+                                    : 'bg-gray-700/50 text-gray-400 hover:bg-gray-700 border border-gray-600';
+                                
+                                return (
+                                    <button
+                                        key={store.id}
+                                        type="button"
+                                        onClick={() => setSelectedStore(store.id)}
+                                        className={`py-3 px-4 rounded-xl font-bold transition-all ${buttonClass}`}
+                                    >
+                                        {store.name}
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
                     <div className="space-y-1.5">
