@@ -196,18 +196,70 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
     return { data: baseItems, count: count || 0 };
 };
 
+// Fetch all inventory with filters (no pagination) - for sorting
+export const fetchInventoryAllFiltered = async (search: string, filter: string = 'all', brand?: string, application?: string): Promise<InventoryItem[]> => {
+    let query = supabase.from(TABLE_NAME).select('*');
+    if (search) query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`);
+    if (brand && brand.trim() !== '') query = query.ilike('brand', `%${brand}%`);
+    if (application && application.trim() !== '') query = query.ilike('application', `%${application}%`);
+    if (filter === 'low') query = query.gt('quantity', 0).lt('quantity', 4); 
+    else if (filter === 'empty') query = query.or('quantity.lte.0,quantity.is.null');
+    
+    const { data, error } = await query.order('date', { ascending: false, nullsFirst: false });
+    if (error) { console.error(error); return []; }
+    
+    const baseItems = (data || []).map(mapBaseItem);
+    if (baseItems.length > 0) {
+        try {
+            const partNumbers = baseItems.map(i => i.partNumber).filter(Boolean);
+            const [costMap, sellMap, photoMapResult] = await Promise.all([fetchLatestCostPrices(partNumbers), fetchLatestSellingPrices(partNumbers), fetchPhotos(partNumbers)]);
+            const photoMap = photoMapResult || {};
+            baseItems.forEach(item => {
+                const key = normalizeKey(item.partNumber);
+                if (costMap && costMap[key] !== undefined) item.costPrice = costMap[key];
+                if (sellMap && sellMap[key] !== undefined) item.price = sellMap[key];
+                if (photoMap && photoMap[key] && photoMap[key].length > 0) { item.images = photoMap[key]; item.imageUrl = photoMap[key][0]; }
+            });
+        } catch (e) {}
+    }
+    return baseItems;
+};
+
 // 2. Fetch Shop / Beranda (DENGAN FIX KATEGORI & ORDERING)
-export const fetchShopItems = async (page: number, limit: number, search: string, cat: string) => {
+export const fetchShopItems = async (
+    page: number, 
+    limit: number, 
+    search: string, 
+    cat: string,
+    partNumberSearch?: string,
+    nameSearch?: string,
+    brandSearch?: string,
+    applicationSearch?: string
+) => {
     // Ambil hanya barang yg ada stoknya
     let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' }).gt('quantity', 0);
     
-    // Filter Pencarian
+    // Filter Pencarian Umum (search all fields)
     if (search && search.trim() !== '') {
         const searchTerm = search.trim();
-        query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%`);
+        query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%,brand.ilike.%${searchTerm}%,application.ilike.%${searchTerm}%`);
     }
     
-    // Filter Kategori (Fix Logic)
+    // Filter Individual Fields
+    if (partNumberSearch && partNumberSearch.trim() !== '') {
+        query = query.ilike('part_number', `%${partNumberSearch.trim()}%`);
+    }
+    if (nameSearch && nameSearch.trim() !== '') {
+        query = query.ilike('name', `%${nameSearch.trim()}%`);
+    }
+    if (brandSearch && brandSearch.trim() !== '') {
+        query = query.ilike('brand', `%${brandSearch.trim()}%`);
+    }
+    if (applicationSearch && applicationSearch.trim() !== '') {
+        query = query.ilike('application', `%${applicationSearch.trim()}%`);
+    }
+    
+    // Filter Kategori (Fix Logic) - Keep for backward compatibility
     if (cat && cat !== 'All' && cat.trim() !== '') {
         const categoryTerm = cat.trim();
         query = query.or(`brand.ilike.%${categoryTerm}%,application.ilike.%${categoryTerm}%`);

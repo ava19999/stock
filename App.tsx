@@ -32,16 +32,16 @@ const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 
 const AppContent: React.FC = () => {
   // --- STATE ---
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [loginName, setLoginName] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(true); // Auto-login enabled
+  const [isAdmin, setIsAdmin] = useState(true); // Auto-login as admin
+  const [loginName, setLoginName] = useState('ava'); // Admin username
   const [loginPass, setLoginPass] = useState('');
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [history, setHistory] = useState<StockHistory[]>([]);
   const [loading, setLoading] = useState(false); 
-  const [activeView, setActiveView] = useState<ActiveView>('shop');
+  const [activeView, setActiveView] = useState<ActiveView>('inventory'); // Start at inventory for admin
   
   const [bannerUrl, setBannerUrl] = useState<string>('');
   const [myCustomerId, setMyCustomerId] = useState<string>('');
@@ -65,7 +65,7 @@ const AppContent: React.FC = () => {
     if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
     setMyCustomerId(cId);
     const savedName = localStorage.getItem('stockmaster_customer_name');
-    if(savedName) { setLoginName(savedName); setIsAuthenticated(true); }
+    if(savedName) { setLoginName(savedName); } // Keep authenticated state as true
     refreshData();
   }, []);
 
