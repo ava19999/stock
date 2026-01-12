@@ -3,6 +3,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { HashRouter as Router } from 'react-router-dom';
 import { CloudLightning } from 'lucide-react';
 
+// --- VALIDATION UTILITY (Development only) ---
+import './utils/databaseValidation';
+
 // --- COMPONENTS ---
 import { Dashboard } from './components/Dashboard';
 import { ItemForm } from './components/ItemForm';
