@@ -24,6 +24,8 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex =
     const initialChanged = initialIndex !== prevInitialIndexRef.current;
     if (images && images.length > 0 && (justOpened || initialChanged)) {
       setCurrentIndex(Math.min(initialIndex, images.length - 1));
+    } else if (justOpened || initialChanged) {
+      setCurrentIndex(0);
     }
     wasOpenRef.current = true;
     prevInitialIndexRef.current = initialIndex;
