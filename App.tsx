@@ -21,6 +21,7 @@ import { ActiveView } from './types/ui';
 
 // --- CONTEXT ---
 import { StoreProvider, useStore } from './context/StoreContext';
+import { STORE_CONFIGS } from './types/store';
 
 // --- TYPES & SERVICES ---
 import { InventoryItem, InventoryFormData, CartItem, Order, StockHistory, OrderStatus } from './types';
@@ -61,6 +62,13 @@ const AppContent: React.FC = () => {
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => setToast({msg, type});
 
+  // Helper to get current store name
+  const getStoreName = () => {
+    return selectedStore && selectedStore in STORE_CONFIGS 
+      ? STORE_CONFIGS[selectedStore].name 
+      : '';
+  };
+
   const isKingFano = useMemo(() => loginName.trim().toLowerCase() === 'king fano', [loginName]);
   const pendingOrdersCount = orders.filter(o => o.status === 'pending').length;
   const myPendingOrdersCount = orders.filter(o => o.customerName === loginName && o.status === 'pending').length;
@@ -80,7 +88,9 @@ const AppContent: React.FC = () => {
   const refreshData = async () => {
     setLoading(true);
     try {
-        const inventoryData = await fetchInventory();
+        const storeName = getStoreName();
+        
+        const inventoryData = await fetchInventory(storeName);
         const bannerItem = inventoryData.find(i => i.partNumber === BANNER_PART_NUMBER);
         if (bannerItem) setBannerUrl(bannerItem.imageUrl);
         setItems(inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER));
@@ -127,22 +137,24 @@ const AppContent: React.FC = () => {
   // --- HANDLERS DATA ---
   const handleSaveItem = async (data: InventoryFormData) => {
       setLoading(true);
+      const storeName = getStoreName();
       const newQuantity = Number(data.quantity) || 0;
       let updatedItem: InventoryItem = { ...editItem, ...data, quantity: newQuantity, initialStock: data.initialStock || 0, qtyIn: data.qtyIn || 0, qtyOut: data.qtyOut || 0, lastUpdated: Date.now() };
 
       if (editItem) {
-          if (await updateInventory(updatedItem)) { showToast('Update berhasil!'); refreshData(); }
+          if (await updateInventory(updatedItem, undefined, storeName)) { showToast('Update berhasil!'); refreshData(); }
       } else {
           if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number sudah ada!', 'error'); setLoading(false); return; }
-          if (await addInventory(data)) { showToast('Tersimpan!'); refreshData(); }
+          if (await addInventory(data, storeName)) { showToast('Tersimpan!'); refreshData(); }
       }
       setIsEditing(false); setEditItem(null); setLoading(false);
   };
 
   // --- FIX: FUNGSI UPDATE BANNER YANG SUDAH DIPERBAIKI ---
   const handleUpdateBanner = async (base64: string) => {
+      const storeName = getStoreName();
       // 1. Cek dulu apakah banner sudah ada di database untuk mendapatkan ID-nya
-      const existingItem = await getItemByPartNumber(BANNER_PART_NUMBER);
+      const existingItem = await getItemByPartNumber(BANNER_PART_NUMBER, storeName);
 
       const bannerData: any = { 
           partNumber: BANNER_PART_NUMBER, 
@@ -165,11 +177,11 @@ const AppContent: React.FC = () => {
       if (existingItem) {
           // Jika sudah ada, gunakan ID yang ditemukan untuk update
           const updateData = { ...bannerData, id: existingItem.id };
-          const result = await updateInventory(updateData);
+          const result = await updateInventory(updateData, undefined, storeName);
           success = !!result;
       } else {
           // Jika belum ada, buat baru
-          const result = await addInventory(bannerData);
+          const result = await addInventory(bannerData, storeName);
           success = !!result;
       }
 
@@ -184,7 +196,8 @@ const AppContent: React.FC = () => {
   const handleDelete = async (id: string) => {
       if(confirm('Hapus Barang Permanen?')) {
           setLoading(true);
-          if (await deleteInventory(id)) { showToast('Dihapus'); refreshData(); }
+          const storeName = getStoreName();
+          if (await deleteInventory(id, storeName)) { showToast('Dihapus'); refreshData(); }
           setLoading(false);
       }
   }
@@ -220,6 +233,7 @@ const AppContent: React.FC = () => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
       setLoading(true);
+      const storeName = getStoreName();
       const today = new Date().toISOString().split('T')[0];
       let pureName = order.customerName;
       let resiVal = '-'; let shopVal = ''; let ecommerceVal = 'APLIKASI';
@@ -232,12 +246,12 @@ const AppContent: React.FC = () => {
       for (const retur of returnedItems) {
           const itemInOrder = order.items.find(i => i.id === retur.itemId);
           if (!itemInOrder) continue;
-          const currentItem = await getItemByPartNumber(itemInOrder.partNumber);
+          const currentItem = await getItemByPartNumber(itemInOrder.partNumber, storeName);
           if (currentItem) {
               const restoreQty = retur.qty;
               const newQuantity = currentItem.quantity + restoreQty;
               const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
-              await updateInventory(itemToUpdate);
+              await updateInventory(itemToUpdate, undefined, storeName);
               await addBarangMasuk({ tanggal: today, tempo: `${resiVal} / ${shopVal}`, ecommerce: ecommerceVal, keterangan: `${pureName} (RETUR)`, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name, brand: itemToUpdate.brand, application: itemToUpdate.application, rak: itemToUpdate.shelf, stockAhir: newQuantity, qtyMasuk: restoreQty, hargaSatuan: itemInOrder.customPrice ?? itemInOrder.price, hargaTotal: (itemInOrder.customPrice ?? itemInOrder.price) * restoreQty });
           }
       }
@@ -260,6 +274,7 @@ const AppContent: React.FC = () => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
       
+      const storeName = getStoreName();
       let pureName = order.customerName; let resiVal = '-'; let shopVal = ''; let ecommerceVal = 'APLIKASI';
       const resiMatch = pureName.match(/\(Resi: (.*?)\)/); if (resiMatch) { resiVal = resiMatch[1]; pureName = pureName.replace(/\(Resi:.*?\)/, ''); }
       const shopMatch = pureName.match(/\(Toko: (.*?)\)/); if (shopMatch) { shopVal = shopMatch[1]; pureName = pureName.replace(/\(Toko:.*?\)/, ''); }
@@ -271,12 +286,12 @@ const AppContent: React.FC = () => {
       if (order.status === 'pending' && newStatus === 'processing') {
           if (await updateOrderStatusService(orderId, newStatus)) { 
               for (const orderItem of order.items) {
-                  const currentItem = await getItemByPartNumber(orderItem.partNumber);
+                  const currentItem = await getItemByPartNumber(orderItem.partNumber, storeName);
                   if (currentItem) {
                       const qtySold = orderItem.cartQuantity;
                       const newQuantity = Math.max(0, currentItem.quantity - qtySold);
                       const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: newQuantity, lastUpdated: Date.now() };
-                      await updateInventory(itemToUpdate);
+                      await updateInventory(itemToUpdate, undefined, storeName);
                       await addBarangKeluar({ tanggal: today, kodeToko: 'APP', tempo: shopVal, ecommerce: ecommerceVal, customer: pureName, partNumber: currentItem.partNumber, name: currentItem.name, brand: currentItem.brand, application: currentItem.application, rak: currentItem.shelf, stockAhir: newQuantity, qtyKeluar: qtySold, hargaSatuan: orderItem.customPrice ?? orderItem.price, hargaTotal: (orderItem.customPrice ?? orderItem.price) * qtySold, resi: resiVal });
                   }
               }
@@ -287,12 +302,12 @@ const AppContent: React.FC = () => {
           if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
               if (order.status !== 'pending') {
                   for (const orderItem of order.items) {
-                      const currentItem = await getItemByPartNumber(orderItem.partNumber);
+                      const currentItem = await getItemByPartNumber(orderItem.partNumber, storeName);
                       if (currentItem) {
                           const restoreQty = orderItem.cartQuantity;
                           const newQuantity = currentItem.quantity + restoreQty;
                           const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
-                          await updateInventory(itemToUpdate);
+                          await updateInventory(itemToUpdate, undefined, storeName);
                           await addBarangMasuk({ tanggal: today, tempo: `${resiVal} / ${shopVal}`, ecommerce: ecommerceVal, keterangan: `${pureName} (RETUR FULL)`, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name, brand: itemToUpdate.brand, application: itemToUpdate.application, rak: itemToUpdate.shelf, stockAhir: newQuantity, qtyMasuk: restoreQty, hargaSatuan: orderItem.customPrice ?? orderItem.price, hargaTotal: (orderItem.customPrice ?? orderItem.price) * restoreQty });
                       }
                   }
