@@ -12,6 +12,7 @@ interface ImageViewerProps {
 export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex = 0, isOpen, onClose }) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const wasOpenRef = useRef(false);
+  const prevInitialIndexRef = useRef(initialIndex);
 
   useEffect(() => {
     if (!isOpen) { 
@@ -21,12 +22,14 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex =
     if (!images || images.length === 0) return;
 
     const justOpened = !wasOpenRef.current;
-    const shouldSyncIndex = justOpened || initialIndex !== currentIndex;
+    const initialChanged = initialIndex !== prevInitialIndexRef.current;
+    const shouldSyncIndex = justOpened || initialChanged;
     if (shouldSyncIndex) {
       setCurrentIndex(Math.min(initialIndex, images.length - 1));
     }
     wasOpenRef.current = true;
-  }, [isOpen, initialIndex, images]);
+    prevInitialIndexRef.current = initialIndex;
+  }, [isOpen, initialIndex, images.length]);
 
   // Jika tidak ada gambar atau modal tertutup, return null
   if (!isOpen || !images || images.length === 0) return null;
