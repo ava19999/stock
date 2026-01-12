@@ -4,7 +4,6 @@ import { InventoryItem, CartItem } from '../types';
 import { fetchShopItems } from '../services/supabaseService'; 
 import { compressImage } from '../utils';
 import { ShoppingCart } from 'lucide-react';
-import { StoreId } from '../config/storeConfig';
 
 import { ImageCropper } from './shop/ImageCropper';
 import { ShopFilterBar } from './shop/ShopFilterBar';
@@ -24,8 +23,7 @@ interface ShopViewProps {
     onRemoveFromCart: (itemId: string) => void; 
     onUpdateCartItem: (itemId: string, changes: Partial<CartItem>) => void; 
     onCheckout: (customerName: string) => void; 
-    onUpdateBanner: (base64: string) => Promise<void>;
-    selectedStore?: StoreId | null;
+    onUpdateBanner: (base64: string) => Promise<void>; 
 }
 
 export const ShopView: React.FC<ShopViewProps> = ({ 
@@ -37,8 +35,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
     onRemoveFromCart, 
     onUpdateCartItem, 
     onCheckout, 
-    onUpdateBanner,
-    selectedStore
+    onUpdateBanner 
 }) => {
   // State Data
   const [shopItems, setShopItems] = useState<InventoryItem[]>([]);
@@ -257,7 +254,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
         customerName={receiptData?.customerName || ''}
         tempo={receiptData?.tempo || ''}
         note={receiptData?.note || ''}
-        selectedStore={selectedStore}
       />
     </div>
   );

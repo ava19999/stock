@@ -4,7 +4,6 @@ import { CartItem } from '../../types';
 import { formatRupiah } from '../../utils';
 import { X, Printer, Share2 } from 'lucide-react';
 import html2canvas from 'html2canvas';
-import { StoreId, getStoreConfig } from '../../config/storeConfig';
 
 interface ReceiptModalProps {
     isOpen: boolean;
@@ -13,14 +12,12 @@ interface ReceiptModalProps {
     customerName: string;
     tempo: string;
     note: string;
-    selectedStore?: StoreId | null;
 }
 
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({ 
-    isOpen, onClose, cart, customerName, tempo, note, selectedStore 
+    isOpen, onClose, cart, customerName, tempo, note 
 }) => {
     const receiptRef = useRef<HTMLDivElement>(null);
-    const storeConfig = getStoreConfig(selectedStore || 'bjw');
 
     if (!isOpen) return null;
 
@@ -54,7 +51,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         if (!imageData) return;
 
         const link = document.createElement('a');
-        link.download = `resi-${storeConfig.name}-${customerName.replace(/\s+/g, '-')}-${Date.now()}.jpg`;
+        link.download = `resi-${customerName.replace(/\s+/g, '-')}-${Date.now()}.jpg`;
         link.href = imageData;
         link.click();
     };
@@ -72,7 +69,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <!DOCTYPE html>
             <html>
             <head>
-                <title>${storeConfig.fullName} - Resi ${customerName}</title>
+                <title>BJWAutopart - Resi ${customerName}</title>
                 <style>
                     body {
                         font-family: Arial, sans-serif;
@@ -106,21 +103,21 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         // Convert base64 to blob
         const response = await fetch(imageData);
         const blob = await response.blob();
-        const file = new File([blob], `${storeConfig.fullName}-${customerName}.jpg`, { type: 'image/jpeg' });
+        const file = new File([blob], `BJWAutopart-${customerName}.jpg`, { type: 'image/jpeg' });
 
         if (navigator.share && navigator.canShare?.({ files: [file] })) {
             try {
                 await navigator.share({
                     files: [file],
-                    title: `${storeConfig.fullName} - Resi Pesanan`,
-                    text: `Resi pesanan ${storeConfig.fullName} untuk ${customerName}`,
+                    title: 'BJWAutopart - Resi Pesanan',
+                    text: `Resi pesanan BJWAutopart untuk ${customerName}`,
                 });
             } catch (error) {
                 console.log('Share cancelled or failed:', error);
             }
         } else {
             // Fallback: copy to clipboard or open WhatsApp Web
-            const whatsappText = encodeURIComponent(`${storeConfig.fullName} - Resi Pesanan\nCustomer: ${customerName}\nTotal: ${formatRupiah(cartTotal)}`);
+            const whatsappText = encodeURIComponent(`BJWAutopart - Resi Pesanan\nCustomer: ${customerName}\nTotal: ${formatRupiah(cartTotal)}`);
             window.open(`https://wa.me/?text=${whatsappText}`, '_blank');
         }
     };
@@ -130,7 +127,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose}></div>
             <div className="bg-gray-800 rounded-3xl shadow-2xl w-full max-w-md relative overflow-hidden animate-in zoom-in-95 border border-gray-700 max-h-[90vh] overflow-y-auto">
                 <div className="bg-gray-900 px-6 py-4 border-b border-gray-700 flex justify-between items-center sticky top-0 z-10">
-                    <h3 className="text-lg font-bold text-gray-100">{storeConfig.fullName} - Resi Pesanan</h3>
+                    <h3 className="text-lg font-bold text-gray-100">BJWAutopart - Resi Pesanan</h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-white">
                         <X size={20}/>
                     </button>
@@ -140,7 +137,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <div ref={receiptRef} className="bg-white p-6">
                     {/* Header */}
                     <div className="text-center mb-4 border-b-2 border-gray-800 pb-3">
-                        <h1 className="text-xl font-bold text-gray-900 mb-0.5">{storeConfig.fullName}</h1>
+                        <h1 className="text-xl font-bold text-gray-900 mb-0.5">BJWAutopart</h1>
                         <p className="text-xs text-gray-600">{currentDate}</p>
                     </div>
 

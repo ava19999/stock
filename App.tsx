@@ -13,10 +13,14 @@ import { QuickInputView } from './components/QuickInputView';
 
 // --- NEW SPLIT COMPONENTS ---
 import { Toast } from './components/common/Toast';
-import { LoginView } from './components/auth/LoginView';
+import { StoreSelector } from './components/auth/StoreSelector';
+import { LoginPage } from './components/auth/LoginPage';
 import { Header } from './components/layout/Header';
 import { MobileNav } from './components/layout/MobileNav';
 import { ActiveView } from './types/ui';
+
+// --- CONTEXT ---
+import { StoreProvider, useStore } from './context/StoreContext';
 
 // --- TYPES & SERVICES ---
 import { InventoryItem, InventoryFormData, CartItem, Order, StockHistory, OrderStatus } from './types';
@@ -26,19 +30,18 @@ import {
   fetchHistory, addBarangMasuk, addBarangKeluar, updateOrderData 
 } from './services/supabaseService';
 import { generateId } from './utils';
-import { StoreId } from './config/storeConfig';
 
 const CUSTOMER_ID_KEY = 'stockmaster_my_customer_id';
 const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
-const SELECTED_STORE_KEY = 'stockmaster_selected_store';
 
 const AppContent: React.FC = () => {
+  // --- STORE CONTEXT ---
+  const { selectedStore, userRole, userName, setStore, setUserRole, setUserName, logout: logoutStore } = useStore();
+  
   // --- STATE ---
-  const [isAuthenticated, setIsAuthenticated] = useState(true); // Auto-login enabled
-  const [isAdmin, setIsAdmin] = useState(true); // Auto-login as admin
-  const [loginName, setLoginName] = useState('ava'); // Admin username
-  const [loginPass, setLoginPass] = useState('');
-  const [selectedStore, setSelectedStore] = useState<StoreId>('bjw'); // Default store
+  const isAuthenticated = selectedStore !== null && userRole !== null;
+  const isAdmin = userRole === 'admin';
+  const loginName = userName;
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -67,17 +70,12 @@ const AppContent: React.FC = () => {
     let cId = localStorage.getItem(CUSTOMER_ID_KEY);
     if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
     setMyCustomerId(cId);
-    const savedName = localStorage.getItem('stockmaster_customer_name');
-    if(savedName) { setLoginName(savedName); } // Keep authenticated state as true
     
-    // Load selected store from localStorage
-    const savedStore = localStorage.getItem(SELECTED_STORE_KEY) as StoreId | null;
-    if (savedStore && (savedStore === 'mjm' || savedStore === 'bjw')) {
-      setSelectedStore(savedStore);
+    // Only refresh data if authenticated
+    if (isAuthenticated) {
+      refreshData();
     }
-    
-    refreshData();
-  }, []);
+  }, [isAuthenticated]);
 
   const refreshData = async () => {
     setLoading(true);
@@ -99,37 +97,31 @@ const AppContent: React.FC = () => {
   };
 
   // --- HANDLERS AUTH ---
-  const handleGlobalLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (loginName.toLowerCase() === 'ava' && loginPass === '9193') {
-        setIsAdmin(true); setIsAuthenticated(true); setActiveView('inventory');
-        setMyCustomerId('ADMIN-AVA'); showToast('Login Admin Berhasil'); 
-        refreshData();
-    } else if (loginName.trim() !== '') {
-        loginAsCustomer(loginName);
-    } else { showToast('Masukkan Nama', 'error'); }
+  const handleSelectStore = (store: 'mjm' | 'bjw') => {
+    setStore(store);
   };
 
-  const loginAsCustomer = (name: string) => {
-      setIsAdmin(false); setIsAuthenticated(true); setActiveView('shop');
-      localStorage.setItem('stockmaster_customer_name', name); 
-      if (name.toLowerCase() === 'king fano') showToast(`Selamat Datang, King Fano! Harga Khusus Aktif.`);
-      else showToast(`Selamat Datang, ${name}!`);
+  const handleLogin = (role: 'admin' | 'guest', name: string) => {
+    setUserRole(role);
+    setUserName(name);
+    if (role === 'admin') {
+      setActiveView('inventory');
+    } else {
+      setActiveView('shop');
+    }
+    showToast(`Selamat Datang di ${selectedStore?.toUpperCase()}, ${name}!`);
+    refreshData();
+  };
+
+  const handleBackToStoreSelection = () => {
+    setStore(null);
+    setUserRole(null);
+    setUserName('');
   };
 
   const handleLogout = () => { 
-    setIsAuthenticated(false); 
-    setIsAdmin(false); 
-    setLoginName(''); 
-    setLoginPass(''); 
-    localStorage.removeItem('stockmaster_customer_name'); 
-    // Don't remove selected store on logout, keep it for next login
-  };
-  
-  // Save selected store to localStorage whenever it changes
-  const handleStoreChange = (store: StoreId) => {
-    setSelectedStore(store);
-    localStorage.setItem(SELECTED_STORE_KEY, store);
+    logoutStore(); 
+    setActiveView('inventory');
   };
 
   // --- HANDLERS DATA ---
@@ -211,7 +203,9 @@ const AppContent: React.FC = () => {
   };
 
   const doCheckout = async (name: string) => {
-      if (name !== loginName && !isAdmin) { setLoginName(name); localStorage.setItem('stockmaster_customer_name', name); }
+      if (name !== userName && !isAdmin) { 
+        setUserName(name); 
+      }
       const totalAmount = cart.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
       const newOrder: Order = { id: generateId(), customerName: name, items: [...cart], totalAmount: totalAmount, status: 'pending', timestamp: Date.now() };
       
@@ -315,21 +309,33 @@ const AppContent: React.FC = () => {
   // --- RENDERING ---
   if (loading && items.length === 0) return <div className="flex flex-col h-screen items-center justify-center bg-gray-900 font-sans text-gray-400 space-y-6"><div className="relative"><div className="w-16 h-16 border-4 border-gray-700 border-t-blue-500 rounded-full animate-spin"></div><div className="absolute inset-0 flex items-center justify-center"><CloudLightning size={20} className="text-blue-500 animate-pulse" /></div></div><div className="text-center space-y-1"><p className="font-medium text-gray-200">Menghubungkan Database</p><p className="text-xs">Sinkronisasi Supabase...</p></div></div>;
 
-  if (!isAuthenticated) {
-      return <LoginView loginName={loginName} setLoginName={setLoginName} loginPass={loginPass} setLoginPass={setLoginPass} onGlobalLogin={handleGlobalLogin} onGuestLogin={loginAsCustomer} toast={toast} onCloseToast={() => setToast(null)} selectedStore={selectedStore} setSelectedStore={handleStoreChange} />;
+  // Show StoreSelector if no store selected
+  if (!selectedStore) {
+    return <StoreSelector onSelectStore={handleSelectStore} />;
+  }
+
+  // Show LoginPage if store selected but not authenticated
+  if (!isAuthenticated || !userRole) {
+      return (
+        <LoginPage 
+          store={selectedStore} 
+          onLogin={handleLogin} 
+          onBack={handleBackToStoreSelection} 
+        />
+      );
   }
 
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col font-sans text-gray-100">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       
-      <Header isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} loading={loading} onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} loginName={loginName} onLogout={handleLogout} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} selectedStore={selectedStore} />
+      <Header isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} loading={loading} onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} loginName={loginName} onLogout={handleLogout} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} />
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
-        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} selectedStore={selectedStore} />}
+        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
         {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
         {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}
-        {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} items={items} isLoading={loading} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
+        {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} isLoading={loading} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
         {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
         
         {isEditing && isAdmin && (
@@ -346,5 +352,11 @@ const AppContent: React.FC = () => {
   );
 };
 
-const App = () => <Router><AppContent /></Router>;
+const App = () => (
+  <Router>
+    <StoreProvider>
+      <AppContent />
+    </StoreProvider>
+  </Router>
+);
 export default App;
