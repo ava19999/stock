@@ -1,6 +1,7 @@
 // FILE: src/components/QuickInputView.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { InventoryItem } from '../types';
+import { StoreType } from '../types/store';
 import { updateInventory, getItemByPartNumber } from '../services/supabaseService';
 import { createEmptyRow, checkIsRowComplete } from './quickInput/quickInputUtils';
 import { QuickInputRow } from './quickInput/types';
@@ -10,11 +11,12 @@ import { QuickInputTable } from './quickInput/QuickInputTable';
 
 interface QuickInputViewProps {
   items: InventoryItem[];
+  selectedStore?: StoreType;
   onRefresh?: () => void;
   showToast?: (msg: string, type: 'success' | 'error') => void;
 }
 
-export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh, showToast }) => {
+export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, selectedStore, onRefresh, showToast }) => {
   // --- STATE ---
   const [rows, setRows] = useState<QuickInputRow[]>([]);
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
@@ -191,7 +193,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     updateRow(row.id, 'isLoading', true);
 
     try {
-      const existingItem = await getItemByPartNumber(row.partNumber);
+      const existingItem = await getItemByPartNumber(row.partNumber, selectedStore);
       if (!existingItem) {
         updateRow(row.id, 'error', `Item tidak ditemukan`);
         updateRow(row.id, 'isLoading', false);
@@ -206,7 +208,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         costPrice: row.hargaModal || existingItem.costPrice,
         price: row.hargaJual || existingItem.price,
         lastUpdated: Date.now()
-      }, transactionData);
+      }, transactionData, selectedStore);
 
       if (updatedItem) {
         setRows(prev => prev.filter(r => r.id !== row.id));

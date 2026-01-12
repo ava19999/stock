@@ -1,6 +1,7 @@
 // FILE: src/components/Dashboard.tsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
+import { StoreType } from '../types/store';
 import { fetchInventoryPaginated, fetchInventoryStats, fetchInventoryAllFiltered } from '../services/supabaseService';
 import { ItemForm } from './ItemForm';
 import { DashboardStats } from './DashboardStats';
@@ -14,6 +15,7 @@ interface DashboardProps {
   orders: Order[];
   history: StockHistory[];
   refreshTrigger: number;
+  selectedStore?: StoreType;
   onViewOrders: () => void;
   onAddNew: () => void;
   onEdit: (item: InventoryItem) => void;
@@ -21,7 +23,7 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
-  history, refreshTrigger, onDelete 
+  history, refreshTrigger, onDelete, selectedStore 
 }) => {
   // --- STATE ---
   const [localItems, setLocalItems] = useState<InventoryItem[]>([]);
@@ -70,23 +72,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
     
     // If price sorting is active, fetch all data
     if (priceSort !== 'none') {
-      const allData = await fetchInventoryAllFiltered(debouncedSearch, filterType, debouncedBrand, debouncedApp);
+      const allData = await fetchInventoryAllFiltered(debouncedSearch, filterType, debouncedBrand, debouncedApp, selectedStore);
       setAllItems(allData);
       setTotalPages(Math.ceil(allData.length / 50));
     } else {
       // Otherwise, use paginated fetch
       // @ts-ignore
-      const { data, count } = await fetchInventoryPaginated(page, 50, debouncedSearch, filterType, debouncedBrand, debouncedApp);
+      const { data, count } = await fetchInventoryPaginated(page, 50, debouncedSearch, filterType, debouncedBrand, debouncedApp, selectedStore);
       setLocalItems(data);
       setAllItems([]); // Clear all items when not sorting
       setTotalPages(Math.ceil(count / 50));
     }
     
     setLoading(false);
-  }, [page, debouncedSearch, filterType, debouncedBrand, debouncedApp, priceSort]);
+  }, [page, debouncedSearch, filterType, debouncedBrand, debouncedApp, priceSort, selectedStore]);
 
   const loadStats = useCallback(async () => {
-    const invStats = await fetchInventoryStats();
+    const invStats = await fetchInventoryStats(selectedStore);
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const todayIn = history
@@ -184,11 +186,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* 4. MODALS */}
       {showHistoryDetail && (
-        <GlobalHistoryModal type={showHistoryDetail} onClose={() => setShowHistoryDetail(null)} />
+        <GlobalHistoryModal type={showHistoryDetail} selectedStore={selectedStore} onClose={() => setShowHistoryDetail(null)} />
       )}
 
       {selectedItemHistory && (
-        <ItemHistoryModal item={selectedItemHistory} onClose={() => setSelectedItemHistory(null)} />
+        <ItemHistoryModal item={selectedItemHistory} selectedStore={selectedStore} onClose={() => setSelectedItemHistory(null)} />
       )}
     </div>
   );
