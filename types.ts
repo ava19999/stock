@@ -18,6 +18,7 @@ export interface InventoryItem {
   qtyOut: number;
   lastUpdated: number;
   description?: string;
+  toko?: string;         // Store identifier (BJW/MJM)
 }
 
 export interface InventoryFormData {
@@ -35,6 +36,7 @@ export interface InventoryFormData {
   initialStock: number;
   qtyIn: number;
   qtyOut: number;
+  toko?: string;         // Store identifier (BJW/MJM)
 }
 
 export interface StockHistory {

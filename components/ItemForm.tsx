@@ -20,7 +20,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     quantity: 0, shelf: '', price: 0, costPrice: 0,
     ecommerce: '', imageUrl: '', 
     images: [], 
-    initialStock: 0, qtyIn: 0, qtyOut: 0
+    initialStock: 0, qtyIn: 0, qtyOut: 0, toko: ''
   });
 
   // Stock Adjustment State
@@ -47,12 +47,11 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         price: initialData.price, costPrice: initialData.costPrice, ecommerce: initialData.ecommerce || '',
         imageUrl: initialData.imageUrl, 
         // SAFETY CHECK: Gunakan fallback ke array kosong
-        images: initialData.images || (initialData.imageUrl ? [initialData.imageUrl] : []), 
-        initialStock: initialData.initialStock,
-        qtyIn: initialData.qtyIn, qtyOut: initialData.qtyOut
+        images: initialData.images || (initialData.imageUrl ? [initialData.imageUrl] : []),
+        initialStock: initialData.initialStock || 0, qtyIn: initialData.qtyIn || 0, qtyOut: initialData.qtyOut || 0,
+        toko: initialData.toko || ''
       });
-      // Safety check untuk preview juga
-      setImagePreview(initialData.imageUrl || (initialData.images && initialData.images[0]) || null);
+      setImagePreview(initialData.imageUrl || null);
     }
   }, [initialData]);
 

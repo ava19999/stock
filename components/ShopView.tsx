@@ -24,6 +24,7 @@ interface ShopViewProps {
     onUpdateCartItem: (itemId: string, changes: Partial<CartItem>) => void; 
     onCheckout: (customerName: string) => void; 
     onUpdateBanner: (base64: string) => Promise<void>; 
+    currentStore: string;
 }
 
 export const ShopView: React.FC<ShopViewProps> = ({ 
@@ -35,7 +36,8 @@ export const ShopView: React.FC<ShopViewProps> = ({
     onRemoveFromCart, 
     onUpdateCartItem, 
     onCheckout, 
-    onUpdateBanner 
+    onUpdateBanner,
+    currentStore 
 }) => {
   // State Data
   const [shopItems, setShopItems] = useState<InventoryItem[]>([]);
@@ -100,7 +102,8 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 debouncedPartNumber,
                 debouncedName,
                 debouncedBrand,
-                debouncedApplication
+                debouncedApplication,
+                currentStore
             );
             
             setShopItems(data || []);
@@ -115,7 +118,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
     };
 
     loadData();
-  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication]); // Hanya jalan jika ini berubah
+  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, currentStore]); // Hanya jalan jika ini berubah
 
   // --- Banner Upload Handlers ---
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { 

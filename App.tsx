@@ -36,6 +36,7 @@ const AppContent: React.FC = () => {
   const [isAdmin, setIsAdmin] = useState(true); // Auto-login as admin
   const [loginName, setLoginName] = useState('ava'); // Admin username
   const [loginPass, setLoginPass] = useState('');
+  const [selectedStore, setSelectedStore] = useState<string>('BJW'); // Store selection (BJW/MJM)
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -65,14 +66,23 @@ const AppContent: React.FC = () => {
     if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
     setMyCustomerId(cId);
     const savedName = localStorage.getItem('stockmaster_customer_name');
+    const savedStore = localStorage.getItem('stockmaster_selected_store');
     if(savedName) { setLoginName(savedName); } // Keep authenticated state as true
+    if(savedStore) { setSelectedStore(savedStore); }
     refreshData();
   }, []);
+
+  // Refresh data when store changes
+  useEffect(() => {
+    if (isAuthenticated) {
+      refreshData();
+    }
+  }, [selectedStore]);
 
   const refreshData = async () => {
     setLoading(true);
     try {
-        const inventoryData = await fetchInventory();
+        const inventoryData = await fetchInventory(selectedStore);
         const bannerItem = inventoryData.find(i => i.partNumber === BANNER_PART_NUMBER);
         if (bannerItem) setBannerUrl(bannerItem.imageUrl);
         setItems(inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER));
@@ -93,7 +103,9 @@ const AppContent: React.FC = () => {
     e.preventDefault();
     if (loginName.toLowerCase() === 'ava' && loginPass === '9193') {
         setIsAdmin(true); setIsAuthenticated(true); setActiveView('inventory');
-        setMyCustomerId('ADMIN-AVA'); showToast('Login Admin Berhasil'); 
+        setMyCustomerId('ADMIN-AVA'); 
+        localStorage.setItem('stockmaster_selected_store', selectedStore);
+        showToast('Login Admin Berhasil'); 
         refreshData();
     } else if (loginName.trim() !== '') {
         loginAsCustomer(loginName);
@@ -103,23 +115,38 @@ const AppContent: React.FC = () => {
   const loginAsCustomer = (name: string) => {
       setIsAdmin(false); setIsAuthenticated(true); setActiveView('shop');
       localStorage.setItem('stockmaster_customer_name', name); 
+      localStorage.setItem('stockmaster_selected_store', selectedStore);
       if (name.toLowerCase() === 'king fano') showToast(`Selamat Datang, King Fano! Harga Khusus Aktif.`);
       else showToast(`Selamat Datang, ${name}!`);
   };
 
-  const handleLogout = () => { setIsAuthenticated(false); setIsAdmin(false); setLoginName(''); setLoginPass(''); localStorage.removeItem('stockmaster_customer_name'); };
+  const handleLogout = () => { 
+    setIsAuthenticated(false); 
+    setIsAdmin(false); 
+    setLoginName(''); 
+    setLoginPass(''); 
+    localStorage.removeItem('stockmaster_customer_name'); 
+  };
+
+  const handleStoreChange = (newStore: string) => {
+    setSelectedStore(newStore);
+    localStorage.setItem('stockmaster_selected_store', newStore);
+    setCart([]); // Clear cart when switching stores
+    showToast(`Beralih ke ${newStore}`);
+  };
 
   // --- HANDLERS DATA ---
   const handleSaveItem = async (data: InventoryFormData) => {
       setLoading(true);
       const newQuantity = Number(data.quantity) || 0;
-      let updatedItem: InventoryItem = { ...editItem, ...data, quantity: newQuantity, initialStock: data.initialStock || 0, qtyIn: data.qtyIn || 0, qtyOut: data.qtyOut || 0, lastUpdated: Date.now() };
+      let updatedItem: InventoryItem = { ...editItem, ...data, quantity: newQuantity, initialStock: data.initialStock || 0, qtyIn: data.qtyIn || 0, qtyOut: data.qtyOut || 0, lastUpdated: Date.now(), toko: data.toko || selectedStore };
 
       if (editItem) {
           if (await updateInventory(updatedItem)) { showToast('Update berhasil!'); refreshData(); }
       } else {
           if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number sudah ada!', 'error'); setLoading(false); return; }
-          if (await addInventory(data)) { showToast('Tersimpan!'); refreshData(); }
+          const formDataWithStore = { ...data, toko: selectedStore };
+          if (await addInventory(formDataWithStore)) { showToast('Tersimpan!'); refreshData(); }
       }
       setIsEditing(false); setEditItem(null); setLoading(false);
   };
@@ -293,18 +320,18 @@ const AppContent: React.FC = () => {
   if (loading && items.length === 0) return <div className="flex flex-col h-screen items-center justify-center bg-gray-900 font-sans text-gray-400 space-y-6"><div className="relative"><div className="w-16 h-16 border-4 border-gray-700 border-t-blue-500 rounded-full animate-spin"></div><div className="absolute inset-0 flex items-center justify-center"><CloudLightning size={20} className="text-blue-500 animate-pulse" /></div></div><div className="text-center space-y-1"><p className="font-medium text-gray-200">Menghubungkan Database</p><p className="text-xs">Sinkronisasi Supabase...</p></div></div>;
 
   if (!isAuthenticated) {
-      return <LoginView loginName={loginName} setLoginName={setLoginName} loginPass={loginPass} setLoginPass={setLoginPass} onGlobalLogin={handleGlobalLogin} onGuestLogin={loginAsCustomer} toast={toast} onCloseToast={() => setToast(null)} />;
+      return <LoginView loginName={loginName} setLoginName={setLoginName} loginPass={loginPass} setLoginPass={setLoginPass} selectedStore={selectedStore} setSelectedStore={setSelectedStore} onGlobalLogin={handleGlobalLogin} onGuestLogin={loginAsCustomer} toast={toast} onCloseToast={() => setToast(null)} />;
   }
 
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col font-sans text-gray-100">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       
-      <Header isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} loading={loading} onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} loginName={loginName} onLogout={handleLogout} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} />
+      <Header isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} loading={loading} onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} loginName={loginName} onLogout={handleLogout} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} currentStore={selectedStore} onStoreChange={handleStoreChange} />
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
-        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
-        {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
+        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} currentStore={selectedStore} />}
+        {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} currentStore={selectedStore} />}
         {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}
         {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} isLoading={loading} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
         {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}

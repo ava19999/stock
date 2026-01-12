@@ -69,7 +69,8 @@ const mapBaseItem = (item: any): InventoryItem => ({
     imageUrl: item.image_url || '',
     images: item.image_url ? [item.image_url] : [],
     lastUpdated: item.date ? new Date(item.date).getTime() : (item.created_at ? new Date(item.created_at).getTime() : Date.now()),
-    price: 0, kingFanoPrice: 0, costPrice: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, ecommerce: ''
+    price: 0, kingFanoPrice: 0, costPrice: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, ecommerce: '',
+    toko: item.toko || ''
 });
 
 const chunkArray = <T>(array: T[], size: number): T[][] => {
@@ -166,11 +167,12 @@ export const saveItemImages = async (partNumber: string, images: string[]) => {
 // --- CORE FUNCTIONS (DENGAN FIX UNTUK SHOP) ---
 
 // 1. Fetch Gudang (Pagination)
-export const fetchInventoryPaginated = async (page: number, limit: number, search: string, filter: string = 'all', brand?: string, application?: string) => {
+export const fetchInventoryPaginated = async (page: number, limit: number, search: string, filter: string = 'all', brand?: string, application?: string, store?: string) => {
     let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' });
     if (search) query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`);
     if (brand && brand.trim() !== '') query = query.ilike('brand', `%${brand}%`);
     if (application && application.trim() !== '') query = query.ilike('application', `%${application}%`);
+    if (store && store.trim() !== '') query = query.eq('toko', store);
     if (filter === 'low') query = query.gt('quantity', 0).lt('quantity', 4); 
     else if (filter === 'empty') query = query.or('quantity.lte.0,quantity.is.null');
     
@@ -197,11 +199,12 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
 };
 
 // Fetch all inventory with filters (no pagination) - for sorting
-export const fetchInventoryAllFiltered = async (search: string, filter: string = 'all', brand?: string, application?: string): Promise<InventoryItem[]> => {
+export const fetchInventoryAllFiltered = async (search: string, filter: string = 'all', brand?: string, application?: string, store?: string): Promise<InventoryItem[]> => {
     let query = supabase.from(TABLE_NAME).select('*');
     if (search) query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`);
     if (brand && brand.trim() !== '') query = query.ilike('brand', `%${brand}%`);
     if (application && application.trim() !== '') query = query.ilike('application', `%${application}%`);
+    if (store && store.trim() !== '') query = query.eq('toko', store);
     if (filter === 'low') query = query.gt('quantity', 0).lt('quantity', 4); 
     else if (filter === 'empty') query = query.or('quantity.lte.0,quantity.is.null');
     
@@ -234,10 +237,16 @@ export const fetchShopItems = async (
     partNumberSearch?: string,
     nameSearch?: string,
     brandSearch?: string,
-    applicationSearch?: string
+    applicationSearch?: string,
+    store?: string
 ) => {
     // Ambil hanya barang yg ada stoknya
     let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' }).gt('quantity', 0);
+    
+    // Filter by store
+    if (store && store.trim() !== '') {
+        query = query.eq('toko', store);
+    }
     
     // Filter Pencarian Umum (search all fields)
     if (search && search.trim() !== '') {
@@ -304,8 +313,12 @@ export const fetchShopItems = async (
 
 // ... Fungsi Standar Lainnya (Tidak berubah logika, hanya disertakan agar file utuh) ...
 
-export const fetchInventory = async (): Promise<InventoryItem[]> => {
-  const { data: baseData, error } = await supabase.from(TABLE_NAME).select('*').order('date', { ascending: false, nullsFirst: false });
+export const fetchInventory = async (store?: string): Promise<InventoryItem[]> => {
+  let query = supabase.from(TABLE_NAME).select('*');
+  if (store && store.trim() !== '') {
+    query = query.eq('toko', store);
+  }
+  const { data: baseData, error } = await query.order('date', { ascending: false, nullsFirst: false });
   if (error) { console.error(error); return []; }
   const baseItems = (baseData || []).map(mapBaseItem);
   const partNumbers = baseItems.map((item: any) => item.partNumber).filter(Boolean);
@@ -358,8 +371,12 @@ export const getItemByPartNumber = async (partNumber: string): Promise<Inventory
   return mapped;
 };
 
-export const fetchInventoryStats = async () => {
-    const { data: items } = await supabase.from(TABLE_NAME).select('part_number, quantity');
+export const fetchInventoryStats = async (store?: string) => {
+    let query = supabase.from(TABLE_NAME).select('part_number, quantity');
+    if (store && store.trim() !== '') {
+        query = query.eq('toko', store);
+    }
+    const { data: items } = await query;
     const all = items || [];
     const partNumbers = all.map((i: any) => i.part_number).filter(Boolean);
     if (partNumbers.length === 0) return { totalItems: 0, totalStock: 0, totalAsset: 0 };
@@ -389,7 +406,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   const { data, error } = await supabase.from(TABLE_NAME).insert([{
     part_number: item.partNumber, name: item.name, brand: item.brand, 
     application: item.application, quantity: item.quantity, shelf: item.shelf, 
-    image_url: mainImage, date: wibNow 
+    image_url: mainImage, date: wibNow, toko: item.toko || '' 
   }]).select().single();
   if (error) { handleDbError("Tambah Barang ke Base", error); return null; }
   if (item.partNumber && item.images && item.images.length > 0) { await saveItemImages(item.partNumber, item.images); }
@@ -426,6 +443,7 @@ export const updateInventory = async (item: InventoryItem, transaction?: { type:
     name: item.name, brand: item.brand, application: item.application,
     shelf: item.shelf, quantity: finalQty, 
     image_url: mainImage, 
+    toko: item.toko || '',
     date: wibNow 
   }).eq('id', item.id).select();
   if (error || !updatedData || updatedData.length === 0) { handleDbError("Update Barang Base", error); return null; }

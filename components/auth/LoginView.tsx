@@ -1,6 +1,6 @@
 // FILE: src/components/auth/LoginView.tsx
 import React from 'react';
-import { Car, User, KeyRound, ArrowRight } from 'lucide-react';
+import { Car, User, KeyRound, ArrowRight, Store } from 'lucide-react';
 import { Toast } from '../common/Toast';
 
 interface LoginViewProps {
@@ -8,6 +8,8 @@ interface LoginViewProps {
   setLoginName: (val: string) => void;
   loginPass: string;
   setLoginPass: (val: string) => void;
+  selectedStore: string;
+  setSelectedStore: (val: string) => void;
   onGlobalLogin: (e: React.FormEvent) => void;
   onGuestLogin: (name: string) => void;
   toast: { msg: string; type: 'success' | 'error' } | null;
@@ -16,6 +18,7 @@ interface LoginViewProps {
 
 export const LoginView: React.FC<LoginViewProps> = ({
   loginName, setLoginName, loginPass, setLoginPass,
+  selectedStore, setSelectedStore,
   onGlobalLogin, onGuestLogin, toast, onCloseToast
 }) => {
   return (
@@ -33,11 +36,21 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     </div>
                 </div>
                 <div className="text-center mb-8">
-                    <h1 className="text-4xl font-extrabold text-white tracking-tight mb-1">BJW</h1>
+                    <h1 className="text-4xl font-extrabold text-white tracking-tight mb-1">{selectedStore}</h1>
                     <p className="text-gray-300 text-lg font-bold uppercase tracking-wider mb-1">Autopart</p>
                     <p className="text-gray-500 text-sm">Sukucadang Mobil</p>
                 </div>
                 <form onSubmit={onGlobalLogin} className="space-y-5">
+                    <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider ml-1">Pilih Toko</label>
+                        <div className="relative group">
+                            <Store className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-blue-400 transition-colors" size={20} />
+                            <select value={selectedStore} onChange={(e) => setSelectedStore(e.target.value)} className="w-full pl-12 pr-4 py-3.5 bg-gray-700/50 border border-gray-600 rounded-xl focus:bg-gray-700 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 outline-none transition-all font-medium text-gray-100">
+                                <option value="BJW">BJW</option>
+                                <option value="MJM">MJM</option>
+                            </select>
+                        </div>
+                    </div>
                     <div className="space-y-1.5">
                         <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider ml-1">Identitas</label>
                         <div className="relative group">
