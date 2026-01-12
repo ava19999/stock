@@ -80,7 +80,7 @@ const AppContent: React.FC = () => {
   const refreshData = async () => {
     setLoading(true);
     try {
-        const inventoryData = await fetchInventory();
+        const inventoryData = await fetchInventory(selectedStore);
         const bannerItem = inventoryData.find(i => i.partNumber === BANNER_PART_NUMBER);
         if (bannerItem) setBannerUrl(bannerItem.imageUrl);
         setItems(inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER));
@@ -88,7 +88,7 @@ const AppContent: React.FC = () => {
         const ordersData = await fetchOrders();
         setOrders(ordersData);
 
-        const historyData = await fetchHistory();
+        const historyData = await fetchHistory(selectedStore);
         setHistory(historyData);
         setRefreshTrigger(prev => prev + 1);
 
@@ -131,10 +131,10 @@ const AppContent: React.FC = () => {
       let updatedItem: InventoryItem = { ...editItem, ...data, quantity: newQuantity, initialStock: data.initialStock || 0, qtyIn: data.qtyIn || 0, qtyOut: data.qtyOut || 0, lastUpdated: Date.now() };
 
       if (editItem) {
-          if (await updateInventory(updatedItem)) { showToast('Update berhasil!'); refreshData(); }
+          if (await updateInventory(updatedItem, undefined, selectedStore)) { showToast('Update berhasil!'); refreshData(); }
       } else {
           if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number sudah ada!', 'error'); setLoading(false); return; }
-          if (await addInventory(data)) { showToast('Tersimpan!'); refreshData(); }
+          if (await addInventory(data, selectedStore)) { showToast('Tersimpan!'); refreshData(); }
       }
       setIsEditing(false); setEditItem(null); setLoading(false);
   };
@@ -142,7 +142,7 @@ const AppContent: React.FC = () => {
   // --- FIX: FUNGSI UPDATE BANNER YANG SUDAH DIPERBAIKI ---
   const handleUpdateBanner = async (base64: string) => {
       // 1. Cek dulu apakah banner sudah ada di database untuk mendapatkan ID-nya
-      const existingItem = await getItemByPartNumber(BANNER_PART_NUMBER);
+      const existingItem = await getItemByPartNumber(BANNER_PART_NUMBER, selectedStore);
 
       const bannerData: any = { 
           partNumber: BANNER_PART_NUMBER, 
@@ -165,11 +165,11 @@ const AppContent: React.FC = () => {
       if (existingItem) {
           // Jika sudah ada, gunakan ID yang ditemukan untuk update
           const updateData = { ...bannerData, id: existingItem.id };
-          const result = await updateInventory(updateData);
+          const result = await updateInventory(updateData, undefined, selectedStore);
           success = !!result;
       } else {
           // Jika belum ada, buat baru
-          const result = await addInventory(bannerData);
+          const result = await addInventory(bannerData, selectedStore);
           success = !!result;
       }
 
@@ -184,7 +184,7 @@ const AppContent: React.FC = () => {
   const handleDelete = async (id: string) => {
       if(confirm('Hapus Barang Permanen?')) {
           setLoading(true);
-          if (await deleteInventory(id)) { showToast('Dihapus'); refreshData(); }
+          if (await deleteInventory(id, selectedStore)) { showToast('Dihapus'); refreshData(); }
           setLoading(false);
       }
   }
@@ -232,13 +232,13 @@ const AppContent: React.FC = () => {
       for (const retur of returnedItems) {
           const itemInOrder = order.items.find(i => i.id === retur.itemId);
           if (!itemInOrder) continue;
-          const currentItem = await getItemByPartNumber(itemInOrder.partNumber);
+          const currentItem = await getItemByPartNumber(itemInOrder.partNumber, selectedStore);
           if (currentItem) {
               const restoreQty = retur.qty;
               const newQuantity = currentItem.quantity + restoreQty;
               const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
-              await updateInventory(itemToUpdate);
-              await addBarangMasuk({ tanggal: today, tempo: `${resiVal} / ${shopVal}`, ecommerce: ecommerceVal, keterangan: `${pureName} (RETUR)`, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name, brand: itemToUpdate.brand, application: itemToUpdate.application, rak: itemToUpdate.shelf, stockAhir: newQuantity, qtyMasuk: restoreQty, hargaSatuan: itemInOrder.customPrice ?? itemInOrder.price, hargaTotal: (itemInOrder.customPrice ?? itemInOrder.price) * restoreQty });
+              await updateInventory(itemToUpdate, undefined, selectedStore);
+              await addBarangMasuk({ tanggal: today, tempo: `${resiVal} / ${shopVal}`, ecommerce: ecommerceVal, keterangan: `${pureName} (RETUR)`, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name, brand: itemToUpdate.brand, application: itemToUpdate.application, rak: itemToUpdate.shelf, stockAhir: newQuantity, qtyMasuk: restoreQty, hargaSatuan: itemInOrder.customPrice ?? itemInOrder.price, hargaTotal: (itemInOrder.customPrice ?? itemInOrder.price) * restoreQty }, selectedStore);
           }
       }
 
@@ -271,13 +271,13 @@ const AppContent: React.FC = () => {
       if (order.status === 'pending' && newStatus === 'processing') {
           if (await updateOrderStatusService(orderId, newStatus)) { 
               for (const orderItem of order.items) {
-                  const currentItem = await getItemByPartNumber(orderItem.partNumber);
+                  const currentItem = await getItemByPartNumber(orderItem.partNumber, selectedStore);
                   if (currentItem) {
                       const qtySold = orderItem.cartQuantity;
                       const newQuantity = Math.max(0, currentItem.quantity - qtySold);
                       const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: newQuantity, lastUpdated: Date.now() };
-                      await updateInventory(itemToUpdate);
-                      await addBarangKeluar({ tanggal: today, kodeToko: 'APP', tempo: shopVal, ecommerce: ecommerceVal, customer: pureName, partNumber: currentItem.partNumber, name: currentItem.name, brand: currentItem.brand, application: currentItem.application, rak: currentItem.shelf, stockAhir: newQuantity, qtyKeluar: qtySold, hargaSatuan: orderItem.customPrice ?? orderItem.price, hargaTotal: (orderItem.customPrice ?? orderItem.price) * qtySold, resi: resiVal });
+                      await updateInventory(itemToUpdate, undefined, selectedStore);
+                      await addBarangKeluar({ tanggal: today, kodeToko: 'APP', tempo: shopVal, ecommerce: ecommerceVal, customer: pureName, partNumber: currentItem.partNumber, name: currentItem.name, brand: currentItem.brand, application: currentItem.application, rak: currentItem.shelf, stockAhir: newQuantity, qtyKeluar: qtySold, hargaSatuan: orderItem.customPrice ?? orderItem.price, hargaTotal: (orderItem.customPrice ?? orderItem.price) * qtySold, resi: resiVal }, selectedStore);
                   }
               }
               showToast('Pesanan diproses, stok berkurang.'); refreshData();
@@ -287,13 +287,13 @@ const AppContent: React.FC = () => {
           if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
               if (order.status !== 'pending') {
                   for (const orderItem of order.items) {
-                      const currentItem = await getItemByPartNumber(orderItem.partNumber);
+                      const currentItem = await getItemByPartNumber(orderItem.partNumber, selectedStore);
                       if (currentItem) {
                           const restoreQty = orderItem.cartQuantity;
                           const newQuantity = currentItem.quantity + restoreQty;
                           const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
-                          await updateInventory(itemToUpdate);
-                          await addBarangMasuk({ tanggal: today, tempo: `${resiVal} / ${shopVal}`, ecommerce: ecommerceVal, keterangan: `${pureName} (RETUR FULL)`, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name, brand: itemToUpdate.brand, application: itemToUpdate.application, rak: itemToUpdate.shelf, stockAhir: newQuantity, qtyMasuk: restoreQty, hargaSatuan: orderItem.customPrice ?? orderItem.price, hargaTotal: (orderItem.customPrice ?? orderItem.price) * restoreQty });
+                          await updateInventory(itemToUpdate, undefined, selectedStore);
+                          await addBarangMasuk({ tanggal: today, tempo: `${resiVal} / ${shopVal}`, ecommerce: ecommerceVal, keterangan: `${pureName} (RETUR FULL)`, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name, brand: itemToUpdate.brand, application: itemToUpdate.application, rak: itemToUpdate.shelf, stockAhir: newQuantity, qtyMasuk: restoreQty, hargaSatuan: orderItem.customPrice ?? orderItem.price, hargaTotal: (orderItem.customPrice ?? orderItem.price) * restoreQty }, selectedStore);
                       }
                   }
                   showToast('Pesanan dibatalkan sepenuhnya.');
@@ -333,8 +333,8 @@ const AppContent: React.FC = () => {
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
-        {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
-        {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}
+        {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} refreshTrigger={refreshTrigger} selectedStore={selectedStore} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
+        {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}}
         {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} isLoading={loading} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
         {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
         
