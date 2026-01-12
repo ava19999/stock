@@ -11,8 +11,23 @@ import {
   ReturRecord, 
   ScanResiLog 
 } from '../types';
+import { StoreType } from '../types/store';
 
-const TABLE_NAME = 'base';
+// Store-specific table name - will be set based on selected store
+let CURRENT_STORE: StoreType = null;
+
+// Helper function to get the correct table name based on selected store
+const getTableName = (): string => {
+  if (CURRENT_STORE === 'mjm') return 'base_mjm';
+  if (CURRENT_STORE === 'bjw') return 'base_bjw';
+  return 'base'; // fallback to default
+};
+
+// Function to set the current store (should be called when store is selected)
+export const setCurrentStore = (store: StoreType) => {
+  CURRENT_STORE = store;
+  console.log(`Database service switched to store: ${store}, table: ${getTableName()}`);
+};
 
 // Cache Foto (Memori Sementara)
 const photoCache: Record<string, string[]> = {};
@@ -167,7 +182,7 @@ export const saveItemImages = async (partNumber: string, images: string[]) => {
 
 // 1. Fetch Gudang (Pagination)
 export const fetchInventoryPaginated = async (page: number, limit: number, search: string, filter: string = 'all', brand?: string, application?: string) => {
-    let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' });
+    let query = supabase.from(getTableName()).select('*', { count: 'exact' });
     if (search) query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`);
     if (brand && brand.trim() !== '') query = query.ilike('brand', `%${brand}%`);
     if (application && application.trim() !== '') query = query.ilike('application', `%${application}%`);
@@ -198,7 +213,7 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
 
 // Fetch all inventory with filters (no pagination) - for sorting
 export const fetchInventoryAllFiltered = async (search: string, filter: string = 'all', brand?: string, application?: string): Promise<InventoryItem[]> => {
-    let query = supabase.from(TABLE_NAME).select('*');
+    let query = supabase.from(getTableName()).select('*');
     if (search) query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`);
     if (brand && brand.trim() !== '') query = query.ilike('brand', `%${brand}%`);
     if (application && application.trim() !== '') query = query.ilike('application', `%${application}%`);
@@ -237,7 +252,7 @@ export const fetchShopItems = async (
     applicationSearch?: string
 ) => {
     // Ambil hanya barang yg ada stoknya
-    let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' }).gt('quantity', 0);
+    let query = supabase.from(getTableName()).select('*', { count: 'exact' }).gt('quantity', 0);
     
     // Filter Pencarian Umum (search all fields)
     if (search && search.trim() !== '') {
@@ -305,7 +320,7 @@ export const fetchShopItems = async (
 // ... Fungsi Standar Lainnya (Tidak berubah logika, hanya disertakan agar file utuh) ...
 
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
-  const { data: baseData, error } = await supabase.from(TABLE_NAME).select('*').order('date', { ascending: false, nullsFirst: false });
+  const { data: baseData, error } = await supabase.from(getTableName()).select('*').order('date', { ascending: false, nullsFirst: false });
   if (error) { console.error(error); return []; }
   const baseItems = (baseData || []).map(mapBaseItem);
   const partNumbers = baseItems.map((item: any) => item.partNumber).filter(Boolean);
@@ -323,7 +338,7 @@ export const fetchInventory = async (): Promise<InventoryItem[]> => {
 };
 
 export const getItemById = async (id: string): Promise<InventoryItem | null> => {
-  const { data, error } = await supabase.from(TABLE_NAME).select('*').eq('id', id).single();
+  const { data, error } = await supabase.from(getTableName()).select('*').eq('id', id).single();
   if (error || !data) return null;
   const mapped = mapBaseItem(data);
   const key = normalizeKey(mapped.partNumber);
@@ -341,7 +356,7 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
 };
 
 export const getItemByPartNumber = async (partNumber: string): Promise<InventoryItem | null> => {
-  const { data, error } = await supabase.from(TABLE_NAME).select('*').eq('part_number', partNumber).limit(1).single();
+  const { data, error } = await supabase.from(getTableName()).select('*').eq('part_number', partNumber).limit(1).single();
   if (error || !data) return null;
   const mapped = mapBaseItem(data);
   const key = normalizeKey(mapped.partNumber);
@@ -359,7 +374,7 @@ export const getItemByPartNumber = async (partNumber: string): Promise<Inventory
 };
 
 export const fetchInventoryStats = async () => {
-    const { data: items } = await supabase.from(TABLE_NAME).select('part_number, quantity');
+    const { data: items } = await supabase.from(getTableName()).select('part_number, quantity');
     const all = items || [];
     const partNumbers = all.map((i: any) => i.part_number).filter(Boolean);
     if (partNumbers.length === 0) return { totalItems: 0, totalStock: 0, totalAsset: 0 };
@@ -386,7 +401,7 @@ export const fetchInventoryStats = async () => {
 export const addInventory = async (item: InventoryFormData): Promise<string | null> => {
   const wibNow = getWIBISOString();
   const mainImage = (item.images && item.images.length > 0) ? item.images[0] : item.imageUrl;
-  const { data, error } = await supabase.from(TABLE_NAME).insert([{
+  const { data, error } = await supabase.from(getTableName()).insert([{
     part_number: item.partNumber, name: item.name, brand: item.brand, 
     application: item.application, quantity: item.quantity, shelf: item.shelf, 
     image_url: mainImage, date: wibNow 
@@ -413,7 +428,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
 };
 
 export const updateInventory = async (item: InventoryItem, transaction?: { type: 'in' | 'out', qty: number, ecommerce: string, resiTempo: string, customer?: string, price?: number, isReturn?: boolean, store?: string }): Promise<InventoryItem | null> => {
-  const { data: currentDbItem, error: fetchError } = await supabase.from(TABLE_NAME).select('quantity').eq('id', item.id).single();
+  const { data: currentDbItem, error: fetchError } = await supabase.from(getTableName()).select('quantity').eq('id', item.id).single();
   if (fetchError || !currentDbItem) { console.error("Gagal ambil stok terbaru:", fetchError); return null; }
   let finalQty = Number(currentDbItem.quantity);
   if (transaction && transaction.qty > 0) {
@@ -422,7 +437,7 @@ export const updateInventory = async (item: InventoryItem, transaction?: { type:
   } else { finalQty = item.quantity; }
   const wibNow = getWIBISOString();
   const mainImage = (item.images && item.images.length > 0) ? item.images[0] : item.imageUrl;
-  const { data: updatedData, error } = await supabase.from(TABLE_NAME).update({
+  const { data: updatedData, error } = await supabase.from(getTableName()).update({
     name: item.name, brand: item.brand, application: item.application,
     shelf: item.shelf, quantity: finalQty, 
     image_url: mainImage, 
@@ -467,7 +482,7 @@ export const updateInventory = async (item: InventoryItem, transaction?: { type:
 };
 
 export const deleteInventory = async (id: string): Promise<boolean> => {
-  const { error } = await supabase.from(TABLE_NAME).delete().eq('id', id);
+  const { error } = await supabase.from(getTableName()).delete().eq('id', id);
   if (error) { handleDbError("Hapus Barang Base", error); return false; }
   return true;
 };
@@ -870,7 +885,7 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
         const partNumbersToCheck = selectedLogs.map(log => log.part_number).filter(pn => pn !== null && pn !== '') as string[];
         const uniquePartNumbers = [...new Set(partNumbersToCheck)];
         if (uniquePartNumbers.length > 0) {
-            const { data: existingItems, error } = await supabase.from(TABLE_NAME).select('part_number').in('part_number', uniquePartNumbers);
+            const { data: existingItems, error } = await supabase.from(getTableName()).select('part_number').in('part_number', uniquePartNumbers);
             if (error) return { success: false, message: "Gagal memvalidasi Part Number di database." };
             const existingSet = new Set(existingItems?.map(item => item.part_number));
             const missingParts = uniquePartNumbers.filter(pn => !existingSet.has(pn));
