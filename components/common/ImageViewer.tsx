@@ -14,15 +14,19 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex =
   const wasOpenRef = React.useRef(false);
 
   useEffect(() => {
-    if (!isOpen) { wasOpenRef.current = false; return; }
+    if (!isOpen) { 
+      wasOpenRef.current = false; 
+      return; 
+    }
     if (!images || images.length === 0) return;
 
     const justOpened = !wasOpenRef.current;
-    if (justOpened || initialIndex !== currentIndex) {
+    const shouldSyncIndex = justOpened || initialIndex !== currentIndex;
+    if (shouldSyncIndex) {
       setCurrentIndex(Math.min(initialIndex, images.length - 1));
     }
     wasOpenRef.current = true;
-  }, [isOpen, initialIndex, images.length, currentIndex, images]);
+  }, [isOpen, initialIndex, currentIndex, images]);
 
   // Jika tidak ada gambar atau modal tertutup, return null
   if (!isOpen || !images || images.length === 0) return null;
