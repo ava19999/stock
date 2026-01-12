@@ -186,11 +186,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* 4. MODALS */}
       {showHistoryDetail && (
-        <GlobalHistoryModal type={showHistoryDetail} onClose={() => setShowHistoryDetail(null)} />
+        <GlobalHistoryModal type={showHistoryDetail} selectedStore={selectedStore} onClose={() => setShowHistoryDetail(null)} />
       )}
 
       {selectedItemHistory && (
-        <ItemHistoryModal item={selectedItemHistory} onClose={() => setSelectedItemHistory(null)} />
+        <ItemHistoryModal item={selectedItemHistory} selectedStore={selectedStore} onClose={() => setSelectedItemHistory(null)} />
       )}
     </div>
   );

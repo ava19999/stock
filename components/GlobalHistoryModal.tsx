@@ -1,16 +1,18 @@
 // FILE: src/components/GlobalHistoryModal.tsx
 import React, { useState, useEffect } from 'react';
 import { StockHistory } from '../types';
+import { StoreType } from '../types/store';
 import { fetchHistoryLogsPaginated } from '../services/supabaseService';
 import { HistoryTable } from './HistoryTable';
 import { Loader2, X, ChevronLeft, ChevronRight, TrendingUp, TrendingDown } from 'lucide-react';
 
 interface GlobalHistoryModalProps {
   type: 'in' | 'out';
+  selectedStore?: StoreType;
   onClose: () => void;
 }
 
-export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, onClose }) => {
+export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, selectedStore, onClose }) => {
   const [data, setData] = useState<StockHistory[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -20,13 +22,13 @@ export const GlobalHistoryModal: React.FC<GlobalHistoryModalProps> = ({ type, on
   useEffect(() => {
     setLoading(true);
     const timer = setTimeout(async () => {
-      const { data, count } = await fetchHistoryLogsPaginated(type, page, 50, search);
+      const { data, count } = await fetchHistoryLogsPaginated(type, page, 50, search, selectedStore);
       setData(data);
       setTotalPages(Math.ceil(count / 50));
       setLoading(false);
     }, 500);
     return () => clearTimeout(timer);
-  }, [type, page, search]);
+  }, [type, page, search, selectedStore]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in">
