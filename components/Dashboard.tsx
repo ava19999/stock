@@ -87,7 +87,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [page, debouncedSearch, filterType, debouncedBrand, debouncedApp, priceSort, currentStore]);
 
   const loadStats = useCallback(async () => {
-    const invStats = await fetchInventoryStats();
+    const invStats = await fetchInventoryStats(currentStore);
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const todayIn = history
@@ -98,7 +98,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       .reduce((acc, h) => acc + (Number(h.quantity) || 0), 0);
 
     setStats({ ...invStats, todayIn, todayOut });
-  }, [history]);
+  }, [history, currentStore]);
 
   useEffect(() => { loadData(); }, [loadData, refreshTrigger]);
   useEffect(() => { loadStats(); }, [loadStats, refreshTrigger]);

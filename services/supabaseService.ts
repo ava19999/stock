@@ -371,8 +371,12 @@ export const getItemByPartNumber = async (partNumber: string): Promise<Inventory
   return mapped;
 };
 
-export const fetchInventoryStats = async () => {
-    const { data: items } = await supabase.from(TABLE_NAME).select('part_number, quantity');
+export const fetchInventoryStats = async (store?: string) => {
+    let query = supabase.from(TABLE_NAME).select('part_number, quantity');
+    if (store && store.trim() !== '') {
+        query = query.eq('toko', store);
+    }
+    const { data: items } = await query;
     const all = items || [];
     const partNumbers = all.map((i: any) => i.part_number).filter(Boolean);
     if (partNumbers.length === 0) return { totalItems: 0, totalStock: 0, totalAsset: 0 };
@@ -439,6 +443,7 @@ export const updateInventory = async (item: InventoryItem, transaction?: { type:
     name: item.name, brand: item.brand, application: item.application,
     shelf: item.shelf, quantity: finalQty, 
     image_url: mainImage, 
+    toko: item.toko || '',
     date: wibNow 
   }).eq('id', item.id).select();
   if (error || !updatedData || updatedData.length === 0) { handleDbError("Update Barang Base", error); return null; }
