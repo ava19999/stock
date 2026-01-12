@@ -43,7 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div>
                 <div className="font-bold leading-none text-gray-100 text-lg">{storeConfig.name}</div>
                 <div className="text-[10px] font-bold text-gray-400 leading-none mt-0.5">Autopart</div>
-                <div className="text-[9px] text-gray-500 leading-none">{storeConfig.fullName.includes('AUTOPART') ? storeConfig.fullName.replace(' AUTOPART', '').replace('AUTOPART', '') : storeConfig.fullName}</div>
+                <div className="text-[9px] text-gray-500 leading-none">{storeConfig.subtitle}</div>
                 <div className={`text-[9px] font-bold mt-1 px-1.5 py-0.5 rounded-md inline-block ${isAdmin ? 'bg-purple-900/30 text-purple-300 border border-purple-800' : 'bg-blue-900/30 text-blue-300 border border-blue-800'}`}>
                     {isAdmin ? 'ADMIN ACCESS' : 'STORE FRONT'}
                 </div>
