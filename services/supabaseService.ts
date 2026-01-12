@@ -68,7 +68,7 @@ const mapBaseItem = (item: any): InventoryItem => ({
     shelf: item.shelf || '',
     imageUrl: item.image_url || '',
     images: item.image_url ? [item.image_url] : [],
-    lastUpdated: item.date ? new Date(item.date).getTime() : (item.created_at ? new Date(item.created_at).getTime() : Date.now()),
+    lastUpdated: item.created_at ? new Date(item.created_at).getTime() : Date.now(),
     price: 0, kingFanoPrice: 0, costPrice: 0, initialStock: 0, qtyIn: 0, qtyOut: 0, ecommerce: ''
 });
 
@@ -176,7 +176,7 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
     
     const from = (page - 1) * limit;
     const to = from + limit - 1;
-    const { data, error, count } = await query.order('date', { ascending: false, nullsFirst: false }).range(from, to);
+    const { data, error, count } = await query.order('created_at', { ascending: false, nullsFirst: false }).range(from, to);
     if (error) { console.error(error); return { data: [], count: 0 }; }
     
     const baseItems = (data || []).map(mapBaseItem);
@@ -205,7 +205,7 @@ export const fetchInventoryAllFiltered = async (search: string, filter: string =
     if (filter === 'low') query = query.gt('quantity', 0).lt('quantity', 4); 
     else if (filter === 'empty') query = query.or('quantity.lte.0,quantity.is.null');
     
-    const { data, error } = await query.order('date', { ascending: false, nullsFirst: false });
+    const { data, error } = await query.order('created_at', { ascending: false, nullsFirst: false });
     if (error) { console.error(error); return []; }
     
     const baseItems = (data || []).map(mapBaseItem);
@@ -305,7 +305,7 @@ export const fetchShopItems = async (
 // ... Fungsi Standar Lainnya (Tidak berubah logika, hanya disertakan agar file utuh) ...
 
 export const fetchInventory = async (): Promise<InventoryItem[]> => {
-  const { data: baseData, error } = await supabase.from(TABLE_NAME).select('*').order('date', { ascending: false, nullsFirst: false });
+  const { data: baseData, error } = await supabase.from(TABLE_NAME).select('*').order('created_at', { ascending: false, nullsFirst: false });
   if (error) { console.error(error); return []; }
   const baseItems = (baseData || []).map(mapBaseItem);
   const partNumbers = baseItems.map((item: any) => item.partNumber).filter(Boolean);
@@ -389,7 +389,7 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   const { data, error } = await supabase.from(TABLE_NAME).insert([{
     part_number: item.partNumber, name: item.name, brand: item.brand, 
     application: item.application, quantity: item.quantity, shelf: item.shelf, 
-    image_url: mainImage, date: wibNow 
+    image_url: mainImage, created_at: wibNow 
   }]).select().single();
   if (error) { handleDbError("Tambah Barang ke Base", error); return null; }
   if (item.partNumber && item.images && item.images.length > 0) { await saveItemImages(item.partNumber, item.images); }
@@ -426,7 +426,7 @@ export const updateInventory = async (item: InventoryItem, transaction?: { type:
     name: item.name, brand: item.brand, application: item.application,
     shelf: item.shelf, quantity: finalQty, 
     image_url: mainImage, 
-    date: wibNow 
+    created_at: wibNow 
   }).eq('id', item.id).select();
   if (error || !updatedData || updatedData.length === 0) { handleDbError("Update Barang Base", error); return null; }
   if (item.partNumber && item.images && item.images.length > 0) { await saveItemImages(item.partNumber, item.images); }
