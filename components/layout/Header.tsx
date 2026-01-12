@@ -2,7 +2,7 @@
 import React from 'react';
 import { 
   ShieldCheck, Package, CloudLightning, ShoppingCart, Plus, 
-  ClipboardList, Home, LogOut 
+  ClipboardList, Home, LogOut, Store 
 } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
 
@@ -17,11 +17,12 @@ interface HeaderProps {
   pendingOrdersCount: number;
   myPendingOrdersCount: number;
   currentStore: string;
+  onStoreChange?: (store: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   isAdmin, activeView, setActiveView, loading, onRefresh,
-  loginName, onLogout, pendingOrdersCount, myPendingOrdersCount, currentStore
+  loginName, onLogout, pendingOrdersCount, myPendingOrdersCount, currentStore, onStoreChange
 }) => {
   return (
     <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm backdrop-blur-md bg-gray-800/90">
@@ -42,6 +43,21 @@ export const Header: React.FC<HeaderProps> = ({
             <button onClick={onRefresh} className="p-2 hover:bg-gray-700 rounded-full transition-colors active:scale-90">
                 <CloudLightning size={20} className={loading ? 'animate-spin text-blue-400' : 'text-gray-400'}/>
             </button>
+            
+            {/* Store Switcher for Admin */}
+            {isAdmin && onStoreChange && (
+                <div className="relative group">
+                    <select 
+                        value={currentStore} 
+                        onChange={(e) => onStoreChange(e.target.value)}
+                        className="px-3 py-2 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded-lg text-sm font-semibold text-gray-200 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none pr-8"
+                    >
+                        <option value="BJW">BJW</option>
+                        <option value="MJM">MJM</option>
+                    </select>
+                    <Store size={16} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                </div>
+            )}
             
             {/* NAVIGASI DESKTOP */}
             {isAdmin ? (

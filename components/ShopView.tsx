@@ -91,28 +91,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
     const loadData = async () => {
         setLoading(true);
         try {
-            const { data, count } = await fetchShopItems(
-                page, 
-                limit, 
-                debouncedSearch, 
-                category,
-                debouncedPartNumber, 
-                debouncedName, 
-                debouncedBrand, 
-                debouncedApplication,
-                currentStore
-            );
-            setShopItems(data);
-            setTotalPages(Math.ceil(count / limit));
-        } catch (err) {
-            console.error("Error loading shop items:", err);
-        } finally {
-            setLoading(false);
-        }
-    };
-    loadData();
-  }, [page, debouncedSearch, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, category, currentStore]);
-        try {
             // PERBAIKAN 4: Ganti 'Semua' jadi 'All' agar filter di Supabase jalan
             const safeCategory = category === 'Semua' ? 'All' : category; 
             
@@ -124,7 +102,8 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 debouncedPartNumber,
                 debouncedName,
                 debouncedBrand,
-                debouncedApplication
+                debouncedApplication,
+                currentStore
             );
             
             setShopItems(data || []);
@@ -139,7 +118,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
     };
 
     loadData();
-  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication]); // Hanya jalan jika ini berubah
+  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, currentStore]); // Hanya jalan jika ini berubah
 
   // --- Banner Upload Handlers ---
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { 

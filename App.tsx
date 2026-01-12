@@ -128,6 +128,13 @@ const AppContent: React.FC = () => {
     localStorage.removeItem('stockmaster_customer_name'); 
   };
 
+  const handleStoreChange = (newStore: string) => {
+    setSelectedStore(newStore);
+    localStorage.setItem('stockmaster_selected_store', newStore);
+    setCart([]); // Clear cart when switching stores
+    showToast(`Beralih ke ${newStore}`);
+  };
+
   // --- HANDLERS DATA ---
   const handleSaveItem = async (data: InventoryFormData) => {
       setLoading(true);
@@ -320,7 +327,7 @@ const AppContent: React.FC = () => {
     <div className="min-h-screen bg-gray-900 flex flex-col font-sans text-gray-100">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       
-      <Header isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} loading={loading} onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} loginName={loginName} onLogout={handleLogout} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} currentStore={selectedStore} />
+      <Header isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} loading={loading} onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} loginName={loginName} onLogout={handleLogout} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} currentStore={selectedStore} onStoreChange={handleStoreChange} />
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} currentStore={selectedStore} />}
