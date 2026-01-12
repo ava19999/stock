@@ -16,18 +16,76 @@ import { StoreType } from '../types/store';
 // Store-specific table name - will be set based on selected store
 let CURRENT_STORE: StoreType = null;
 
-// Helper function to get the correct table name based on selected store
+// Helper functions to get the correct table names based on selected store
 const getTableName = (): string => {
-  if (CURRENT_STORE === 'mjm') return 'base_mjm';
-  if (CURRENT_STORE === 'bjw') return 'base_bjw';
-  return 'base'; // fallback to default
+  const tableName = CURRENT_STORE === 'mjm' ? 'base_mjm' : 
+                    CURRENT_STORE === 'bjw' ? 'base_bjw' : 
+                    'base';
+  console.log(`[DEBUG] getTableName() called - CURRENT_STORE: ${CURRENT_STORE}, returning: ${tableName}`);
+  return tableName;
+};
+
+const getBarangMasukTable = (): string => {
+  if (CURRENT_STORE === 'mjm') return 'barang_masuk_mjm';
+  if (CURRENT_STORE === 'bjw') return 'barang_masuk_bjw';
+  return 'barang_masuk';
+};
+
+const getBarangKeluarTable = (): string => {
+  if (CURRENT_STORE === 'mjm') return 'barang_keluar_mjm';
+  if (CURRENT_STORE === 'bjw') return 'barang_keluar_bjw';
+  return 'barang_keluar';
+};
+
+const getOrdersTable = (): string => {
+  if (CURRENT_STORE === 'mjm') return 'orders_mjm';
+  if (CURRENT_STORE === 'bjw') return 'orders_bjw';
+  return 'orders';
+};
+
+const getFotoTable = (): string => {
+  if (CURRENT_STORE === 'mjm') return 'foto_mjm';
+  if (CURRENT_STORE === 'bjw') return 'foto_bjw';
+  return 'foto';
+};
+
+const getListHargaJualTable = (): string => {
+  if (CURRENT_STORE === 'mjm') return 'list_harga_jual_mjm';
+  if (CURRENT_STORE === 'bjw') return 'list_harga_jual_bjw';
+  return 'list_harga_jual';
+};
+
+const getReturTable = (): string => {
+  if (CURRENT_STORE === 'mjm') return 'retur_mjm';
+  if (CURRENT_STORE === 'bjw') return 'retur_bjw';
+  return 'retur';
+};
+
+const getScanResiTable = (): string => {
+  if (CURRENT_STORE === 'mjm') return 'scan_resi_mjm';
+  if (CURRENT_STORE === 'bjw') return 'scan_resi_bjw';
+  return 'scan_resi';
+};
+
+const getChatSessionsTable = (): string => {
+  if (CURRENT_STORE === 'mjm') return 'chat_sessions_mjm';
+  if (CURRENT_STORE === 'bjw') return 'chat_sessions_bjw';
+  return 'chat_sessions';
 };
 
 // Function to set the current store (should be called when store is selected)
 export const setCurrentStore = (store: StoreType) => {
   CURRENT_STORE = store;
-  console.log(`Database service switched to store: ${store}, table: ${getTableName()}`);
+  console.log(`[STORE SERVICE] Database service switched to store: ${store}`);
+  console.log(`[STORE SERVICE] Current table names:`);
+  console.log(`  - Base: ${getTableName()}`);
+  console.log(`  - Barang Masuk: ${getBarangMasukTable()}`);
+  console.log(`  - Barang Keluar: ${getBarangKeluarTable()}`);
+  console.log(`  - Orders: ${getOrdersTable()}`);
 };
+
+// Export function to check current store (for debugging)
+export const getCurrentStore = () => CURRENT_STORE;
 
 // Cache Foto (Memori Sementara)
 const photoCache: Record<string, string[]> = {};
@@ -101,7 +159,7 @@ const normalizeKey = (key: string | null | undefined): string => {
 
 const fetchLatestCostPrices = async (partNumbers?: string[]) => {
     try {
-        let query = supabase.from('barang_masuk').select('part_number, harga_satuan').order('created_at', { ascending: false, nullsFirst: false });
+        let query = supabase.from(getBarangMasukTable()).select('part_number, harga_satuan').order('created_at', { ascending: false, nullsFirst: false });
         if (partNumbers && partNumbers.length > 0) { query = query.in('part_number', partNumbers); }
         const { data, error } = await query;
         if (error || !data) return {};
@@ -116,7 +174,7 @@ const fetchLatestCostPrices = async (partNumbers?: string[]) => {
 
 const fetchLatestSellingPrices = async (partNumbers?: string[]) => {
     try {
-        let query = supabase.from('list_harga_jual').select('part_number, harga');
+        let query = supabase.from(getListHargaJualTable()).select('part_number, harga');
         if (partNumbers && partNumbers.length > 0) { query = query.in('part_number', partNumbers); }
         const { data, error } = await query;
         if (error || !data) return {};
@@ -145,7 +203,7 @@ const fetchPhotos = async (partNumbers?: string[]) => {
     const batches = chunkArray(missingPartNumbers, 50);
     const fetchBatch = async (batch: string[]) => {
         try {
-            const { data, error } = await supabase.from('foto')
+            const { data, error } = await supabase.from(getFotoTable())
                 .select('part_number, foto_1, foto_2, foto_3, foto_4, foto_5, foto_6, foto_7, foto_8, foto_9, foto_10')
                 .in('part_number', batch);
             if (error) return; 
@@ -172,9 +230,9 @@ export const saveItemImages = async (partNumber: string, images: string[]) => {
     const payload: any = { part_number: partNumber };
     for (let i = 0; i < 10; i++) { payload[`foto_${i+1}`] = images[i] || null; }
     try {
-        const { data: existing } = await supabase.from('foto').select('id').eq('part_number', partNumber).maybeSingle();
-        if (existing) { await supabase.from('foto').update(payload).eq('id', existing.id); } 
-        else { await supabase.from('foto').insert([payload]); }
+        const { data: existing } = await supabase.from(getFotoTable()).select('id').eq('part_number', partNumber).maybeSingle();
+        if (existing) { await supabase.from(getFotoTable()).update(payload).eq('id', existing.id); } 
+        else { await supabase.from(getFotoTable()).insert([payload]); }
     } catch (e) { console.error(e); }
 };
 
@@ -182,7 +240,10 @@ export const saveItemImages = async (partNumber: string, images: string[]) => {
 
 // 1. Fetch Gudang (Pagination)
 export const fetchInventoryPaginated = async (page: number, limit: number, search: string, filter: string = 'all', brand?: string, application?: string) => {
-    let query = supabase.from(getTableName()).select('*', { count: 'exact' });
+    const tableName = getTableName();
+    console.log(`[FETCH INVENTORY] Querying table: ${tableName}, page: ${page}, limit: ${limit}`);
+    
+    let query = supabase.from(tableName).select('*', { count: 'exact' });
     if (search) query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`);
     if (brand && brand.trim() !== '') query = query.ilike('brand', `%${brand}%`);
     if (application && application.trim() !== '') query = query.ilike('application', `%${application}%`);
@@ -192,7 +253,13 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
     const from = (page - 1) * limit;
     const to = from + limit - 1;
     const { data, error, count } = await query.order('date', { ascending: false, nullsFirst: false }).range(from, to);
-    if (error) { console.error(error); return { data: [], count: 0 }; }
+    
+    if (error) { 
+        console.error(`[FETCH INVENTORY ERROR] Table: ${tableName}, Error:`, error); 
+        return { data: [], count: 0 }; 
+    }
+    
+    console.log(`[FETCH INVENTORY SUCCESS] Table: ${tableName}, Found ${data?.length || 0} items, Total count: ${count}`);
     
     const baseItems = (data || []).map(mapBaseItem);
     if (baseItems.length > 0) {
@@ -251,8 +318,11 @@ export const fetchShopItems = async (
     brandSearch?: string,
     applicationSearch?: string
 ) => {
+    const tableName = getTableName();
+    console.log(`[FETCH SHOP] Querying table: ${tableName}, page: ${page}, limit: ${limit}`);
+    
     // Ambil hanya barang yg ada stoknya
-    let query = supabase.from(getTableName()).select('*', { count: 'exact' }).gt('quantity', 0);
+    let query = supabase.from(tableName).select('*', { count: 'exact' }).gt('quantity', 0);
     
     // Filter Pencarian Umum (search all fields)
     if (search && search.trim() !== '') {
@@ -286,9 +356,11 @@ export const fetchShopItems = async (
     const { data, error, count } = await query.order('name', { ascending: true }).range(from, to);
     
     if (error) { 
-        console.error("Shop fetch failed:", error); 
+        console.error(`[FETCH SHOP ERROR] Table: ${tableName}, Error:`, error); 
         return { data: [], count: 0 }; 
     }
+    
+    console.log(`[FETCH SHOP SUCCESS] Table: ${tableName}, Found ${data?.length || 0} items, Total count: ${count}`);
     
     const baseItems = (data || []).map(mapBaseItem);
 
@@ -311,7 +383,7 @@ export const fetchShopItems = async (
                 }
             });
         } catch (e) {
-            console.error("Shop secondary fetch failed, using base data only", e);
+            console.error("[FETCH SHOP] Secondary fetch failed, using base data only", e);
         }
     }
     return { data: baseItems, count: count || 0 };
@@ -343,9 +415,9 @@ export const getItemById = async (id: string): Promise<InventoryItem | null> => 
   const mapped = mapBaseItem(data);
   const key = normalizeKey(mapped.partNumber);
   try {
-      const { data: costData } = await supabase.from('barang_masuk').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+      const { data: costData } = await supabase.from(getBarangMasukTable()).select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
       if (costData) mapped.costPrice = Number(costData.harga_satuan) || 0;
-      const { data: sellData } = await supabase.from('list_harga_jual').select('harga').eq('part_number', mapped.partNumber).limit(1).maybeSingle();
+      const { data: sellData } = await supabase.from(getListHargaJualTable()).select('harga').eq('part_number', mapped.partNumber).limit(1).maybeSingle();
       if (sellData) mapped.price = Number(sellData.harga) || 0;
       if (mapped.partNumber) {
           const photoMap = await fetchPhotos([mapped.partNumber]);
@@ -361,9 +433,9 @@ export const getItemByPartNumber = async (partNumber: string): Promise<Inventory
   const mapped = mapBaseItem(data);
   const key = normalizeKey(mapped.partNumber);
   try {
-      const { data: costData } = await supabase.from('barang_masuk').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+      const { data: costData } = await supabase.from(getBarangMasukTable()).select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
       if (costData) mapped.costPrice = Number(costData.harga_satuan) || 0;
-      const { data: sellData } = await supabase.from('list_harga_jual').select('harga').eq('part_number', mapped.partNumber).limit(1).maybeSingle();
+      const { data: sellData } = await supabase.from(getListHargaJualTable()).select('harga').eq('part_number', mapped.partNumber).limit(1).maybeSingle();
       if (sellData) mapped.price = Number(sellData.harga) || 0;
       if (mapped.partNumber) {
           const photoMap = await fetchPhotos([mapped.partNumber]);
@@ -411,9 +483,9 @@ export const addInventory = async (item: InventoryFormData): Promise<string | nu
   else if (item.partNumber && item.imageUrl) { await saveItemImages(item.partNumber, [item.imageUrl]); }
   if (item.partNumber && item.price !== undefined) {
       try {
-          const { data: existing } = await supabase.from('list_harga_jual').select('id').eq('part_number', item.partNumber).maybeSingle();
-          if (existing) { await supabase.from('list_harga_jual').update({ harga: item.price, name: item.name }).eq('part_number', item.partNumber); } 
-          else { await supabase.from('list_harga_jual').insert([{ part_number: item.partNumber, name: item.name, harga: item.price }]); }
+          const { data: existing } = await supabase.from(getListHargaJualTable()).select('id').eq('part_number', item.partNumber).maybeSingle();
+          if (existing) { await supabase.from(getListHargaJualTable()).update({ harga: item.price, name: item.name }).eq('part_number', item.partNumber); } 
+          else { await supabase.from(getListHargaJualTable()).insert([{ part_number: item.partNumber, name: item.name, harga: item.price }]); }
       } catch (e) {}
   }
   if (item.quantity > 0 && data) {
@@ -447,9 +519,9 @@ export const updateInventory = async (item: InventoryItem, transaction?: { type:
   if (item.partNumber && item.images && item.images.length > 0) { await saveItemImages(item.partNumber, item.images); }
   if (item.partNumber && item.price !== undefined && item.price > 0) {
       try {
-          const { data: existing } = await supabase.from('list_harga_jual').select('id').eq('part_number', item.partNumber).limit(1).maybeSingle();
-          if (existing) { await supabase.from('list_harga_jual').update({ harga: item.price, name: item.name }).eq('part_number', item.partNumber); }
-          else { await supabase.from('list_harga_jual').insert([{ part_number: item.partNumber, name: item.name, harga: item.price }]); }
+          const { data: existing } = await supabase.from(getListHargaJualTable()).select('id').eq('part_number', item.partNumber).limit(1).maybeSingle();
+          if (existing) { await supabase.from(getListHargaJualTable()).update({ harga: item.price, name: item.name }).eq('part_number', item.partNumber); }
+          else { await supabase.from(getListHargaJualTable()).insert([{ part_number: item.partNumber, name: item.name, harga: item.price }]); }
       } catch (e) {}
   }
   const baseUpdated = updatedData[0];
@@ -489,8 +561,8 @@ export const deleteInventory = async (id: string): Promise<boolean> => {
 
 // ... History & Log Functions (Sisa Sama) ...
 export const fetchHistory = async (): Promise<StockHistory[]> => {
-    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
-    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
+    const { data: dataMasuk } = await supabase.from(getBarangMasukTable()).select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
+    const { data: dataKeluar } = await supabase.from(getBarangKeluarTable()).select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
     const history: StockHistory[] = [];
     (dataMasuk || []).forEach((m: any) => {
         const ket = m.keterangan || 'Restock';
@@ -548,8 +620,8 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
 };
 
 export const fetchItemHistory = async (partNumber: string): Promise<StockHistory[]> => {
-    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
-    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
+    const { data: dataMasuk } = await supabase.from(getBarangMasukTable()).select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
+    const { data: dataKeluar } = await supabase.from(getBarangKeluarTable()).select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
     const history: StockHistory[] = [];
     (dataMasuk || []).forEach((m: any) => {
         const ket = m.keterangan || 'Restock';
@@ -576,7 +648,7 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
 export const addBarangMasuk = async (data: any) => { 
     const ecommerceVal = data.ecommerce || 'Lainnya';
     const keteranganVal = data.keterangan || 'Restock'; 
-    const { error } = await supabase.from('barang_masuk').insert([{ 
+    const { error } = await supabase.from(getBarangMasukTable()).insert([{ 
         created_at: data.created_at || getWIBISOString(), tempo: data.tempo, ecommerce: ecommerceVal, keterangan: keteranganVal, 
         part_number: data.partNumber || data.part_number, name: data.name, brand: data.brand, application: data.application, rak: data.rak, 
         stock_ahir: data.stockAhir || data.stock_ahir, qty_masuk: data.qtyMasuk || data.qty_masuk, 
@@ -587,7 +659,7 @@ export const addBarangMasuk = async (data: any) => {
 };
 
 export const addBarangKeluar = async (data: any) => { 
-    const { error } = await supabase.from('barang_keluar').insert([{ 
+    const { error } = await supabase.from(getBarangKeluarTable()).insert([{ 
         created_at: data.created_at || getWIBISOString(), kode_toko: data.kodeToko || data.kode_toko, tempo: data.tempo, ecommerce: data.ecommerce, customer: data.customer, 
         part_number: data.partNumber || data.part_number, name: data.name, brand: data.brand, application: data.application, rak: data.rak, 
         stock_ahir: data.stockAhir || data.stock_ahir, qty_keluar: data.qtyKeluar || data.qty_keluar, 
@@ -617,9 +689,9 @@ export const addHistoryLog = async (h: StockHistory) => {
 };
 
 export const updateOrderData = async (orderId: string, newItems: any[], newTotal: number, newStatus: string): Promise<boolean> => {
-    const { data: oldData } = await supabase.from('orders').select('*').eq('resi', orderId).limit(1).single();
+    const { data: oldData } = await supabase.from(getOrdersTable()).select('*').eq('resi', orderId).limit(1).single();
     if (!oldData) return false;
-    const { error: delError } = await supabase.from('orders').delete().eq('resi', orderId);
+    const { error: delError } = await supabase.from(getOrdersTable()).delete().eq('resi', orderId);
     if (delError) { console.error("Gagal hapus order lama:", delError); return false; }
     const rows = newItems.map((item: any) => ({
         tanggal: oldData.tanggal, resi: orderId, toko: oldData.toko, ecommerce: oldData.ecommerce,
@@ -628,14 +700,14 @@ export const updateOrderData = async (orderId: string, newItems: any[], newTotal
         harga_total: (item.customPrice || item.price) * item.cartQuantity, status: newStatus
     }));
     if (rows.length > 0) {
-        const { error: insError } = await supabase.from('orders').insert(rows);
+        const { error: insError } = await supabase.from(getOrdersTable()).insert(rows);
         if (insError) { console.error("Gagal insert order baru:", insError); return false; }
     }
     return true;
 };
 
 export const fetchOrders = async (): Promise<Order[]> => { 
-    const { data } = await supabase.from('orders').select('*').order('tanggal', { ascending: false }).limit(300); 
+    const { data } = await supabase.from(getOrdersTable()).select('*').order('tanggal', { ascending: false }).limit(300); 
     if (!data) return [];
     const groupedOrders: Record<string, Order> = {};
     data.forEach((row: any) => {
@@ -678,7 +750,7 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
         part_number: item.partNumber || '-', nama_barang: item.name, quantity: item.cartQuantity, 
         harga_satuan: item.customPrice || item.price, harga_total: (item.customPrice || item.price) * item.cartQuantity, status: order.status
     }));
-    const { error } = await supabase.from('orders').insert(rows);
+    const { error } = await supabase.from(getOrdersTable()).insert(rows);
     if (error) { console.error("Gagal simpan order:", error); return false; }
     return true; 
 };
@@ -686,7 +758,7 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
 export const updateOrderStatusService = async (id: string, status: string, timestamp?: number): Promise<boolean> => { 
     const updateData: any = { status }; 
     if (timestamp) updateData.tanggal = getWIBISOStringFromTimestamp(timestamp); 
-    const { error } = await supabase.from('orders').update(updateData).eq('resi', id); 
+    const { error } = await supabase.from(getOrdersTable()).update(updateData).eq('resi', id); 
     return !error; 
 };
 
@@ -717,7 +789,7 @@ export const updateReturKeterangan = async (resi: string, keterangan: string): P
 };
 
 export const fetchPriceHistoryBySource = async (partNumber: string) => { 
-    const { data, error } = await supabase.from('barang_masuk').select('ecommerce, harga_satuan, created_at').eq('part_number', partNumber).order('created_at', { ascending: false }); 
+    const { data, error } = await supabase.from(getBarangMasukTable()).select('ecommerce, harga_satuan, created_at').eq('part_number', partNumber).order('created_at', { ascending: false }); 
     if (error || !data) return []; 
     const uniqueSources: Record<string, any> = {}; 
     data.forEach((item: any) => { 
@@ -733,30 +805,30 @@ export const fetchPriceHistoryBySource = async (partNumber: string) => {
 };
 
 export const clearBarangKeluar = async (): Promise<boolean> => { 
-    const { error } = await supabase.from('barang_keluar').delete().neq('id', 0); 
+    const { error } = await supabase.from(getBarangKeluarTable()).delete().neq('id', 0); 
     if (error) { console.error("Gagal hapus barang keluar:", error); return false; } 
     return true; 
 };
 
 export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
-    const { data, error } = await supabase.from('scan_resi').select('*').order('tanggal', { ascending: false }).limit(500); 
+    const { data, error } = await supabase.from(getScanResiTable()).select('*').order('tanggal', { ascending: false }).limit(500); 
     if (error) { console.error("Gagal ambil log scan resi:", error); return []; }
     return data || [];
 };
 
 export const addScanResiLog = async (resi: string, ecommerce: string, toko: string): Promise<boolean> => {
     try {
-        const { data: existingItems } = await supabase.from('scan_resi').select('*').eq('resi', resi);
+        const { data: existingItems } = await supabase.from(getScanResiTable()).select('*').eq('resi', resi);
         if (existingItems && existingItems.length > 0) {
             const updatePromises = existingItems.map(async (item) => {
                 const isComplete = checkIsComplete({ customer: item.customer, part_number: item.part_number, nama_barang: item.nama_barang, quantity: item.quantity, harga_total: item.harga_total });
                 const newStatus = isComplete ? 'Siap Kirim' : 'Pending';
-                return supabase.from('scan_resi').update({ status: newStatus, tanggal: getWIBISOString() }).eq('id', item.id);
+                return supabase.from(getScanResiTable()).update({ status: newStatus, tanggal: getWIBISOString() }).eq('id', item.id);
             });
             await Promise.all(updatePromises);
             return true;
         } else {
-            const { error } = await supabase.from('scan_resi').insert([{
+            const { error } = await supabase.from(getScanResiTable()).insert([{
                 tanggal: getWIBISOString(), resi: resi, ecommerce: ecommerce, toko: toko, status: 'Pending', 
             }]);
             return !error;
@@ -768,7 +840,7 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
     try {
         const resiList = updates.map(u => u.resi).filter(Boolean);
         if (resiList.length === 0) return { success: false, skippedCount: 0, updatedCount: 0 };
-        const { data: existingData, error: checkError } = await supabase.from('scan_resi').select('*').in('resi', resiList);
+        const { data: existingData, error: checkError } = await supabase.from(getScanResiTable()).select('*').in('resi', resiList);
         if (checkError) return { success: false, skippedCount: 0, updatedCount: 0 };
 
         const existingGrouped = new Map<string, any[]>();
@@ -818,7 +890,7 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
                     nama_barang: item.nama_barang, quantity: item.quantity, status: statusToUse 
                 };
                 if (!isSplitItem) { updateData.harga_satuan = item.harga_satuan; updateData.harga_total = item.harga_total; }
-                updatePromises.push(supabase.from('scan_resi').update(updateData).eq('id', existing.id));
+                updatePromises.push(supabase.from(getScanResiTable()).update(updateData).eq('id', existing.id));
             } else {
                 insertPayload.push({
                     tanggal: getWIBISOString(), resi: item.resi, toko: item.toko, ecommerce: item.ecommerce,
@@ -829,7 +901,7 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
             }
         });
 
-        if (insertPayload.length > 0) await supabase.from('scan_resi').insert(insertPayload);
+        if (insertPayload.length > 0) await supabase.from(getScanResiTable()).insert(insertPayload);
         if (updatePromises.length > 0) await Promise.all(updatePromises);
 
         return { success: true, skippedCount: updates.length - insertPayload.length - updatePromises.length, updatedCount: updatePromises.length };
@@ -837,7 +909,7 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
 };
 
 export const updateScanResiLogField = async (id: number, field: string, value: any): Promise<boolean> => {
-    const { data, error } = await supabase.from('scan_resi').update({ [field]: value }).eq('id', id).select().single();
+    const { data, error } = await supabase.from(getScanResiTable()).update({ [field]: value }).eq('id', id).select().single();
     if (error) return false;
 
     if (data) {
@@ -851,7 +923,7 @@ export const updateScanResiLogField = async (id: number, field: string, value: a
             });
             const newStatus = isComplete ? 'Siap Kirim' : 'Pending';
             if (data.status !== newStatus) {
-                await supabase.from('scan_resi').update({ status: newStatus }).eq('id', id);
+                await supabase.from(getScanResiTable()).update({ status: newStatus }).eq('id', id);
             }
         }
     }
@@ -860,24 +932,24 @@ export const updateScanResiLogField = async (id: number, field: string, value: a
 
 export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
     try {
-        const { data: sourceItem, error: fetchError } = await supabase.from('scan_resi').select('*').eq('id', id).single();
+        const { data: sourceItem, error: fetchError } = await supabase.from(getScanResiTable()).select('*').eq('id', id).single();
         if (fetchError || !sourceItem) return false;
-        const { data: siblings } = await supabase.from('scan_resi').select('*').eq('resi', sourceItem.resi).eq('nama_barang', sourceItem.nama_barang); 
+        const { data: siblings } = await supabase.from(getScanResiTable()).select('*').eq('resi', sourceItem.resi).eq('nama_barang', sourceItem.nama_barang); 
         if (!siblings) return false;
         const totalPoolPrice = siblings.reduce((sum, item) => sum + (Number(item.harga_total) || 0), 0);
         const totalQuantity = siblings.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
         const pricePerUnit = totalQuantity > 0 ? Math.floor(totalPoolPrice / totalQuantity) : 0;
-        const updatePromises = siblings.map(item => supabase.from('scan_resi').update({ harga_satuan: pricePerUnit, harga_total: pricePerUnit * (Number(item.quantity) || 0) }).eq('id', item.id));
+        const updatePromises = siblings.map(item => supabase.from(getScanResiTable()).update({ harga_satuan: pricePerUnit, harga_total: pricePerUnit * (Number(item.quantity) || 0) }).eq('id', item.id));
         await Promise.all(updatePromises);
         const { id: oldId, ...cleanItemData } = sourceItem;
-        const { error: insertError } = await supabase.from('scan_resi').insert([{ ...cleanItemData, tanggal: getWIBISOString(), harga_satuan: pricePerUnit, harga_total: pricePerUnit * (Number(cleanItemData.quantity) || 0), status: 'Pending' }]);
+        const { error: insertError } = await supabase.from(getScanResiTable()).insert([{ ...cleanItemData, tanggal: getWIBISOString(), harga_satuan: pricePerUnit, harga_total: pricePerUnit * (Number(cleanItemData.quantity) || 0), status: 'Pending' }]);
         if (insertError) return false;
         return true;
     } catch (err) { console.error("Error duplicating:", err); return false; }
 };
 
 export const deleteScanResiLog = async (id: number): Promise<boolean> => {
-    try { const { error } = await supabase.from('scan_resi').delete().eq('id', id); return !error; } catch (err) { console.error("Error deleting:", err); return false; }
+    try { const { error } = await supabase.from(getScanResiTable()).delete().eq('id', id); return !error; } catch (err) { console.error("Error deleting:", err); return false; }
 };
 
 export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Promise<{ success: boolean; message?: string }> => {
@@ -901,12 +973,12 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
                 }
             }
             const harga_total = (log.harga_satuan || 0) * (log.quantity || 0);
-            const { error: insertError } = await supabase.from('orders').insert([{
+            const { error: insertError } = await supabase.from(getOrdersTable()).insert([{
                 tanggal: getWIBISOString(), resi: log.resi, toko: log.toko, ecommerce: log.ecommerce, customer: log.customer,
                 part_number: log.part_number, nama_barang: realItemName, quantity: log.quantity, harga_satuan: log.harga_satuan, harga_total: harga_total, status: 'processing' 
             }]);
             if (insertError) continue; 
-            await supabase.from('scan_resi').update({ status: 'Terjual' }).eq('id', log.id);
+            await supabase.from(getScanResiTable()).update({ status: 'Terjual' }).eq('id', log.id);
         }
         return { success: true };
     } catch (error) { console.error("Error processing shipment:", error); return { success: false, message: "Terjadi kesalahan sistem." }; }
