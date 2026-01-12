@@ -24,6 +24,7 @@ interface ShopViewProps {
     onUpdateCartItem: (itemId: string, changes: Partial<CartItem>) => void; 
     onCheckout: (customerName: string) => void; 
     onUpdateBanner: (base64: string) => Promise<void>; 
+    currentStore: string;
 }
 
 export const ShopView: React.FC<ShopViewProps> = ({ 
@@ -35,7 +36,8 @@ export const ShopView: React.FC<ShopViewProps> = ({
     onRemoveFromCart, 
     onUpdateCartItem, 
     onCheckout, 
-    onUpdateBanner 
+    onUpdateBanner,
+    currentStore 
 }) => {
   // State Data
   const [shopItems, setShopItems] = useState<InventoryItem[]>([]);
@@ -88,6 +90,28 @@ export const ShopView: React.FC<ShopViewProps> = ({
   useEffect(() => {
     const loadData = async () => {
         setLoading(true);
+        try {
+            const { data, count } = await fetchShopItems(
+                page, 
+                limit, 
+                debouncedSearch, 
+                category,
+                debouncedPartNumber, 
+                debouncedName, 
+                debouncedBrand, 
+                debouncedApplication,
+                currentStore
+            );
+            setShopItems(data);
+            setTotalPages(Math.ceil(count / limit));
+        } catch (err) {
+            console.error("Error loading shop items:", err);
+        } finally {
+            setLoading(false);
+        }
+    };
+    loadData();
+  }, [page, debouncedSearch, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, category, currentStore]);
         try {
             // PERBAIKAN 4: Ganti 'Semua' jadi 'All' agar filter di Supabase jalan
             const safeCategory = category === 'Semua' ? 'All' : category; 

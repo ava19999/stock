@@ -16,11 +16,12 @@ interface HeaderProps {
   onLogout: () => void;
   pendingOrdersCount: number;
   myPendingOrdersCount: number;
+  currentStore: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   isAdmin, activeView, setActiveView, loading, onRefresh,
-  loginName, onLogout, pendingOrdersCount, myPendingOrdersCount
+  loginName, onLogout, pendingOrdersCount, myPendingOrdersCount, currentStore
 }) => {
   return (
     <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm backdrop-blur-md bg-gray-800/90">
@@ -29,7 +30,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />}
             </div>
             <div>
-                <div className="font-bold leading-none text-gray-100 text-lg">BJW</div>
+                <div className="font-bold leading-none text-gray-100 text-lg">{currentStore}</div>
                 <div className="text-[10px] font-bold text-gray-400 leading-none mt-0.5">Autopart</div>
                 <div className="text-[9px] text-gray-500 leading-none">Sukucadang Mobil</div>
                 <div className={`text-[9px] font-bold mt-1 px-1.5 py-0.5 rounded-md inline-block ${isAdmin ? 'bg-purple-900/30 text-purple-300 border border-purple-800' : 'bg-blue-900/30 text-blue-300 border border-blue-800'}`}>
