@@ -11,8 +11,33 @@ import {
   ReturRecord, 
   ScanResiLog 
 } from '../types';
+import { StoreType } from '../types/store';
 
-const TABLE_NAME = 'base';
+const AUTH_STORAGE_KEY = 'stockmaster_auth_state';
+
+const resolveTableName = (store: StoreType | undefined | null) => {
+    if (store === 'mjm') return 'base_mjm';
+    if (store === 'bjw') return 'base_bjw';
+    return 'base';
+};
+
+const getStoredTableName = () => {
+    if (typeof window === 'undefined') return 'base';
+    try {
+        const saved = localStorage.getItem(AUTH_STORAGE_KEY);
+        if (!saved) return 'base';
+        const parsed = JSON.parse(saved);
+        return resolveTableName(parsed?.selectedStore as StoreType | null);
+    } catch {
+        return 'base';
+    }
+};
+
+let TABLE_NAME = getStoredTableName();
+
+export const setInventoryTableName = (store: StoreType | null | undefined) => {
+    TABLE_NAME = resolveTableName(store);
+};
 
 // Cache Foto (Memori Sementara)
 const photoCache: Record<string, string[]> = {};

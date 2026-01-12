@@ -1,5 +1,5 @@
 // FILE: src/components/common/ImageViewer.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface ImageViewerProps {
@@ -11,9 +11,34 @@ interface ImageViewerProps {
 
 export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex = 0, isOpen, onClose }) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
+  const wasOpenRef = useRef(false);
+  const prevInitialIndexRef = useRef(initialIndex);
+  const hasImages = images && images.length > 0;
+  const clampIndex = (idx: number, length: number) => Math.min(idx, Math.max(0, length - 1));
+
+  useEffect(() => {
+    if (!isOpen) { 
+      wasOpenRef.current = false; 
+      return; 
+    }
+
+    const justOpened = !wasOpenRef.current;
+    const initialChanged = initialIndex !== prevInitialIndexRef.current;
+    if (!hasImages) {
+      wasOpenRef.current = true;
+      prevInitialIndexRef.current = initialIndex;
+      return;
+    }
+
+    if (justOpened || initialChanged) {
+      setCurrentIndex(clampIndex(initialIndex, images.length));
+    }
+    wasOpenRef.current = true;
+    prevInitialIndexRef.current = initialIndex;
+  }, [isOpen, initialIndex, images]);
 
   // Jika tidak ada gambar atau modal tertutup, return null
-  if (!isOpen || !images || images.length === 0) return null;
+  if (!isOpen || !hasImages) return null;
 
   const handleNext = (e: React.MouseEvent) => {
     e.stopPropagation();
