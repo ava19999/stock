@@ -13,6 +13,8 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex =
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const wasOpenRef = useRef(false);
   const prevInitialIndexRef = useRef(initialIndex);
+  const hasImages = images && images.length > 0;
+  const clampIndex = (idx: number, length: number) => Math.min(idx, Math.max(0, length - 1));
 
   useEffect(() => {
     if (!isOpen) { 
@@ -20,7 +22,6 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex =
       return; 
     }
 
-    const hasImages = images && images.length > 0;
     const justOpened = !wasOpenRef.current;
     const initialChanged = initialIndex !== prevInitialIndexRef.current;
     if (!hasImages) {
@@ -30,14 +31,14 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex =
     }
 
     if (justOpened || initialChanged) {
-      setCurrentIndex(Math.min(initialIndex, Math.max(0, images.length - 1)));
+      setCurrentIndex(clampIndex(initialIndex, images.length));
     }
     wasOpenRef.current = true;
     prevInitialIndexRef.current = initialIndex;
   }, [isOpen, initialIndex, images]);
 
   // Jika tidak ada gambar atau modal tertutup, return null
-  if (!isOpen || !images || images.length === 0) return null;
+  if (!isOpen || !hasImages) return null;
 
   const handleNext = (e: React.MouseEvent) => {
     e.stopPropagation();
