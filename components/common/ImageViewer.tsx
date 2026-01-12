@@ -1,5 +1,5 @@
 // FILE: src/components/common/ImageViewer.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface ImageViewerProps {
@@ -11,6 +11,12 @@ interface ImageViewerProps {
 
 export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex = 0, isOpen, onClose }) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
+
+  useEffect(() => {
+    if (isOpen) {
+      setCurrentIndex(Math.min(initialIndex, Math.max(0, images.length - 1)));
+    }
+  }, [isOpen, images, initialIndex]);
 
   // Jika tidak ada gambar atau modal tertutup, return null
   if (!isOpen || !images || images.length === 0) return null;
