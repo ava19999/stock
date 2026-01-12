@@ -1,6 +1,7 @@
 // FILE: src/components/ShopView.tsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { InventoryItem, CartItem } from '../types';
+import { StoreType } from '../types/store';
 import { fetchShopItems } from '../services/supabaseService'; 
 import { compressImage } from '../utils';
 import { ShoppingCart } from 'lucide-react';
@@ -18,7 +19,8 @@ interface ShopViewProps {
     cart: CartItem[]; 
     isAdmin: boolean;
     isKingFano: boolean; 
-    bannerUrl: string; 
+    bannerUrl: string;
+    selectedStore?: StoreType;
     onAddToCart: (item: InventoryItem) => void; 
     onRemoveFromCart: (itemId: string) => void; 
     onUpdateCartItem: (itemId: string, changes: Partial<CartItem>) => void; 
@@ -30,7 +32,8 @@ export const ShopView: React.FC<ShopViewProps> = ({
     cart = [], 
     isAdmin,
     isKingFano, 
-    bannerUrl, 
+    bannerUrl,
+    selectedStore,
     onAddToCart, 
     onRemoveFromCart, 
     onUpdateCartItem, 
@@ -100,7 +103,8 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 debouncedPartNumber,
                 debouncedName,
                 debouncedBrand,
-                debouncedApplication
+                debouncedApplication,
+                selectedStore
             );
             
             setShopItems(data || []);
@@ -115,7 +119,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
     };
 
     loadData();
-  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication]); // Hanya jalan jika ini berubah
+  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, selectedStore]); // Hanya jalan jika ini berubah
 
   // --- Banner Upload Handlers ---
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { 
