@@ -11,6 +11,7 @@ import {
   ReturRecord, 
   ScanResiLog 
 } from '../types';
+import { STORE_CONFIGS } from '../types/store';
 
 const TABLE_NAME = 'base';
 
@@ -165,11 +166,14 @@ export const saveItemImages = async (partNumber: string, images: string[]) => {
 
 // --- STORE-BASED FUNCTIONS ---
 
-// Map store name to table name
+// Map store name to table name using STORE_CONFIGS
 const getTableNameByStore = (storeName: string): string => {
     const upperStore = storeName.toUpperCase();
-    if (upperStore === 'MJM86') return 'base_mjm';
-    if (upperStore === 'BJW') return 'base_bjw';
+    
+    // Use constants from STORE_CONFIGS to avoid magic strings
+    if (upperStore === STORE_CONFIGS.mjm.name) return 'base_mjm';
+    if (upperStore === STORE_CONFIGS.bjw.name) return 'base_bjw';
+    
     return TABLE_NAME; // fallback to default 'base' table
 };
 

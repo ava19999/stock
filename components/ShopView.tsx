@@ -42,8 +42,10 @@ export const ShopView: React.FC<ShopViewProps> = ({
   // Get selected store from context
   const { selectedStore } = useStore();
   
-  // Determine store name for fetching
-  const storeName = selectedStore ? STORE_CONFIGS[selectedStore].name : '';
+  // Determine store name for fetching with safety check
+  const storeName = selectedStore && selectedStore in STORE_CONFIGS 
+    ? STORE_CONFIGS[selectedStore].name 
+    : '';
   
   // State Data
   const [shopItems, setShopItems] = useState<InventoryItem[]>([]);
