@@ -1,10 +1,11 @@
 // FILE: src/components/layout/Header.tsx
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   ShieldCheck, Package, CloudLightning, ShoppingCart, Plus, 
   ClipboardList, Home, LogOut 
 } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
+import { StoreConfig } from '../../types/store';
 
 interface HeaderProps {
   isAdmin: boolean;
@@ -16,22 +17,33 @@ interface HeaderProps {
   onLogout: () => void;
   pendingOrdersCount: number;
   myPendingOrdersCount: number;
+  storeConfig: StoreConfig;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   isAdmin, activeView, setActiveView, loading, onRefresh,
-  loginName, onLogout, pendingOrdersCount, myPendingOrdersCount
+  loginName, onLogout, pendingOrdersCount, myPendingOrdersCount, storeConfig
 }) => {
+  const [logoError, setLogoError] = useState(false);
   return (
     <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm backdrop-blur-md bg-gray-800/90">
         <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')}>
-            <div className={`${isAdmin ? 'bg-purple-600' : 'bg-blue-600'} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform`}>
-                {isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />}
+            <div className={`${isAdmin ? 'bg-purple-600' : 'bg-blue-600'} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform flex items-center justify-center`}>
+                {!logoError ? (
+                    <img 
+                        src={storeConfig.logo} 
+                        alt={storeConfig.name}
+                        className="w-5 h-5 object-contain"
+                        onError={() => setLogoError(true)}
+                    />
+                ) : (
+                    isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />
+                )}
             </div>
             <div>
-                <div className="font-bold leading-none text-gray-100 text-lg">BJW</div>
+                <div className="font-bold leading-none text-gray-100 text-lg">{storeConfig.name}</div>
                 <div className="text-[10px] font-bold text-gray-400 leading-none mt-0.5">Autopart</div>
-                <div className="text-[9px] text-gray-500 leading-none">Sukucadang Mobil</div>
+                <div className="text-[9px] text-gray-500 leading-none">{storeConfig.fullName.includes('AUTOPART') ? storeConfig.fullName.replace(' AUTOPART', '').replace('AUTOPART', '') : storeConfig.fullName}</div>
                 <div className={`text-[9px] font-bold mt-1 px-1.5 py-0.5 rounded-md inline-block ${isAdmin ? 'bg-purple-900/30 text-purple-300 border border-purple-800' : 'bg-blue-900/30 text-blue-300 border border-blue-800'}`}>
                     {isAdmin ? 'ADMIN ACCESS' : 'STORE FRONT'}
                 </div>

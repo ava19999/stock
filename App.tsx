@@ -36,12 +36,13 @@ const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 
 const AppContent: React.FC = () => {
   // --- STORE CONTEXT ---
-  const { selectedStore, userRole, userName, setStore, setUserRole, setUserName, logout: logoutStore } = useStore();
+  const { selectedStore, userRole, userName, setStore, setUserRole, setUserName, logout: logoutStore, getStoreConfig } = useStore();
   
   // --- STATE ---
   const isAuthenticated = selectedStore !== null && userRole !== null;
   const isAdmin = userRole === 'admin';
   const loginName = userName;
+  const currentStoreConfig = getStoreConfig();
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -329,7 +330,20 @@ const AppContent: React.FC = () => {
     <div className="min-h-screen bg-gray-900 flex flex-col font-sans text-gray-100">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       
-      <Header isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} loading={loading} onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} loginName={loginName} onLogout={handleLogout} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} />
+      {currentStoreConfig && (
+        <Header 
+          isAdmin={isAdmin} 
+          activeView={activeView} 
+          setActiveView={setActiveView} 
+          loading={loading} 
+          onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} 
+          loginName={loginName} 
+          onLogout={handleLogout} 
+          pendingOrdersCount={pendingOrdersCount} 
+          myPendingOrdersCount={myPendingOrdersCount}
+          storeConfig={currentStoreConfig}
+        />
+      )}
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
