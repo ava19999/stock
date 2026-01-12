@@ -1,6 +1,18 @@
 // FILE: src/services/authService.ts
 import { supabase } from '../lib/supabase';
 
+/**
+ * Authentication Service
+ * 
+ * SECURITY NOTE: This implementation uses plain text passwords for simplicity.
+ * For production use, implement:
+ * - Password hashing (bcrypt, argon2)
+ * - Supabase Auth integration
+ * - Session tokens with expiration
+ * - Rate limiting for login attempts
+ * - Audit logging
+ */
+
 export interface User {
   id: string;
   username: string;

@@ -35,3 +35,9 @@ The migration creates a default admin user:
 2. Use Supabase Auth for built-in authentication
 3. Implement proper session management
 4. Add rate limiting for login attempts
+
+⚠️ **Row Level Security Policies**: The current policies allow public read and insert access. For production:
+1. Restrict read access to exclude password field
+2. Remove public insert access or restrict to specific use cases
+3. Implement proper role-based access control
+4. Consider using Supabase Auth for secure user management
