@@ -163,6 +163,63 @@ export const saveItemImages = async (partNumber: string, images: string[]) => {
     } catch (e) { console.error(e); }
 };
 
+// --- STORE-BASED FUNCTIONS ---
+
+// Map store name to table name
+const getTableNameByStore = (storeName: string): string => {
+    const upperStore = storeName.toUpperCase();
+    if (upperStore === 'MJM86') return 'base_mjm';
+    if (upperStore === 'BJW') return 'base_bjw';
+    return TABLE_NAME; // fallback to default 'base' table
+};
+
+// Fetch inventory by store
+export const fetchInventoryByStore = async (storeName: string): Promise<{ data: InventoryItem[], error: string | null }> => {
+    try {
+        const tableName = getTableNameByStore(storeName);
+        const { data, error } = await supabase
+            .from(tableName)
+            .select('*')
+            .gt('quantity', 0)
+            .order('name', { ascending: true });
+        
+        if (error) {
+            console.error(`Error fetching inventory from ${tableName}:`, error);
+            return { data: [], error: error.message };
+        }
+
+        const baseItems = (data || []).map(mapBaseItem);
+
+        // Fetch additional data (prices, photos)
+        if (baseItems.length > 0) {
+            try {
+                const partNumbers = baseItems.map(i => i.partNumber).filter(Boolean);
+                const [sellMap, photoMapResult] = await Promise.all([
+                    fetchLatestSellingPrices(partNumbers),
+                    fetchPhotos(partNumbers)
+                ]);
+                const photoMap = photoMapResult || {};
+
+                baseItems.forEach(item => {
+                    const key = normalizeKey(item.partNumber);
+                    if (sellMap && sellMap[key] !== undefined) item.price = sellMap[key];
+                    if (photoMap && photoMap[key] && photoMap[key].length > 0) {
+                        item.images = photoMap[key];
+                        item.imageUrl = photoMap[key][0];
+                    }
+                });
+            } catch (e) {
+                console.error("Error fetching secondary data for inventory:", e);
+            }
+        }
+
+        return { data: baseItems, error: null };
+    } catch (err: any) {
+        console.error('Error in fetchInventoryByStore:', err);
+        return { data: [], error: err.message || 'Unknown error occurred' };
+    }
+};
+
 // --- CORE FUNCTIONS (DENGAN FIX UNTUK SHOP) ---
 
 // 1. Fetch Gudang (Pagination)
@@ -234,10 +291,14 @@ export const fetchShopItems = async (
     partNumberSearch?: string,
     nameSearch?: string,
     brandSearch?: string,
-    applicationSearch?: string
+    applicationSearch?: string,
+    storeName?: string
 ) => {
+    // Determine table based on store name
+    const tableName = storeName ? getTableNameByStore(storeName) : TABLE_NAME;
+    
     // Ambil hanya barang yg ada stoknya
-    let query = supabase.from(TABLE_NAME).select('*', { count: 'exact' }).gt('quantity', 0);
+    let query = supabase.from(tableName).select('*', { count: 'exact' }).gt('quantity', 0);
     
     // Filter Pencarian Umum (search all fields)
     if (search && search.trim() !== '') {

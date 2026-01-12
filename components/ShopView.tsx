@@ -4,6 +4,8 @@ import { InventoryItem, CartItem } from '../types';
 import { fetchShopItems } from '../services/supabaseService'; 
 import { compressImage } from '../utils';
 import { ShoppingCart } from 'lucide-react';
+import { useStore } from '../context/StoreContext';
+import { STORE_CONFIGS } from '../types/store';
 
 import { ImageCropper } from './shop/ImageCropper';
 import { ShopFilterBar } from './shop/ShopFilterBar';
@@ -37,9 +39,16 @@ export const ShopView: React.FC<ShopViewProps> = ({
     onCheckout, 
     onUpdateBanner 
 }) => {
+  // Get selected store from context
+  const { selectedStore } = useStore();
+  
+  // Determine store name for fetching
+  const storeName = selectedStore ? STORE_CONFIGS[selectedStore].name : '';
+  
   // State Data
   const [shopItems, setShopItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
   // State Filter & Pagination
   const [searchTerm, setSearchTerm] = useState('');
@@ -88,6 +97,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
   useEffect(() => {
     const loadData = async () => {
         setLoading(true);
+        setError(null);
         try {
             // PERBAIKAN 4: Ganti 'Semua' jadi 'All' agar filter di Supabase jalan
             const safeCategory = category === 'Semua' ? 'All' : category; 
@@ -100,7 +110,8 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 debouncedPartNumber,
                 debouncedName,
                 debouncedBrand,
-                debouncedApplication
+                debouncedApplication,
+                storeName // Pass store name to fetch from appropriate table
             );
             
             setShopItems(data || []);
@@ -109,13 +120,14 @@ export const ShopView: React.FC<ShopViewProps> = ({
         } catch (err) {
             console.error("Gagal load shop items:", err);
             setShopItems([]);
+            setError('Failed to load inventory data');
         } finally {
             setLoading(false);
         }
     };
 
     loadData();
-  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication]); // Hanya jalan jika ini berubah
+  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, storeName]); // Added storeName to dependencies
 
   // --- Banner Upload Handlers ---
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { 
@@ -196,6 +208,12 @@ export const ShopView: React.FC<ShopViewProps> = ({
 
           {/* LIST BARANG */}
           <div className="p-4 pb-24">
+            {error && (
+              <div className="mb-4 p-4 bg-red-500/10 border border-red-500 rounded-lg text-red-400 text-center">
+                {error}
+              </div>
+            )}
+            
             <ShopItemList 
                 loading={loading}
                 // PERBAIKAN 5: Kirim 'items' (bukan shopItems) agar sesuai komponen ShopItemList yang baru
