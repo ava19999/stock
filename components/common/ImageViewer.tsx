@@ -11,14 +11,11 @@ interface ImageViewerProps {
 
 export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex = 0, isOpen, onClose }) => {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
-  const imagesLength = images?.length ?? 0;
 
   useEffect(() => {
-    if (!isOpen) return;
-    if (imagesLength > 0) {
-      setCurrentIndex(Math.min(initialIndex, imagesLength - 1));
-    }
-  }, [isOpen, initialIndex, imagesLength]);
+    if (!isOpen || !images || images.length === 0) return;
+    setCurrentIndex(Math.min(initialIndex, images.length - 1));
+  }, [isOpen, initialIndex, images?.length]);
 
   // Jika tidak ada gambar atau modal tertutup, return null
   if (!isOpen || !images || images.length === 0) return null;
