@@ -25,6 +25,7 @@ import {
   fetchOrders, saveOrder, updateOrderStatusService,
   fetchHistory, addBarangMasuk, addBarangKeluar, updateOrderData 
 } from './services/supabaseService';
+import { login, loginAsGuest, ensureDefaultAdmin, User } from './services/authService';
 import { generateId } from './utils';
 import { StoreId } from './config/storeConfig';
 
@@ -34,9 +35,10 @@ const SELECTED_STORE_KEY = 'stockmaster_selected_store';
 
 const AppContent: React.FC = () => {
   // --- STATE ---
-  const [isAuthenticated, setIsAuthenticated] = useState(true); // Auto-login enabled
-  const [isAdmin, setIsAdmin] = useState(true); // Auto-login as admin
-  const [loginName, setLoginName] = useState('ava'); // Admin username
+  const [isAuthenticated, setIsAuthenticated] = useState(false); // Disabled auto-login
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [loginName, setLoginName] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [selectedStore, setSelectedStore] = useState<StoreId>('bjw'); // Default store
 
@@ -58,17 +60,33 @@ const AppContent: React.FC = () => {
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => setToast({msg, type});
 
-  const isKingFano = useMemo(() => loginName.trim().toLowerCase() === 'king fano', [loginName]);
+  const isKingFano = useMemo(() => currentUser?.name.trim().toLowerCase() === 'king fano' || loginName.trim().toLowerCase() === 'king fano', [currentUser, loginName]);
   const pendingOrdersCount = orders.filter(o => o.status === 'pending').length;
-  const myPendingOrdersCount = orders.filter(o => o.customerName === loginName && o.status === 'pending').length;
+  const myPendingOrdersCount = orders.filter(o => o.customerName === (currentUser?.name || loginName) && o.status === 'pending').length;
 
   // --- EFFECTS ---
   useEffect(() => {
+    // Initialize default admin user
+    ensureDefaultAdmin().catch(err => console.error('Failed to ensure default admin:', err));
+    
     let cId = localStorage.getItem(CUSTOMER_ID_KEY);
     if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
     setMyCustomerId(cId);
-    const savedName = localStorage.getItem('stockmaster_customer_name');
-    if(savedName) { setLoginName(savedName); } // Keep authenticated state as true
+    
+    // Check for saved user session
+    const savedUser = localStorage.getItem('stockmaster_current_user');
+    if (savedUser) {
+      try {
+        const user: User = JSON.parse(savedUser);
+        setCurrentUser(user);
+        setIsAuthenticated(true);
+        setIsAdmin(user.role === 'admin');
+        setLoginName(user.name);
+      } catch (e) {
+        console.error('Failed to parse saved user:', e);
+        localStorage.removeItem('stockmaster_current_user');
+      }
+    }
     
     // Load selected store from localStorage
     const savedStore = localStorage.getItem(SELECTED_STORE_KEY) as StoreId | null;
@@ -99,29 +117,75 @@ const AppContent: React.FC = () => {
   };
 
   // --- HANDLERS AUTH ---
-  const handleGlobalLogin = (e: React.FormEvent) => {
+  const handleGlobalLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loginName.toLowerCase() === 'ava' && loginPass === '9193') {
-        setIsAdmin(true); setIsAuthenticated(true); setActiveView('inventory');
-        setMyCustomerId('ADMIN-AVA'); showToast('Login Admin Berhasil'); 
+    
+    // Admin login with password
+    if (loginPass !== '') {
+      const result = await login(loginName, loginPass);
+      if (result.success && result.user) {
+        setCurrentUser(result.user);
+        setIsAdmin(result.user.role === 'admin');
+        setIsAuthenticated(true);
+        setActiveView(result.user.role === 'admin' ? 'inventory' : 'shop');
+        setMyCustomerId(result.user.id);
+        localStorage.setItem('stockmaster_current_user', JSON.stringify(result.user));
+        showToast('Login Berhasil!');
         refreshData();
-    } else if (loginName.trim() !== '') {
-        loginAsCustomer(loginName);
-    } else { showToast('Masukkan Nama', 'error'); }
+      } else {
+        showToast(result.message || 'Login Gagal', 'error');
+      }
+    } 
+    // Guest/Customer login
+    else if (loginName.trim() !== '') {
+      const result = await loginAsGuest(loginName);
+      if (result.success && result.user) {
+        setCurrentUser(result.user);
+        setIsAdmin(false);
+        setIsAuthenticated(true);
+        setActiveView('shop');
+        localStorage.setItem('stockmaster_current_user', JSON.stringify(result.user));
+        localStorage.setItem('stockmaster_customer_name', result.user.name);
+        
+        if (result.user.name.toLowerCase() === 'king fano') {
+          showToast(`Selamat Datang, King Fano! Harga Khusus Aktif.`);
+        } else {
+          showToast(`Selamat Datang, ${result.user.name}!`);
+        }
+      } else {
+        showToast(result.message || 'Login Gagal', 'error');
+      }
+    } else {
+      showToast('Masukkan Nama', 'error');
+    }
   };
 
-  const loginAsCustomer = (name: string) => {
-      setIsAdmin(false); setIsAuthenticated(true); setActiveView('shop');
-      localStorage.setItem('stockmaster_customer_name', name); 
-      if (name.toLowerCase() === 'king fano') showToast(`Selamat Datang, King Fano! Harga Khusus Aktif.`);
-      else showToast(`Selamat Datang, ${name}!`);
+  const loginAsCustomer = async (name: string) => {
+    const result = await loginAsGuest(name);
+    if (result.success && result.user) {
+      setCurrentUser(result.user);
+      setIsAdmin(false);
+      setIsAuthenticated(true);
+      setActiveView('shop');
+      setLoginName(result.user.name);
+      localStorage.setItem('stockmaster_current_user', JSON.stringify(result.user));
+      localStorage.setItem('stockmaster_customer_name', result.user.name);
+      
+      if (result.user.name.toLowerCase() === 'king fano') {
+        showToast(`Selamat Datang, King Fano! Harga Khusus Aktif.`);
+      } else {
+        showToast(`Selamat Datang, ${result.user.name}!`);
+      }
+    }
   };
 
   const handleLogout = () => { 
     setIsAuthenticated(false); 
-    setIsAdmin(false); 
+    setIsAdmin(false);
+    setCurrentUser(null);
     setLoginName(''); 
     setLoginPass(''); 
+    localStorage.removeItem('stockmaster_current_user');
     localStorage.removeItem('stockmaster_customer_name'); 
     // Don't remove selected store on logout, keep it for next login
   };
@@ -211,9 +275,13 @@ const AppContent: React.FC = () => {
   };
 
   const doCheckout = async (name: string) => {
-      if (name !== loginName && !isAdmin) { setLoginName(name); localStorage.setItem('stockmaster_customer_name', name); }
+      const customerName = currentUser?.name || name;
+      if (name !== customerName && !isAdmin) { 
+        setLoginName(name); 
+        localStorage.setItem('stockmaster_customer_name', name); 
+      }
       const totalAmount = cart.reduce((sum, item) => sum + ((item.customPrice ?? item.price) * item.cartQuantity), 0);
-      const newOrder: Order = { id: generateId(), customerName: name, items: [...cart], totalAmount: totalAmount, status: 'pending', timestamp: Date.now() };
+      const newOrder: Order = { id: generateId(), customerName: customerName, items: [...cart], totalAmount: totalAmount, status: 'pending', timestamp: Date.now() };
       
       setLoading(true);
       if (await saveOrder(newOrder)) {
@@ -323,14 +391,14 @@ const AppContent: React.FC = () => {
     <div className="min-h-screen bg-gray-900 flex flex-col font-sans text-gray-100">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       
-      <Header isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} loading={loading} onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} loginName={loginName} onLogout={handleLogout} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} selectedStore={selectedStore} />
+      <Header isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} loading={loading} onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} loginName={currentUser?.name || loginName} onLogout={handleLogout} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} selectedStore={selectedStore} />
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
         {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} selectedStore={selectedStore} />}
         {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
         {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}
         {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} items={items} isLoading={loading} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
-        {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
+        {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === (currentUser?.name || loginName))} />}
         
         {isEditing && isAdmin && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in">
