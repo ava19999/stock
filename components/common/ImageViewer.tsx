@@ -22,14 +22,18 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex =
 
     const justOpened = !wasOpenRef.current;
     const initialChanged = initialIndex !== prevInitialIndexRef.current;
-    if (images && images.length > 0 && (justOpened || initialChanged)) {
+    if (!images || images.length === 0) {
+      wasOpenRef.current = true;
+      prevInitialIndexRef.current = initialIndex;
+      return;
+    }
+
+    if (justOpened || initialChanged) {
       setCurrentIndex(Math.min(initialIndex, images.length - 1));
-    } else if (justOpened || initialChanged) {
-      setCurrentIndex(0);
     }
     wasOpenRef.current = true;
     prevInitialIndexRef.current = initialIndex;
-  }, [isOpen, initialIndex, images.length]);
+  }, [isOpen, initialIndex, images]);
 
   // Jika tidak ada gambar atau modal tertutup, return null
   if (!isOpen || !images || images.length === 0) return null;
