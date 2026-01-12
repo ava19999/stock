@@ -41,10 +41,9 @@ relation "base_bjw" does not exist
 5. **Verifikasi**
    - Buka "Table Editor" di sidebar
    - Pastikan tabel berikut muncul:
-     - `base_mjm` dan `base_bjw`
-     - `barang_masuk_mjm` dan `barang_masuk_bjw`
-     - `barang_keluar_mjm` dan `barang_keluar_bjw`
-     - dll. (total 18 tabel)
+     - **Per Toko:** `base_mjm`, `base_bjw`, `barang_masuk_mjm`, `barang_masuk_bjw`, dst (12 tabel)
+     - **Shared:** `foto`, `list_harga_jual`, `chat_sessions` (3 tabel)
+     - **Total:** 15 tabel
 
 ### Cara 2: Duplikasi Manual (Jika Sudah Ada Data)
 
@@ -60,14 +59,16 @@ Jika Anda sudah punya data di tabel lama (`base`, `barang_masuk`, dll) dan ingin
 
 3. **Atau gunakan SQL untuk copy data:**
    ```sql
-   -- Copy data dari tabel lama ke tabel baru
+   -- Copy data dari tabel lama ke tabel baru (per toko)
    INSERT INTO base_mjm SELECT * FROM base;
    INSERT INTO base_bjw SELECT * FROM base;
    
-   -- Ulangi untuk tabel lain
    INSERT INTO barang_masuk_mjm SELECT * FROM barang_masuk;
    INSERT INTO barang_masuk_bjw SELECT * FROM barang_masuk;
    -- dst...
+   
+   -- Tabel shared tidak perlu diduplikasi, gunakan yang sudah ada
+   -- (foto, list_harga_jual, chat_sessions)
    ```
 
 ## 🧪 Testing & Verifikasi
@@ -110,7 +111,7 @@ Jika Anda sudah punya data di tabel lama (`base`, `barang_masuk`, dll) dan ingin
 
 ## 📊 Struktur Tabel yang Dibutuhkan
 
-### Untuk Setiap Toko (MJM & BJW):
+### Tabel TERPISAH per Toko (6 tabel untuk MJM + 6 untuk BJW = 12 tabel):
 
 | Tabel | Fungsi | Contoh untuk MJM |
 |-------|--------|------------------|
@@ -118,13 +119,24 @@ Jika Anda sudah punya data di tabel lama (`base`, `barang_masuk`, dll) dan ingin
 | Barang Masuk | Log stok masuk | `barang_masuk_mjm` |
 | Barang Keluar | Log stok keluar | `barang_keluar_mjm` |
 | Orders | Pesanan customer | `orders_mjm` |
-| Foto | Gambar produk | `foto_mjm` |
-| List Harga Jual | Daftar harga | `list_harga_jual_mjm` |
 | Retur | Log retur | `retur_mjm` |
 | Scan Resi | Tracking pengiriman | `scan_resi_mjm` |
-| Chat Sessions | Chat pelanggan | `chat_sessions_mjm` |
 
-**Total: 18 tabel** (9 untuk MJM + 9 untuk BJW)
+### Tabel SHARED (Digunakan bersama oleh SEMUA toko = 3 tabel):
+
+| Tabel | Fungsi | Shared? |
+|-------|--------|---------|
+| foto | Gambar produk | ✅ SHARED |
+| list_harga_jual | Daftar harga | ✅ SHARED |
+| chat_sessions | Chat pelanggan | ✅ SHARED |
+
+**Total: 15 tabel** (6 untuk MJM + 6 untuk BJW + 3 shared)
+
+### Mengapa Ada Tabel Shared?
+
+- **Foto & Harga** digunakan bersama untuk efisiensi - produk yang sama memiliki foto dan harga yang sama di kedua toko
+- **Chat Sessions** juga shared agar customer bisa berkomunikasi dengan admin dari toko mana saja
+- **Data inventory dan transaksi** tetap terpisah per toko
 
 ## 🔍 Troubleshooting
 
@@ -163,6 +175,7 @@ Jika Anda sudah punya data di tabel lama (`base`, `barang_masuk`, dll) dan ingin
 
 ✅ Kode aplikasi sudah diupdate untuk multi-store  
 ✅ Dynamic table names sudah diimplementasi  
+✅ Tabel foto dan list_harga_jual di-SHARE antar toko untuk efisiensi  
 ✅ Logging sudah ditambahkan untuk debugging  
 ✅ Dokumentasi sudah dibuat  
 ⚠️ **DIPERLUKAN: Buat tabel di Supabase menggunakan `database_setup.sql`**
@@ -171,8 +184,9 @@ Jika Anda sudah punya data di tabel lama (`base`, `barang_masuk`, dll) dan ingin
 
 1. **Tabel HARUS dibuat** agar aplikasi berfungsi
 2. **Nama tabel harus persis** (huruf kecil, dengan underscore)
-3. **Setiap toko punya data terpisah** - tidak sharing
-4. **Backup data lama** sebelum migrasi (jika ada)
+3. **Data inventory terpisah per toko** - tidak sharing
+4. **Foto dan harga SHARED** - kedua toko menggunakan foto dan harga yang sama
+5. **Backup data lama** sebelum migrasi (jika ada)
 
 ## 📞 Dukungan
 

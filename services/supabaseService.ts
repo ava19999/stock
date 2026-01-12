@@ -43,16 +43,13 @@ const getOrdersTable = (): string => {
   return 'orders';
 };
 
+// Shared tables across stores (not store-specific)
 const getFotoTable = (): string => {
-  if (CURRENT_STORE === 'mjm') return 'foto_mjm';
-  if (CURRENT_STORE === 'bjw') return 'foto_bjw';
-  return 'foto';
+  return 'foto'; // SHARED: Foto digunakan bersama untuk semua toko
 };
 
 const getListHargaJualTable = (): string => {
-  if (CURRENT_STORE === 'mjm') return 'list_harga_jual_mjm';
-  if (CURRENT_STORE === 'bjw') return 'list_harga_jual_bjw';
-  return 'list_harga_jual';
+  return 'list_harga_jual'; // SHARED: List harga jual digunakan bersama untuk semua toko
 };
 
 const getReturTable = (): string => {
@@ -67,12 +64,6 @@ const getScanResiTable = (): string => {
   return 'scan_resi';
 };
 
-const getChatSessionsTable = (): string => {
-  if (CURRENT_STORE === 'mjm') return 'chat_sessions_mjm';
-  if (CURRENT_STORE === 'bjw') return 'chat_sessions_bjw';
-  return 'chat_sessions';
-};
-
 // Function to set the current store (should be called when store is selected)
 export const setCurrentStore = (store: StoreType) => {
   CURRENT_STORE = store;
@@ -82,6 +73,8 @@ export const setCurrentStore = (store: StoreType) => {
   console.log(`  - Barang Masuk: ${getBarangMasukTable()}`);
   console.log(`  - Barang Keluar: ${getBarangKeluarTable()}`);
   console.log(`  - Orders: ${getOrdersTable()}`);
+  console.log(`  - Foto: ${getFotoTable()} (SHARED)`);
+  console.log(`  - List Harga Jual: ${getListHargaJualTable()} (SHARED)`);
 };
 
 // Export function to check current store (for debugging)

@@ -2,8 +2,13 @@
 -- SQL Script untuk Setup Multi-Store Database
 -- ========================================
 -- 
--- Script ini akan membuat semua tabel yang diperlukan untuk
--- toko MJM dan BJW berdasarkan schema tabel yang sudah ada.
+-- Script ini akan membuat tabel yang diperlukan untuk sistem multi-store.
+-- 
+-- STRUKTUR:
+-- - Tabel TERPISAH per toko: base, barang_masuk, barang_keluar, orders, retur, scan_resi
+-- - Tabel SHARED (digunakan bersama): foto, list_harga_jual, chat_sessions
+-- 
+-- Total: 15 tabel (6 MJM + 6 BJW + 3 shared)
 --
 -- CARA PENGGUNAAN:
 -- 1. Buka Supabase Dashboard → SQL Editor
@@ -12,7 +17,8 @@
 --
 -- ========================================
 
--- BAGIAN 1: Buat Tabel Base (Inventory Utama)
+-- ========================================
+-- BAGIAN 1: Tabel Base (Inventory Utama) - PER TOKO
 -- ========================================
 
 -- Tabel base_mjm untuk toko MJM86
@@ -44,7 +50,7 @@ CREATE TABLE IF NOT EXISTS base_bjw (
 );
 
 -- ========================================
--- BAGIAN 2: Barang Masuk (Incoming Stock)
+-- BAGIAN 2: Barang Masuk (Incoming Stock) - PER TOKO
 -- ========================================
 
 CREATE TABLE IF NOT EXISTS barang_masuk_mjm (
@@ -86,7 +92,7 @@ CREATE TABLE IF NOT EXISTS barang_masuk_bjw (
 );
 
 -- ========================================
--- BAGIAN 3: Barang Keluar (Outgoing Stock)
+-- BAGIAN 3: Barang Keluar (Outgoing Stock) - PER TOKO
 -- ========================================
 
 CREATE TABLE IF NOT EXISTS barang_keluar_mjm (
@@ -130,7 +136,7 @@ CREATE TABLE IF NOT EXISTS barang_keluar_bjw (
 );
 
 -- ========================================
--- BAGIAN 4: Orders (Pesanan)
+-- BAGIAN 4: Orders (Pesanan) - PER TOKO
 -- ========================================
 
 CREATE TABLE IF NOT EXISTS orders_mjm (
@@ -166,63 +172,7 @@ CREATE TABLE IF NOT EXISTS orders_bjw (
 );
 
 -- ========================================
--- BAGIAN 5: Foto (Product Images)
--- ========================================
-
-CREATE TABLE IF NOT EXISTS foto_mjm (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    part_number TEXT UNIQUE,
-    foto_1 TEXT,
-    foto_2 TEXT,
-    foto_3 TEXT,
-    foto_4 TEXT,
-    foto_5 TEXT,
-    foto_6 TEXT,
-    foto_7 TEXT,
-    foto_8 TEXT,
-    foto_9 TEXT,
-    foto_10 TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS foto_bjw (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    part_number TEXT UNIQUE,
-    foto_1 TEXT,
-    foto_2 TEXT,
-    foto_3 TEXT,
-    foto_4 TEXT,
-    foto_5 TEXT,
-    foto_6 TEXT,
-    foto_7 TEXT,
-    foto_8 TEXT,
-    foto_9 TEXT,
-    foto_10 TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- ========================================
--- BAGIAN 6: List Harga Jual (Selling Prices)
--- ========================================
-
-CREATE TABLE IF NOT EXISTS list_harga_jual_mjm (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    part_number TEXT UNIQUE,
-    name TEXT,
-    harga NUMERIC,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS list_harga_jual_bjw (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    part_number TEXT UNIQUE,
-    name TEXT,
-    harga NUMERIC,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- ========================================
--- BAGIAN 7: Retur (Returns)
+-- BAGIAN 5: Retur (Returns) - PER TOKO
 -- ========================================
 
 CREATE TABLE IF NOT EXISTS retur_mjm (
@@ -262,7 +212,7 @@ CREATE TABLE IF NOT EXISTS retur_bjw (
 );
 
 -- ========================================
--- BAGIAN 8: Scan Resi (Shipment Tracking)
+-- BAGIAN 6: Scan Resi (Shipment Tracking) - PER TOKO
 -- ========================================
 
 CREATE TABLE IF NOT EXISTS scan_resi_mjm (
@@ -298,10 +248,37 @@ CREATE TABLE IF NOT EXISTS scan_resi_bjw (
 );
 
 -- ========================================
--- BAGIAN 9: Chat Sessions
+-- BAGIAN 7: TABEL SHARED (Digunakan oleh SEMUA toko)
 -- ========================================
 
-CREATE TABLE IF NOT EXISTS chat_sessions_mjm (
+-- Foto (SHARED) - Foto produk digunakan bersama
+CREATE TABLE IF NOT EXISTS foto (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    part_number TEXT UNIQUE,
+    foto_1 TEXT,
+    foto_2 TEXT,
+    foto_3 TEXT,
+    foto_4 TEXT,
+    foto_5 TEXT,
+    foto_6 TEXT,
+    foto_7 TEXT,
+    foto_8 TEXT,
+    foto_9 TEXT,
+    foto_10 TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- List Harga Jual (SHARED) - Daftar harga digunakan bersama
+CREATE TABLE IF NOT EXISTS list_harga_jual (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    part_number TEXT UNIQUE,
+    name TEXT,
+    harga NUMERIC,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Chat Sessions (SHARED) - Chat customer digunakan bersama
+CREATE TABLE IF NOT EXISTS chat_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     customer_id TEXT UNIQUE,
     customer_name TEXT,
@@ -313,20 +290,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions_mjm (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS chat_sessions_bjw (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    customer_id TEXT UNIQUE,
-    customer_name TEXT,
-    messages JSONB,
-    last_message TEXT,
-    last_timestamp BIGINT,
-    unread_admin_count INTEGER DEFAULT 0,
-    unread_user_count INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
 -- ========================================
--- BAGIAN 10: Indexes untuk Performa
+-- BAGIAN 8: Indexes untuk Performa
 -- ========================================
 
 -- Index untuk base_mjm
@@ -361,11 +326,27 @@ CREATE INDEX IF NOT EXISTS idx_scan_resi_mjm_date ON scan_resi_mjm(tanggal DESC)
 CREATE INDEX IF NOT EXISTS idx_scan_resi_bjw_resi ON scan_resi_bjw(resi);
 CREATE INDEX IF NOT EXISTS idx_scan_resi_bjw_date ON scan_resi_bjw(tanggal DESC);
 
+-- Index untuk foto (SHARED)
+CREATE INDEX IF NOT EXISTS idx_foto_part_number ON foto(part_number);
+
+-- Index untuk list_harga_jual (SHARED)
+CREATE INDEX IF NOT EXISTS idx_list_harga_jual_part ON list_harga_jual(part_number);
+
 -- ========================================
 -- SELESAI!
 -- ========================================
 -- 
--- Tabel-tabel sudah dibuat. Sekarang Anda bisa:
+-- Tabel-tabel sudah dibuat:
+-- - 6 tabel untuk toko MJM (base_mjm, barang_masuk_mjm, dll)
+-- - 6 tabel untuk toko BJW (base_bjw, barang_masuk_bjw, dll)
+-- - 3 tabel SHARED (foto, list_harga_jual, chat_sessions)
+-- 
+-- CATATAN PENTING:
+-- - Tabel foto, list_harga_jual, dan chat_sessions digunakan BERSAMA
+-- - Kedua toko akan mengakses foto dan harga yang sama
+-- - Data inventory dan transaksi tetap terpisah per toko
+--
+-- Sekarang Anda bisa:
 -- 1. Test aplikasi dengan memilih toko MJM atau BJW
 -- 2. Cek browser console (F12) untuk melihat log
 -- 3. Verifikasi data muncul dengan benar

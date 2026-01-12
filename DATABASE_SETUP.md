@@ -2,33 +2,36 @@
 
 ## Struktur Database untuk Multi-Store
 
-Aplikasi ini mendukung dua toko: **MJM86** dan **BJW**. Setiap toko memiliki tabel database terpisah untuk menghindari konflik data.
+Aplikasi ini mendukung dua toko: **MJM86** dan **BJW**. Setiap toko memiliki tabel database terpisah untuk data transaksi, namun **berbagi tabel foto dan harga** untuk efisiensi.
 
 ### Tabel yang Diperlukan
 
-Untuk setiap toko, buat tabel berikut di Supabase:
+#### Tabel TERPISAH Per Toko
 
-#### Untuk Toko MJM (mjm):
+**Untuk Toko MJM (mjm):**
 - `base_mjm` - Tabel inventory utama
 - `barang_masuk_mjm` - Log barang masuk
 - `barang_keluar_mjm` - Log barang keluar
 - `orders_mjm` - Pesanan pelanggan
-- `foto_mjm` - Foto produk
-- `list_harga_jual_mjm` - Daftar harga jual
 - `retur_mjm` - Log retur
 - `scan_resi_mjm` - Log scan resi
-- `chat_sessions_mjm` - Sesi chat pelanggan
 
-#### Untuk Toko BJW (bjw):
+**Untuk Toko BJW (bjw):**
 - `base_bjw` - Tabel inventory utama
 - `barang_masuk_bjw` - Log barang masuk
 - `barang_keluar_bjw` - Log barang keluar
 - `orders_bjw` - Pesanan pelanggan
-- `foto_bjw` - Foto produk
-- `list_harga_jual_bjw` - Daftar harga jual
 - `retur_bjw` - Log retur
 - `scan_resi_bjw` - Log scan resi
-- `chat_sessions_bjw` - Sesi chat pelanggan
+
+#### Tabel SHARED (Digunakan Bersama)
+
+Tabel berikut digunakan oleh **KEDUA toko**:
+- `foto` - Foto produk (shared)
+- `list_harga_jual` - Daftar harga jual (shared)
+- `chat_sessions` - Sesi chat pelanggan (shared)
+
+**Total: 15 tabel** (6 untuk MJM + 6 untuk BJW + 3 shared)
 
 ### Cara Membuat Tabel
 
