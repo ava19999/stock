@@ -19,12 +19,10 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex =
       wasOpenRef.current = false; 
       return; 
     }
-    if (!images || images.length === 0) return;
 
     const justOpened = !wasOpenRef.current;
     const initialChanged = initialIndex !== prevInitialIndexRef.current;
-    const shouldSyncIndex = justOpened || initialChanged;
-    if (shouldSyncIndex) {
+    if (images && images.length > 0 && (justOpened || initialChanged)) {
       setCurrentIndex(Math.min(initialIndex, images.length - 1));
     }
     wasOpenRef.current = true;
