@@ -13,8 +13,11 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ images, initialIndex =
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
 
   useEffect(() => {
-    if (isOpen) {
-      setCurrentIndex(Math.min(initialIndex, Math.max(0, images.length - 1)));
+    if (!isOpen) return;
+    if (images && images.length > 0) {
+      setCurrentIndex(Math.min(initialIndex, images.length - 1));
+    } else {
+      setCurrentIndex(0);
     }
   }, [isOpen, images, initialIndex]);
 
