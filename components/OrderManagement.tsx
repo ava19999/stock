@@ -1,6 +1,6 @@
 // FILE: src/components/OrderManagement.tsx
 import React, { useState, useEffect, useMemo } from 'react';
-import { Order, OrderStatus, ReturRecord } from '../types';
+import { Order, OrderStatus, ReturRecord, InventoryItem } from '../types';
 import { 
   fetchReturRecords, updateReturKeterangan, getItemByPartNumber, 
   updateInventory, addReturTransaction, updateOrderData, saveOrder 
@@ -26,13 +26,14 @@ const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 
 
 interface OrderManagementProps {
   orders: Order[];
+  items?: InventoryItem[];
   isLoading?: boolean;
   onUpdateStatus: (orderId: string, status: OrderStatus) => void;
   onProcessReturn: (orderId: string, returnedItems: { itemId: string, qty: number }[]) => void;
   onRefresh?: () => void;
 }
 
-export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], isLoading = false, onUpdateStatus, onRefresh }) => {
+export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], items = [], isLoading = false, onUpdateStatus, onRefresh }) => {
   // --- STATE ---
   const [activeTab, setActiveTab] = useState<'pending' | 'scan' | 'processing' | 'history'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
@@ -166,7 +167,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
 
       {/* TABS */}
       <div className="flex border-b border-gray-700 bg-gray-900/50">
-          {[{ id: 'pending', label: 'Baru', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-400' }, { id: 'scan', label: 'Scan Resi', icon: ScanBarcode, count: 0, color: 'text-gray-300' }, { id: 'processing', label: 'Terjual', icon: Package, count: 0, color: 'text-blue-400' }, { id: 'history', label: 'Retur', icon: CheckCircle, count: returDbRecords.length, color: 'text-red-400' }].map((tab: any) => (
+          {[{ id: 'pending', label: 'Offline', icon: Clock, count: safeOrders.filter(o=>o?.status==='pending').length, color: 'text-amber-400' }, { id: 'scan', label: 'Scan Resi', icon: ScanBarcode, count: 0, color: 'text-gray-300' }, { id: 'processing', label: 'Terjual', icon: Package, count: 0, color: 'text-blue-400' }, { id: 'history', label: 'Retur', icon: CheckCircle, count: returDbRecords.length, color: 'text-red-400' }].map((tab: any) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-3 text-xs font-bold flex items-center justify-center gap-2 border-b-2 transition-all hover:bg-gray-800 relative ${activeTab === tab.id ? `border-purple-500 text-purple-400 bg-gray-800` : 'border-transparent text-gray-500 hover:text-gray-300'}`}><tab.icon size={16} className={activeTab === tab.id ? tab.color : ''} /><span>{tab.label}</span>{tab.id === 'pending' && tab.count > 0 && <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full min-w-[16px] text-center">{tab.count}</span>}</button>
           ))}
       </div>
@@ -186,7 +187,7 @@ export const OrderManagement: React.FC<OrderManagementProps> = ({ orders = [], i
       ) : activeTab === 'history' ? (
           <ReturnHistoryView returRecords={filteredData as ReturRecord[]} openNoteModal={openNoteModal} page={currentPage} setPage={setCurrentPage} />
       ) : (
-          <OrderListView orders={filteredData as Order[]} onUpdateStatus={onUpdateStatus} openReturnModal={openReturnModal} page={currentPage} setPage={setCurrentPage} />
+          <OrderListView orders={filteredData as Order[]} items={items} onUpdateStatus={onUpdateStatus} openReturnModal={openReturnModal} page={currentPage} setPage={setCurrentPage} onRefresh={onRefresh} activeTab={activeTab} />
       )}
     </div>
   );
