@@ -32,7 +32,10 @@ export const getDatabaseStore = (): StoreType => {
  */
 export const getTableName = (baseTableName: string): string => {
   if (!currentStore) {
-    console.warn(`Database store not set! Using unprefixed table: ${baseTableName}`);
+    console.warn(
+      `Database store not set! Call setDatabaseStore() before making database queries. ` +
+      `Using unprefixed table: ${baseTableName}. This will likely cause database errors.`
+    );
     return baseTableName;
   }
 

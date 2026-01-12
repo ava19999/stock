@@ -677,8 +677,31 @@ export const updateOrderStatusService = async (id: string, status: string, times
     return !error; 
 };
 
-export const fetchChatSessions = async (): Promise<ChatSession[]> => { const { data } = await supabase.from(getTableName('chat_sessions')).select('*'); return (data || []).map((c: any) => ({ customerId: c.customer_id, customerName: c.customer_name, messages: c.messages, lastMessage: c.last_message, lastTimestamp: c.last_timestamp, unreadAdminCount: c.unread_admin_count, unreadUserCount: c.unread_user_count })); };
-export const saveChatSession = async (s: ChatSession): Promise<boolean> => { const { error } = await supabase.from(getTableName('chat_sessions')).upsert([{ customer_id: s.customerId, customer_name: s.customerName, messages: s.messages, last_message: s.lastMessage, last_timestamp: s.lastTimestamp, unread_admin_count: s.unreadAdminCount, unread_user_count: s.unreadUserCount }]); return !error; };
+export const fetchChatSessions = async (): Promise<ChatSession[]> => { 
+    const { data } = await supabase.from(getTableName('chat_sessions')).select('*'); 
+    return (data || []).map((c: any) => ({ 
+        customerId: c.customer_id, 
+        customerName: c.customer_name, 
+        messages: c.messages, 
+        lastMessage: c.last_message, 
+        lastTimestamp: c.last_timestamp, 
+        unreadAdminCount: c.unread_admin_count, 
+        unreadUserCount: c.unread_user_count 
+    })); 
+};
+
+export const saveChatSession = async (s: ChatSession): Promise<boolean> => { 
+    const { error } = await supabase.from(getTableName('chat_sessions')).upsert([{ 
+        customer_id: s.customerId, 
+        customer_name: s.customerName, 
+        messages: s.messages, 
+        last_message: s.lastMessage, 
+        last_timestamp: s.lastTimestamp, 
+        unread_admin_count: s.unreadAdminCount, 
+        unread_user_count: s.unreadUserCount 
+    }]); 
+    return !error; 
+};
 
 export const addReturTransaction = async (data: ReturRecord): Promise<boolean> => {
     const { error } = await supabase.from(getTableName('retur')).insert([{
@@ -864,7 +887,17 @@ export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
 };
 
 export const deleteScanResiLog = async (id: number): Promise<boolean> => {
-    try { const { error } = await supabase.from(getTableName('scan_resi')).delete().eq('id', id); return !error; } catch (err) { console.error("Error deleting:", err); return false; }
+    try { 
+        const { error } = await supabase.from(getTableName('scan_resi')).delete().eq('id', id); 
+        if (error) {
+            console.error("Error deleting scan resi log:", error);
+            return false;
+        }
+        return true; 
+    } catch (err) { 
+        console.error("Error deleting scan resi log:", err); 
+        return false; 
+    }
 };
 
 export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Promise<{ success: boolean; message?: string }> => {

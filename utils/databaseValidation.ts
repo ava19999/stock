@@ -88,11 +88,16 @@ export const showTableNames = () => {
   return tables;
 };
 
-// Attach functions to window for console access
-if (typeof window !== 'undefined') {
+// Attach functions to window for console access (development only)
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
   window.validateDatabaseRouting = validateDatabaseRouting;
   window.showCurrentStore = showCurrentStore;
   window.showTableNames = showTableNames;
+  
+  console.log('📊 Database validation utilities loaded. Available commands:');
+  console.log('  - window.validateDatabaseRouting()');
+  console.log('  - window.showCurrentStore()');
+  console.log('  - window.showTableNames()');
 }
 
 // Also export for module usage
