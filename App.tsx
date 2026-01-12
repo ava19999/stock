@@ -27,7 +27,8 @@ import { InventoryItem, InventoryFormData, CartItem, Order, StockHistory, OrderS
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory, getItemByPartNumber, 
   fetchOrders, saveOrder, updateOrderStatusService,
-  fetchHistory, addBarangMasuk, addBarangKeluar, updateOrderData 
+  fetchHistory, addBarangMasuk, addBarangKeluar, updateOrderData,
+  setCurrentStore 
 } from './services/supabaseService';
 import { generateId } from './utils';
 
@@ -71,11 +72,16 @@ const AppContent: React.FC = () => {
     if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
     setMyCustomerId(cId);
     
+    // Set current store in database service when selectedStore changes
+    if (selectedStore) {
+      setCurrentStore(selectedStore);
+    }
+    
     // Only refresh data if authenticated
     if (isAuthenticated) {
       refreshData();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, selectedStore]);
 
   const refreshData = async () => {
     setLoading(true);
@@ -99,6 +105,8 @@ const AppContent: React.FC = () => {
   // --- HANDLERS AUTH ---
   const handleSelectStore = (store: 'mjm' | 'bjw') => {
     setStore(store);
+    // Set the current store in the database service
+    setCurrentStore(store);
   };
 
   const handleLogin = (role: 'admin' | 'guest', name: string) => {
