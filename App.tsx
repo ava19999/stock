@@ -27,7 +27,7 @@ import { InventoryItem, InventoryFormData, CartItem, Order, StockHistory, OrderS
 import { 
   fetchInventory, addInventory, updateInventory, deleteInventory, getItemByPartNumber, 
   fetchOrders, saveOrder, updateOrderStatusService,
-  fetchHistory, addBarangMasuk, addBarangKeluar, updateOrderData 
+  fetchHistory, addBarangMasuk, addBarangKeluar, updateOrderData, setInventoryTableName 
 } from './services/supabaseService';
 import { generateId } from './utils';
 
@@ -58,6 +58,10 @@ const AppContent: React.FC = () => {
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
   
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  useEffect(() => {
+    setInventoryTableName(selectedStore);
+  }, [selectedStore]);
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => setToast({msg, type});
 
