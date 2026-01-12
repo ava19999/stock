@@ -8,6 +8,8 @@ import { DashboardFilterBar } from './DashboardFilterBar';
 import { InventoryList } from './InventoryList';
 import { GlobalHistoryModal } from './GlobalHistoryModal';
 import { ItemHistoryModal } from './ItemHistoryModal';
+import { useStore } from '../context/StoreContext';
+import { STORE_CONFIGS } from '../types/store';
 
 interface DashboardProps {
   items: InventoryItem[]; 
@@ -23,6 +25,14 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({ 
   history, refreshTrigger, onDelete 
 }) => {
+  // Get selected store from context
+  const { selectedStore } = useStore();
+  
+  // Get store name for fetching
+  const storeName = selectedStore && selectedStore in STORE_CONFIGS 
+    ? STORE_CONFIGS[selectedStore].name 
+    : undefined;
+  
   // --- STATE ---
   const [localItems, setLocalItems] = useState<InventoryItem[]>([]);
   const [allItems, setAllItems] = useState<InventoryItem[]>([]); // Store all items when sorting
@@ -70,23 +80,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
     
     // If price sorting is active, fetch all data
     if (priceSort !== 'none') {
-      const allData = await fetchInventoryAllFiltered(debouncedSearch, filterType, debouncedBrand, debouncedApp);
+      const allData = await fetchInventoryAllFiltered(debouncedSearch, filterType, debouncedBrand, debouncedApp, storeName);
       setAllItems(allData);
       setTotalPages(Math.ceil(allData.length / 50));
     } else {
       // Otherwise, use paginated fetch
       // @ts-ignore
-      const { data, count } = await fetchInventoryPaginated(page, 50, debouncedSearch, filterType, debouncedBrand, debouncedApp);
+      const { data, count } = await fetchInventoryPaginated(page, 50, debouncedSearch, filterType, debouncedBrand, debouncedApp, storeName);
       setLocalItems(data);
       setAllItems([]); // Clear all items when not sorting
       setTotalPages(Math.ceil(count / 50));
     }
     
     setLoading(false);
-  }, [page, debouncedSearch, filterType, debouncedBrand, debouncedApp, priceSort]);
+  }, [page, debouncedSearch, filterType, debouncedBrand, debouncedApp, priceSort, storeName]);
 
   const loadStats = useCallback(async () => {
-    const invStats = await fetchInventoryStats();
+    const invStats = await fetchInventoryStats(storeName);
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const todayIn = history
@@ -97,7 +107,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       .reduce((acc, h) => acc + (Number(h.quantity) || 0), 0);
 
     setStats({ ...invStats, todayIn, todayOut });
-  }, [history]);
+  }, [history, storeName]);
 
   useEffect(() => { loadData(); }, [loadData, refreshTrigger]);
   useEffect(() => { loadStats(); }, [loadStats, refreshTrigger]);
