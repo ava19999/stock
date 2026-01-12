@@ -1,7 +1,8 @@
 // FILE: src/components/auth/LoginView.tsx
 import React from 'react';
-import { Car, User, KeyRound, ArrowRight } from 'lucide-react';
+import { Car, User, KeyRound, ArrowRight, Store } from 'lucide-react';
 import { Toast } from '../common/Toast';
+import { StoreId, STORE_CONFIG, getStoreConfig } from '../../config/storeConfig';
 
 interface LoginViewProps {
   loginName: string;
@@ -12,12 +13,16 @@ interface LoginViewProps {
   onGuestLogin: (name: string) => void;
   toast: { msg: string; type: 'success' | 'error' } | null;
   onCloseToast: () => void;
+  selectedStore: StoreId;
+  setSelectedStore: (store: StoreId) => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({
   loginName, setLoginName, loginPass, setLoginPass,
-  onGlobalLogin, onGuestLogin, toast, onCloseToast
+  onGlobalLogin, onGuestLogin, toast, onCloseToast,
+  selectedStore, setSelectedStore
 }) => {
+  const storeConfig = getStoreConfig(selectedStore);
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4 font-sans relative overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 rounded-full blur-[100px] -mr-20 -mt-20"></div>
@@ -33,11 +38,36 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     </div>
                 </div>
                 <div className="text-center mb-8">
-                    <h1 className="text-4xl font-extrabold text-white tracking-tight mb-1">BJW</h1>
+                    <h1 className="text-4xl font-extrabold text-white tracking-tight mb-1">{storeConfig.name}</h1>
                     <p className="text-gray-300 text-lg font-bold uppercase tracking-wider mb-1">Autopart</p>
-                    <p className="text-gray-500 text-sm">Sukucadang Mobil</p>
+                    <p className="text-gray-500 text-sm">{storeConfig.subtitle}</p>
                 </div>
                 <form onSubmit={onGlobalLogin} className="space-y-5">
+                    <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider ml-1">Pilih Toko</label>
+                        <div className="grid grid-cols-2 gap-2">
+                            {Object.values(STORE_CONFIG).map((store) => {
+                                const isSelected = selectedStore === store.id;
+                                // Use complete class names for Tailwind
+                                const buttonClass = isSelected
+                                    ? (store.id === 'mjm' 
+                                        ? 'bg-yellow-400 text-gray-900 ring-2 ring-cyan-400 shadow-lg'
+                                        : 'bg-red-500 text-white ring-2 ring-blue-500 shadow-lg')
+                                    : 'bg-gray-700/50 text-gray-400 hover:bg-gray-700 border border-gray-600';
+                                
+                                return (
+                                    <button
+                                        key={store.id}
+                                        type="button"
+                                        onClick={() => setSelectedStore(store.id)}
+                                        className={`py-3 px-4 rounded-xl font-bold transition-all ${buttonClass}`}
+                                    >
+                                        {store.name}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
                     <div className="space-y-1.5">
                         <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider ml-1">Identitas</label>
                         <div className="relative group">

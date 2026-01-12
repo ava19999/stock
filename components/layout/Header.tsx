@@ -5,6 +5,7 @@ import {
   ClipboardList, Home, LogOut 
 } from 'lucide-react';
 import { ActiveView } from '../../types/ui';
+import { StoreId, getStoreConfig } from '../../config/storeConfig';
 
 interface HeaderProps {
   isAdmin: boolean;
@@ -16,23 +17,50 @@ interface HeaderProps {
   onLogout: () => void;
   pendingOrdersCount: number;
   myPendingOrdersCount: number;
+  selectedStore: StoreId | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   isAdmin, activeView, setActiveView, loading, onRefresh,
-  loginName, onLogout, pendingOrdersCount, myPendingOrdersCount
+  loginName, onLogout, pendingOrdersCount, myPendingOrdersCount, selectedStore
 }) => {
+  const storeConfig = getStoreConfig(selectedStore);
+  
+  // Dynamic colors based on store - using complete class names for Tailwind
+  const iconBgClass = isAdmin 
+    ? 'bg-purple-600' 
+    : (selectedStore === 'mjm' ? 'bg-yellow-400' : 'bg-red-500');
+  
+  const navActiveClass = isAdmin 
+    ? 'bg-purple-900/30 text-purple-300 ring-1 ring-purple-800'
+    : (selectedStore === 'mjm' ? 'bg-yellow-900/30 text-yellow-300 ring-1 ring-yellow-800' : 'bg-red-900/30 text-red-300 ring-1 ring-red-800');
+  
+  const badgeClass = isAdmin
+    ? 'bg-purple-900/30 text-purple-300 border border-purple-800'
+    : (selectedStore === 'mjm' ? 'bg-yellow-900/30 text-yellow-300 border border-yellow-800' : 'bg-red-900/30 text-red-300 border border-red-800');
+  
   return (
     <div className="bg-gray-800 border-b border-gray-700 px-4 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm backdrop-blur-md bg-gray-800/90">
         <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setActiveView(isAdmin ? 'inventory' : 'shop')}>
-            <div className={`${isAdmin ? 'bg-purple-600' : 'bg-blue-600'} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform`}>
-                {isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />}
+            {/* Store Logo or Icon */}
+            <div className={`${iconBgClass} text-white p-2.5 rounded-xl shadow-md group-hover:scale-105 transition-transform flex items-center justify-center overflow-hidden`}>
+                {storeConfig.logo && storeConfig.logo !== '/assets/mjm-logo.png' && storeConfig.logo !== '/assets/bjw-logo.png' ? (
+                    <img src={storeConfig.logo} alt={storeConfig.name} className="w-5 h-5 object-contain" onError={(e) => {
+                        // Fallback to icon if image fails to load
+                        e.currentTarget.style.display = 'none';
+                        e.currentTarget.parentElement!.innerHTML = isAdmin 
+                            ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>'
+                            : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>';
+                    }} />
+                ) : (
+                    isAdmin ? <ShieldCheck size={20} /> : <Package size={20} />
+                )}
             </div>
             <div>
-                <div className="font-bold leading-none text-gray-100 text-lg">BJW</div>
-                <div className="text-[10px] font-bold text-gray-400 leading-none mt-0.5">Autopart</div>
-                <div className="text-[9px] text-gray-500 leading-none">Sukucadang Mobil</div>
-                <div className={`text-[9px] font-bold mt-1 px-1.5 py-0.5 rounded-md inline-block ${isAdmin ? 'bg-purple-900/30 text-purple-300 border border-purple-800' : 'bg-blue-900/30 text-blue-300 border border-blue-800'}`}>
+                <div className="font-bold leading-none text-gray-100 text-lg">{storeConfig.name}</div>
+                <div className="text-[10px] font-bold text-gray-400 leading-none mt-0.5">AUTOPART</div>
+                <div className="text-[9px] text-gray-500 leading-none">{storeConfig.subtitle}</div>
+                <div className={`text-[9px] font-bold mt-1 px-1.5 py-0.5 rounded-md inline-block ${badgeClass}`}>
                     {isAdmin ? 'ADMIN ACCESS' : 'STORE FRONT'}
                 </div>
             </div>
@@ -54,8 +82,8 @@ export const Header: React.FC<HeaderProps> = ({
                 </>
             ) : (
                 <>
-                  <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-blue-900/30 text-blue-300 ring-1 ring-blue-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><Home size={18}/> Belanja</button>
-                  <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-blue-900/30 text-blue-300 ring-1 ring-blue-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}>
+                  <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?navActiveClass:'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><Home size={18}/> Belanja</button>
+                  <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?navActiveClass:'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}>
                     <ClipboardList size={18}/> Pesanan {myPendingOrdersCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-gray-900"></span>}
                   </button>
                 </>
