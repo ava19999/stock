@@ -1,6 +1,7 @@
 // FILE: src/context/StoreContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { StoreType, UserRole, AuthState, STORE_CONFIGS } from '../types/store';
+import { setDatabaseStore } from '../lib/databaseConfig';
 
 interface StoreContextValue {
   selectedStore: StoreType;
@@ -31,6 +32,10 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         setSelectedStore(parsed.selectedStore);
         setUserRole(parsed.userRole);
         setUserName(parsed.userName || '');
+        // Set database store for database operations
+        if (parsed.selectedStore) {
+          setDatabaseStore(parsed.selectedStore);
+        }
       } catch (e) {
         console.error('Failed to parse saved auth state:', e);
       }
@@ -51,6 +56,8 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const setStore = (store: StoreType) => {
     setSelectedStore(store);
+    // Update database store context whenever store changes
+    setDatabaseStore(store);
   };
 
   const logout = () => {
@@ -58,6 +65,8 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setUserRole(null);
     setUserName('');
     localStorage.removeItem(STORAGE_KEY);
+    // Clear database store context on logout
+    setDatabaseStore(null);
   };
 
   const getStoreConfig = () => {
