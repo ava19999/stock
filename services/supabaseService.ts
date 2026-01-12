@@ -15,6 +15,10 @@ import { STORE_CONFIGS } from '../types/store';
 
 const TABLE_NAME = 'base';
 
+// Store-specific table names
+const TABLE_NAME_MJM = 'base_mjm';
+const TABLE_NAME_BJW = 'base_bjw';
+
 // Cache Foto (Memori Sementara)
 const photoCache: Record<string, string[]> = {};
 
@@ -170,9 +174,9 @@ export const saveItemImages = async (partNumber: string, images: string[]) => {
 const getTableNameByStore = (storeName: string): string => {
     const upperStore = storeName.toUpperCase();
     
-    // Use constants from STORE_CONFIGS to avoid magic strings
-    if (upperStore === STORE_CONFIGS.mjm.name) return 'base_mjm';
-    if (upperStore === STORE_CONFIGS.bjw.name) return 'base_bjw';
+    // Use constants instead of magic strings
+    if (upperStore === STORE_CONFIGS.mjm.name) return TABLE_NAME_MJM;
+    if (upperStore === STORE_CONFIGS.bjw.name) return TABLE_NAME_BJW;
     
     return TABLE_NAME; // fallback to default 'base' table
 };

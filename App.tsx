@@ -63,10 +63,10 @@ const AppContent: React.FC = () => {
   const showToast = (msg: string, type: 'success'|'error' = 'success') => setToast({msg, type});
 
   // Helper to get current store name
-  const getStoreName = () => {
+  const getStoreName = (): string | undefined => {
     return selectedStore && selectedStore in STORE_CONFIGS 
       ? STORE_CONFIGS[selectedStore].name 
-      : '';
+      : undefined;
   };
 
   const isKingFano = useMemo(() => loginName.trim().toLowerCase() === 'king fano', [loginName]);
