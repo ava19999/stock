@@ -50,10 +50,6 @@ export const ShopView: React.FC<ShopViewProps> = ({
   const [showBJWProductView, setShowBJWProductView] = useState(false);
   
   // State Filter & Pagination
-  const [shopItems, setShopItems] = useState<InventoryItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  
-  // State Filter & Pagination
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState(''); // Anti-kedip
   const [partNumberSearch, setPartNumberSearch] = useState('');
