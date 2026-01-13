@@ -14,6 +14,7 @@ export const BJWShopView: React.FC<BJWShopViewProps> = ({ isAdmin }) => {
   // State Data
   const [bjwItems, setBJWItems] = useState<BJWItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string>('');
   
   // State Filter & Pagination
   const [searchTerm, setSearchTerm] = useState('');
@@ -125,7 +126,8 @@ export const BJWShopView: React.FC<BJWShopViewProps> = ({ isAdmin }) => {
       setEditForm({});
     } catch (error) {
       console.error("Failed to save item:", error);
-      alert("Gagal menyimpan perubahan");
+      setErrorMessage("Gagal menyimpan perubahan");
+      setTimeout(() => setErrorMessage(''), 3000);
     }
   };
 
@@ -152,6 +154,13 @@ export const BJWShopView: React.FC<BJWShopViewProps> = ({ isAdmin }) => {
   return (
     <div className="relative min-h-full pb-20 bg-gray-900 text-gray-100 flex flex-col h-full overflow-hidden">
       <div className="flex-1 overflow-y-auto custom-scrollbar">
+        {/* ERROR MESSAGE */}
+        {errorMessage && (
+          <div className="sticky top-0 z-20 bg-red-500 text-white px-4 py-2 text-center">
+            {errorMessage}
+          </div>
+        )}
+        
         {/* FILTER BAR */}
         <div className="sticky top-0 z-10 bg-gray-900 px-4 py-2 border-b border-gray-800 shadow-md">
           <ShopFilterBar 
