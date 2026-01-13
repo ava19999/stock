@@ -11,7 +11,9 @@ import {
   Order, 
   ChatSession, 
   ReturRecord, 
-  ScanResiLog 
+  ScanResiLog,
+  BJWItem,
+  FotoRecord
 } from '../types';
 
 // LocalStorage Keys
@@ -24,7 +26,9 @@ const STORAGE_KEYS = {
   PRICES: 'stock_prices',
   CHAT_SESSIONS: 'stock_chat_sessions',
   RETUR: 'stock_retur',
-  SCAN_RESI: 'stock_scan_resi'
+  SCAN_RESI: 'stock_scan_resi',
+  BASE_BJW: 'stock_base_bjw',
+  FOTO: 'stock_foto'
 };
 
 // Helper functions for localStorage
@@ -846,5 +850,189 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
   } catch (error) {
     console.error("Error processing shipment:", error);
     return { success: false, message: "Terjadi kesalahan sistem." };
+  }
+};
+
+// ==================== BJW-SPECIFIC FUNCTIONS ====================
+
+// Fetch all BJW items with photos
+export const fetchBJWItems = async (): Promise<BJWItem[]> => {
+  const bjwItems = getFromStorage<BJWItem>(STORAGE_KEYS.BASE_BJW);
+  const fotos = getFromStorage<FotoRecord>(STORAGE_KEYS.FOTO);
+  
+  // Merge BJW items with their photos
+  return bjwItems.map(item => {
+    const foto = fotos.find(f => f.partNumber === item.partNumber);
+    return {
+      ...item,
+      photoUrl: foto?.photoUrl || ''
+    };
+  });
+};
+
+// Fetch paginated BJW items for shop view
+export const fetchBJWItemsPaginated = async (
+  page: number,
+  limit: number,
+  search: string = '',
+  partNumberSearch: string = '',
+  nameSearch: string = '',
+  brandSearch: string = '',
+  applicationSearch: string = ''
+) => {
+  const allItems = await fetchBJWItems();
+  
+  let filtered = allItems.filter(item => {
+    const matchesSearch = !search || 
+      item.name.toLowerCase().includes(search.toLowerCase()) ||
+      item.partNumber.toLowerCase().includes(search.toLowerCase()) ||
+      item.brand.toLowerCase().includes(search.toLowerCase()) ||
+      item.application.toLowerCase().includes(search.toLowerCase());
+    
+    const matchesPartNumber = !partNumberSearch || item.partNumber.toLowerCase().includes(partNumberSearch.toLowerCase());
+    const matchesName = !nameSearch || item.name.toLowerCase().includes(nameSearch.toLowerCase());
+    const matchesBrand = !brandSearch || item.brand.toLowerCase().includes(brandSearch.toLowerCase());
+    const matchesApplication = !applicationSearch || item.application.toLowerCase().includes(applicationSearch.toLowerCase());
+    
+    return matchesSearch && matchesPartNumber && matchesName && matchesBrand && matchesApplication;
+  });
+  
+  filtered.sort((a, b) => a.name.localeCompare(b.name));
+  
+  const from = (page - 1) * limit;
+  const to = from + limit;
+  const paginated = filtered.slice(from, to);
+  
+  return { data: paginated, count: filtered.length };
+};
+
+// Add or update BJW item
+export const saveBJWItem = async (item: Omit<BJWItem, 'id' | 'lastUpdated'>): Promise<string> => {
+  const items = getFromStorage<BJWItem>(STORAGE_KEYS.BASE_BJW);
+  const existingIndex = items.findIndex(i => i.partNumber === item.partNumber);
+  
+  const newItem: BJWItem = {
+    ...item,
+    id: existingIndex >= 0 ? items[existingIndex].id : generateId(),
+    lastUpdated: Date.now()
+  };
+  
+  if (existingIndex >= 0) {
+    items[existingIndex] = newItem;
+  } else {
+    items.push(newItem);
+  }
+  
+  saveToStorage(STORAGE_KEYS.BASE_BJW, items);
+  return newItem.id;
+};
+
+// Update BJW item
+export const updateBJWItem = async (partNumber: string, updates: Partial<BJWItem>): Promise<boolean> => {
+  const items = getFromStorage<BJWItem>(STORAGE_KEYS.BASE_BJW);
+  const index = items.findIndex(i => i.partNumber === partNumber);
+  
+  if (index === -1) return false;
+  
+  items[index] = {
+    ...items[index],
+    ...updates,
+    lastUpdated: Date.now()
+  };
+  
+  saveToStorage(STORAGE_KEYS.BASE_BJW, items);
+  return true;
+};
+
+// Delete BJW item
+export const deleteBJWItem = async (partNumber: string): Promise<boolean> => {
+  const items = getFromStorage<BJWItem>(STORAGE_KEYS.BASE_BJW);
+  const filtered = items.filter(i => i.partNumber !== partNumber);
+  
+  if (filtered.length === items.length) return false;
+  
+  saveToStorage(STORAGE_KEYS.BASE_BJW, filtered);
+  
+  // Also delete associated photo
+  const fotos = getFromStorage<FotoRecord>(STORAGE_KEYS.FOTO);
+  const filteredFotos = fotos.filter(f => f.partNumber !== partNumber);
+  saveToStorage(STORAGE_KEYS.FOTO, filteredFotos);
+  
+  return true;
+};
+
+// Save or update photo for a part number
+export const saveFoto = async (partNumber: string, photoUrl: string): Promise<boolean> => {
+  const fotos = getFromStorage<FotoRecord>(STORAGE_KEYS.FOTO);
+  const existingIndex = fotos.findIndex(f => f.partNumber === partNumber);
+  
+  const fotoRecord: FotoRecord = {
+    partNumber,
+    photoUrl,
+    uploadedAt: Date.now()
+  };
+  
+  if (existingIndex >= 0) {
+    fotos[existingIndex] = fotoRecord;
+  } else {
+    fotos.push(fotoRecord);
+  }
+  
+  saveToStorage(STORAGE_KEYS.FOTO, fotos);
+  return true;
+};
+
+// Get photo for a part number
+export const getFoto = async (partNumber: string): Promise<string | null> => {
+  const fotos = getFromStorage<FotoRecord>(STORAGE_KEYS.FOTO);
+  const foto = fotos.find(f => f.partNumber === partNumber);
+  return foto?.photoUrl || null;
+};
+
+// Initialize sample BJW data if empty
+export const initializeBJWSampleData = async (): Promise<void> => {
+  const existing = getFromStorage<BJWItem>(STORAGE_KEYS.BASE_BJW);
+  if (existing.length > 0) return; // Already has data
+  
+  const sampleData: Omit<BJWItem, 'id' | 'lastUpdated'>[] = [
+    {
+      partNumber: 'BJW-001',
+      name: 'Kampas Rem Depan',
+      brand: 'Toyota',
+      application: 'Avanza 2015-2020',
+      shelf: 'A1'
+    },
+    {
+      partNumber: 'BJW-002',
+      name: 'Filter Oli',
+      brand: 'Honda',
+      application: 'Jazz GK5',
+      shelf: 'B2'
+    },
+    {
+      partNumber: 'BJW-003',
+      name: 'Busi Iridium',
+      brand: 'Mitsubishi',
+      application: 'Xpander 2018-2023',
+      shelf: 'C3'
+    },
+    {
+      partNumber: 'BJW-004',
+      name: 'Shock Absorber Belakang',
+      brand: 'Daihatsu',
+      application: 'Terios 2010-2015',
+      shelf: 'A2'
+    },
+    {
+      partNumber: 'BJW-005',
+      name: 'Radiator Coolant',
+      brand: 'Suzuki',
+      application: 'Ertiga 2012-2018',
+      shelf: 'B1'
+    }
+  ];
+  
+  for (const item of sampleData) {
+    await saveBJWItem(item);
   }
 };

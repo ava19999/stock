@@ -4,6 +4,7 @@ import { InventoryItem, CartItem } from '../types';
 import { fetchShopItems } from '../services/supabaseService'; 
 import { compressImage } from '../utils';
 import { ShoppingCart } from 'lucide-react';
+import { useStore } from '../context/StoreContext';
 
 import { ImageCropper } from './shop/ImageCropper';
 import { ShopFilterBar } from './shop/ShopFilterBar';
@@ -12,6 +13,7 @@ import { ShopPagination } from './shop/ShopPagination';
 import { ShopCartModal } from './shop/ShopCartModal';
 import { ShopCheckoutModal } from './shop/ShopCheckoutModal';
 import { ReceiptModal } from './shop/ReceiptModal';
+import { BJWShopView } from './shop/BJWShopView';
 
 interface ShopViewProps { 
     items: InventoryItem[]; 
@@ -37,6 +39,14 @@ export const ShopView: React.FC<ShopViewProps> = ({
     onCheckout, 
     onUpdateBanner 
 }) => {
+  // Get store context
+  const { selectedStore } = useStore();
+  
+  // If BJW store is selected, show BJWShopView
+  if (selectedStore === 'bjw') {
+    return <BJWShopView isAdmin={isAdmin} />;
+  }
+  
   // State Data
   const [shopItems, setShopItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
