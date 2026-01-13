@@ -4,6 +4,9 @@
  * 
  * Note: This file uses .cjs extension because the project is configured as ES modules (package.json has "type": "module")
  * Note: Requires @supabase/supabase-js to be installed
+ * 
+ * The script uses the Supabase configuration from lib/supabase.ts by default.
+ * You can override with environment variables if needed.
  */
 
 const { createClient } = require('@supabase/supabase-js');
@@ -16,7 +19,7 @@ const TABLES_TO_CLEAR = [
   'barang_keluar'
 ];
 
-// Get Supabase configuration from environment variables or fallback to hardcoded values
+// Get Supabase configuration from environment variables or use defaults from lib/supabase.ts
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://doyyghsijggiibkcktuq.supabase.co';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRveXlnaHNpamdnaWlia2NrdHVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDk3MTE2MzcsImV4cCI6MjAyNTI4NzYzN30.sb_publishable_d0LbRl9l1zDIpMD5wbEu1g_Hkgw1Aab';
 
@@ -59,10 +62,11 @@ async function clearTable(supabase, tableName) {
     }
     
     // Delete all records from the table
+    // Using a condition that matches all records reliably
     const { error: deleteError } = await supabase
       .from(tableName)
       .delete()
-      .neq('id', 0);
+      .not('id', 'is', null);
     
     if (deleteError) {
       console.error(`   ❌ Error deleting from ${tableName}:`, deleteError.message);

@@ -16,14 +16,28 @@ The script will empty the following tables:
 
 ### Configuration
 
-The script uses environment variables for Supabase configuration. You can configure these in your `.env` file:
+The script uses the Supabase configuration from `lib/supabase.ts` by default. This means it will work out of the box with your existing project configuration.
 
-```env
-SUPABASE_URL="your-supabase-url"
-SUPABASE_ANON_KEY="your-supabase-anon-key"
+#### Using environment variables (optional)
+
+If you want to use different credentials, you can override them with environment variables:
+
+```bash
+# Linux/Mac
+export SUPABASE_URL="your-supabase-url"
+export SUPABASE_ANON_KEY="your-supabase-anon-key"
+npm run clear-db
+
+# Windows (Command Prompt)
+set SUPABASE_URL=your-supabase-url
+set SUPABASE_ANON_KEY=your-supabase-anon-key
+npm run clear-db
+
+# Windows (PowerShell)
+$env:SUPABASE_URL="your-supabase-url"
+$env:SUPABASE_ANON_KEY="your-supabase-anon-key"
+npm run clear-db
 ```
-
-If environment variables are not set, the script will fall back to the hardcoded values from `lib/supabase.ts`.
 
 ### Usage
 
