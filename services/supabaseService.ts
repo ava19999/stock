@@ -717,6 +717,19 @@ export const fetchPriceHistoryBySource = async (partNumber: string) => {
     return Object.values(uniqueSources); 
 };
 
+export const fetchBarangMasuk = async (): Promise<BarangMasuk[]> => {
+    const { data, error } = await supabase
+        .from('barang_masuk')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(500);
+    if (error) { 
+        console.error("Gagal ambil data barang masuk:", error); 
+        return []; 
+    }
+    return data || [];
+};
+
 export const clearBarangKeluar = async (): Promise<boolean> => { 
     const { error } = await supabase.from('barang_keluar').delete().neq('id', 0); 
     if (error) { console.error("Gagal hapus barang keluar:", error); return false; } 

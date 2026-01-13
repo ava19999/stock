@@ -7,6 +7,7 @@ import { QuickInputRow } from './quickInput/types';
 import { QuickInputHeader } from './quickInput/QuickInputHeader';
 import { QuickInputFooter } from './quickInput/QuickInputFooter';
 import { QuickInputTable } from './quickInput/QuickInputTable';
+import { BarangMasukTableView } from './quickInput/BarangMasukTableView';
 
 interface QuickInputViewProps {
   items: InventoryItem[];
@@ -18,6 +19,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   // --- STATE ---
   const [rows, setRows] = useState<QuickInputRow[]>([]);
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
+  const [refreshTableTrigger, setRefreshTableTrigger] = useState(0);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
   const [isSavingAll, setIsSavingAll] = useState(false);
@@ -241,7 +243,10 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     const successCount = results.filter(r => r).length;
     
     if (showToast && successCount > 0) showToast(`${successCount} item berhasil disimpan`, 'success');
-    if (successCount > 0 && onRefresh) onRefresh();
+    if (successCount > 0) {
+        if (onRefresh) onRefresh();
+        setRefreshTableTrigger(prev => prev + 1); // Trigger refresh of table view
+    }
     
     const remainingRows = rows.length - successCount;
     if (remainingRows === 0) {
@@ -257,35 +262,41 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const totalPages = Math.ceil(rows.length / itemsPerPage);
 
   return (
-    <div className="bg-gray-800 min-h-[80vh] flex flex-col overflow-hidden text-gray-100">
-      <QuickInputHeader 
-        onAddRow={addNewRow} 
-        onSaveAll={saveAllRows} 
-        isSaving={isSavingAll} 
-        validCount={validRowsCount}
-      />
+    <div className="bg-gray-800 flex flex-col overflow-hidden text-gray-100">
+      {/* Input Section */}
+      <div className="min-h-[60vh]">
+        <QuickInputHeader 
+          onAddRow={addNewRow} 
+          onSaveAll={saveAllRows} 
+          isSaving={isSavingAll} 
+          validCount={validRowsCount}
+        />
 
-      <QuickInputTable
-        currentRows={currentRows}
-        startIndex={startIndex}
-        activeSearchIndex={activeSearchIndex}
-        suggestions={suggestions}
-        inputRefs={inputRefs}
-        onPartNumberChange={handlePartNumberChange}
-        onSelectItem={handleSelectItem}
-        onUpdateRow={updateRow}
-        onRemoveRow={removeRow}
-        highlightedIndex={highlightedIndex}
-        onSearchKeyDown={handleSearchKeyDown}
-        onGridKeyDown={handleGridKeyDown}
-      />
+        <QuickInputTable
+          currentRows={currentRows}
+          startIndex={startIndex}
+          activeSearchIndex={activeSearchIndex}
+          suggestions={suggestions}
+          inputRefs={inputRefs}
+          onPartNumberChange={handlePartNumberChange}
+          onSelectItem={handleSelectItem}
+          onUpdateRow={updateRow}
+          onRemoveRow={removeRow}
+          highlightedIndex={highlightedIndex}
+          onSearchKeyDown={handleSearchKeyDown}
+          onGridKeyDown={handleGridKeyDown}
+        />
 
-      <QuickInputFooter 
-        totalRows={rows.length} 
-        currentPage={currentPage} 
-        totalPages={totalPages} 
-        onPageChange={setCurrentPage} 
-      />
+        <QuickInputFooter 
+          totalRows={rows.length} 
+          currentPage={currentPage} 
+          totalPages={totalPages} 
+          onPageChange={setCurrentPage} 
+        />
+      </div>
+
+      {/* Table View Section */}
+      <BarangMasukTableView refreshTrigger={refreshTableTrigger} />
     </div>
   );
 };
