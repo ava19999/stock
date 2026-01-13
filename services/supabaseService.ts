@@ -447,8 +447,13 @@ export const updateInventory = async (item: InventoryItem, transaction?: { type:
           let ketText = 'Manual Restock';
           if (transaction.customer && transaction.customer.trim() !== '') ketText = transaction.customer;
           if (transaction.isReturn) { const custName = transaction.customer || 'Customer'; ketText = `${custName} (RETUR)`; }
+          
+          // Use custom date from transaction if provided, otherwise use current time
+          const txDate = transaction.tanggal ? new Date(transaction.tanggal).toISOString() : wibNow;
+          const txTempo = transaction.tempo || transaction.resiTempo || '-';
+          
           await addBarangMasuk({
-              created_at: wibNow, tempo: transaction.resiTempo || '-', keterangan: ketText, ecommerce: sourceName, 
+              created_at: txDate, tempo: txTempo, keterangan: ketText, ecommerce: sourceName, 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
               rak: item.shelf, stockAhir: finalQty, qtyMasuk: txQty, hargaSatuan: txPrice, hargaTotal: txTotal, customer: transaction.customer 
           });
