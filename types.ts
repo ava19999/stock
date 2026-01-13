@@ -20,6 +20,25 @@ export interface InventoryItem {
   description?: string;
 }
 
+// BJW-specific data structure
+export interface BJWItem {
+  id: string;
+  partNumber: string;
+  name: string;
+  brand: string;
+  application: string;
+  shelf: string;           // rak
+  photoUrl?: string;       // From foto table
+  lastUpdated: number;
+}
+
+// Photo storage for BJW items
+export interface FotoRecord {
+  partNumber: string;
+  photoUrl: string;
+  uploadedAt: number;
+}
+
 export interface InventoryFormData {
   partNumber: string;
   name: string;
