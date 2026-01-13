@@ -58,13 +58,20 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
         const cleanVal = valStr.replace(/[^0-9]/g, '');
         const newTotal = cleanVal === '' ? 0 : parseInt(cleanVal, 10);
         
-        const currentQty = row.qtyMasuk > 0 ? row.qtyMasuk : 1;
-        const newUnitPrice = newTotal / currentQty;
-
-        onUpdateRow(row.id, {
-            totalHarga: newTotal,
-            hargaSatuan: newUnitPrice
-        });
+        // Only calculate if qtyMasuk > 0 to avoid division by zero
+        if (row.qtyMasuk > 0) {
+            const newUnitPrice = newTotal / row.qtyMasuk;
+            onUpdateRow(row.id, {
+                totalHarga: newTotal,
+                hargaSatuan: newUnitPrice
+            });
+        } else {
+            // If qtyMasuk is 0, just update totalHarga
+            onUpdateRow(row.id, {
+                totalHarga: newTotal,
+                hargaSatuan: 0
+            });
+        }
     };
 
     useEffect(() => {

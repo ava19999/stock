@@ -449,7 +449,16 @@ export const updateInventory = async (item: InventoryItem, transaction?: { type:
           if (transaction.isReturn) { const custName = transaction.customer || 'Customer'; ketText = `${custName} (RETUR)`; }
           
           // Use custom date from transaction if provided, otherwise use current time
-          const txDate = transaction.tanggal ? new Date(transaction.tanggal).toISOString() : wibNow;
+          // If tanggal is in YYYY-MM-DD format, append time to maintain date consistency
+          let txDate = wibNow;
+          if (transaction.tanggal) {
+              // If the date is in YYYY-MM-DD format, add timezone-neutral time
+              if (/^\d{4}-\d{2}-\d{2}$/.test(transaction.tanggal)) {
+                  txDate = `${transaction.tanggal}T00:00:00Z`;
+              } else {
+                  txDate = new Date(transaction.tanggal).toISOString();
+              }
+          }
           const txTempo = transaction.tempo || transaction.resiTempo || '-';
           
           await addBarangMasuk({
