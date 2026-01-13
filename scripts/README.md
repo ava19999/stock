@@ -33,7 +33,7 @@ If environment variables are not set, the script will fall back to the hardcoded
 npm run clear-db
 ```
 
-#### Direct execution
+#### Direct execution (TypeScript)
 
 ```bash
 tsx scripts/clearDatabase.ts
@@ -43,6 +43,14 @@ Or with ts-node (if configured):
 
 ```bash
 ts-node scripts/clearDatabase.ts
+```
+
+#### Direct execution (JavaScript)
+
+If you prefer to use the plain JavaScript version (CommonJS):
+
+```bash
+node scripts/clearDatabase.cjs
 ```
 
 ### Features
