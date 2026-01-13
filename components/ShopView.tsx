@@ -89,7 +89,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
     const loadData = async () => {
         setLoading(true);
         try {
-            // PERBAIKAN 4: Ganti 'Semua' jadi 'All' agar filter di Supabase jalan
+            // PERBAIKAN 4: Ganti 'Semua' jadi 'All' agar filter berjalan dengan baik
             const safeCategory = category === 'Semua' ? 'All' : category; 
             
             const { data, count } = await fetchShopItems(
