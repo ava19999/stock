@@ -9,6 +9,9 @@ import {
   deleteBJWPhoto 
 } from '../services/supabaseService';
 
+// Constants
+const PLACEHOLDER_IMAGE = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" fill="gray"%3EInvalid URL%3C/text%3E%3C/svg%3E';
+
 interface BJWProductViewProps {
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
 }
@@ -20,6 +23,7 @@ export const BJWProductView: React.FC<BJWProductViewProps> = ({ onShowToast }) =
   const [editedData, setEditedData] = useState<Partial<BJWProduct>>({});
   const [photoEditing, setPhotoEditing] = useState<{ partNumber: string; photoKey: string } | null>(null);
   const [newPhotoUrl, setNewPhotoUrl] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<{ partNumber: string; photoKey: string } | null>(null);
 
   useEffect(() => {
     loadProducts();
@@ -106,11 +110,15 @@ export const BJWProductView: React.FC<BJWProductViewProps> = ({ onShowToast }) =
   };
 
   const handlePhotoDelete = async (partNumber: string, photoKey: string) => {
-    if (!confirm('Are you sure you want to delete this photo?')) return;
+    setShowDeleteConfirm({ partNumber, photoKey });
+  };
+
+  const confirmPhotoDelete = async () => {
+    if (!showDeleteConfirm) return;
 
     setLoading(true);
     try {
-      const success = await deleteBJWPhoto(partNumber, photoKey);
+      const success = await deleteBJWPhoto(showDeleteConfirm.partNumber, showDeleteConfirm.photoKey);
       if (success) {
         onShowToast('Photo deleted successfully!');
         await loadProducts();
@@ -122,6 +130,7 @@ export const BJWProductView: React.FC<BJWProductViewProps> = ({ onShowToast }) =
       onShowToast('Failed to delete photo', 'error');
     } finally {
       setLoading(false);
+      setShowDeleteConfirm(null);
     }
   };
 
@@ -337,7 +346,7 @@ export const BJWProductView: React.FC<BJWProductViewProps> = ({ onShowToast }) =
                   alt="Preview" 
                   className="w-full h-48 object-cover rounded-lg border border-gray-600"
                   onError={(e) => {
-                    (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><text x="50%" y="50%" text-anchor="middle" fill="gray">Invalid URL</text></svg>';
+                    (e.target as HTMLImageElement).src = PLACEHOLDER_IMAGE;
                   }}
                 />
               </div>
@@ -356,6 +365,37 @@ export const BJWProductView: React.FC<BJWProductViewProps> = ({ onShowToast }) =
                   setPhotoEditing(null);
                   setNewPhotoUrl('');
                 }}
+                className="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-xl font-semibold text-white mb-4">
+              Confirm Delete
+            </h3>
+            
+            <p className="text-gray-300 mb-6">
+              Are you sure you want to delete this photo? This action cannot be undone.
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={confirmPhotoDelete}
+                disabled={loading}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? 'Deleting...' : 'Delete'}
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(null)}
                 className="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg"
               >
                 Cancel

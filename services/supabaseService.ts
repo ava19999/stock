@@ -858,34 +858,31 @@ const BJW_STORAGE_KEYS = {
   FOTO: 'stock_foto'
 };
 
-export const fetchBJWProducts = async (): Promise<any[]> => {
+export const fetchBJWProducts = async (): Promise<BJWProduct[]> => {
   try {
-    const baseItems = getFromStorage<any>(BJW_STORAGE_KEYS.BASE_BJW);
-    const fotos = getFromStorage<any>(BJW_STORAGE_KEYS.FOTO);
+    const baseItems = getFromStorage<BaseBJW>(BJW_STORAGE_KEYS.BASE_BJW);
+    const fotos = getFromStorage<Foto>(BJW_STORAGE_KEYS.FOTO);
     
     // Map base items with their photos
-    return baseItems.map(item => {
-      const photo = fotos.find((f: any) => f.part_number === item.part_number);
-      return {
-        ...item,
-        photos: photo || null
-      };
-    });
+    return baseItems.map(item => ({
+      ...item,
+      photos: fotos.find(f => f.part_number === item.part_number) || null
+    }));
   } catch (error) {
     console.error("Error fetching BJW products:", error);
     return [];
   }
 };
 
-export const fetchBJWProductByPartNumber = async (partNumber: string): Promise<any | null> => {
+export const fetchBJWProductByPartNumber = async (partNumber: string): Promise<BJWProduct | null> => {
   try {
-    const baseItems = getFromStorage<any>(BJW_STORAGE_KEYS.BASE_BJW);
-    const fotos = getFromStorage<any>(BJW_STORAGE_KEYS.FOTO);
+    const baseItems = getFromStorage<BaseBJW>(BJW_STORAGE_KEYS.BASE_BJW);
+    const fotos = getFromStorage<Foto>(BJW_STORAGE_KEYS.FOTO);
     
-    const item = baseItems.find((i: any) => i.part_number === partNumber);
+    const item = baseItems.find(i => i.part_number === partNumber);
     if (!item) return null;
     
-    const photo = fotos.find((f: any) => f.part_number === partNumber);
+    const photo = fotos.find(f => f.part_number === partNumber);
     return {
       ...item,
       photos: photo || null
@@ -896,10 +893,10 @@ export const fetchBJWProductByPartNumber = async (partNumber: string): Promise<a
   }
 };
 
-export const updateBJWProduct = async (partNumber: string, updates: Partial<any>): Promise<boolean> => {
+export const updateBJWProduct = async (partNumber: string, updates: Partial<BaseBJW>): Promise<boolean> => {
   try {
-    const baseItems = getFromStorage<any>(BJW_STORAGE_KEYS.BASE_BJW);
-    const index = baseItems.findIndex((i: any) => i.part_number === partNumber);
+    const baseItems = getFromStorage<BaseBJW>(BJW_STORAGE_KEYS.BASE_BJW);
+    const index = baseItems.findIndex(i => i.part_number === partNumber);
     
     if (index === -1) return false;
     
@@ -917,10 +914,10 @@ export const updateBJWProduct = async (partNumber: string, updates: Partial<any>
   }
 };
 
-export const updateBJWPhotos = async (partNumber: string, photoUpdates: Record<string, string>): Promise<boolean> => {
+export const updateBJWPhotos = async (partNumber: string, photoUpdates: Partial<Omit<Foto, 'id' | 'part_number' | 'created_at' | 'updated_at'>>): Promise<boolean> => {
   try {
-    const fotos = getFromStorage<any>(BJW_STORAGE_KEYS.FOTO);
-    const index = fotos.findIndex((f: any) => f.part_number === partNumber);
+    const fotos = getFromStorage<Foto>(BJW_STORAGE_KEYS.FOTO);
+    const index = fotos.findIndex(f => f.part_number === partNumber);
     
     if (index === -1) {
       // Create new foto entry
@@ -950,8 +947,8 @@ export const updateBJWPhotos = async (partNumber: string, photoUpdates: Record<s
 
 export const deleteBJWPhoto = async (partNumber: string, photoKey: string): Promise<boolean> => {
   try {
-    const fotos = getFromStorage<any>(BJW_STORAGE_KEYS.FOTO);
-    const index = fotos.findIndex((f: any) => f.part_number === partNumber);
+    const fotos = getFromStorage<Foto>(BJW_STORAGE_KEYS.FOTO);
+    const index = fotos.findIndex(f => f.part_number === partNumber);
     
     if (index === -1) return false;
     
@@ -970,12 +967,12 @@ export const deleteBJWPhoto = async (partNumber: string, photoKey: string): Prom
   }
 };
 
-export const addBJWProduct = async (product: any): Promise<string | null> => {
+export const addBJWProduct = async (product: Omit<BaseBJW, 'id' | 'created_at' | 'updated_at'>): Promise<string | null> => {
   try {
-    const baseItems = getFromStorage<any>(BJW_STORAGE_KEYS.BASE_BJW);
+    const baseItems = getFromStorage<BaseBJW>(BJW_STORAGE_KEYS.BASE_BJW);
     
     // Check if product already exists
-    const exists = baseItems.some((i: any) => i.part_number === product.part_number);
+    const exists = baseItems.some(i => i.part_number === product.part_number);
     if (exists) {
       console.error("Product with this part number already exists");
       return null;
