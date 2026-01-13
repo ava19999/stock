@@ -11,7 +11,10 @@ import {
   Order, 
   ChatSession, 
   ReturRecord, 
-  ScanResiLog 
+  ScanResiLog,
+  BaseBJW,
+  Foto,
+  BJWProduct
 } from '../types';
 
 // LocalStorage Keys
@@ -846,5 +849,155 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
   } catch (error) {
     console.error("Error processing shipment:", error);
     return { success: false, message: "Terjadi kesalahan sistem." };
+  }
+};
+
+// BJW Store specific functions
+const BJW_STORAGE_KEYS = {
+  BASE_BJW: 'stock_base_bjw',
+  FOTO: 'stock_foto'
+};
+
+export const fetchBJWProducts = async (): Promise<any[]> => {
+  try {
+    const baseItems = getFromStorage<any>(BJW_STORAGE_KEYS.BASE_BJW);
+    const fotos = getFromStorage<any>(BJW_STORAGE_KEYS.FOTO);
+    
+    // Map base items with their photos
+    return baseItems.map(item => {
+      const photo = fotos.find((f: any) => f.part_number === item.part_number);
+      return {
+        ...item,
+        photos: photo || null
+      };
+    });
+  } catch (error) {
+    console.error("Error fetching BJW products:", error);
+    return [];
+  }
+};
+
+export const fetchBJWProductByPartNumber = async (partNumber: string): Promise<any | null> => {
+  try {
+    const baseItems = getFromStorage<any>(BJW_STORAGE_KEYS.BASE_BJW);
+    const fotos = getFromStorage<any>(BJW_STORAGE_KEYS.FOTO);
+    
+    const item = baseItems.find((i: any) => i.part_number === partNumber);
+    if (!item) return null;
+    
+    const photo = fotos.find((f: any) => f.part_number === partNumber);
+    return {
+      ...item,
+      photos: photo || null
+    };
+  } catch (error) {
+    console.error("Error fetching BJW product:", error);
+    return null;
+  }
+};
+
+export const updateBJWProduct = async (partNumber: string, updates: Partial<any>): Promise<boolean> => {
+  try {
+    const baseItems = getFromStorage<any>(BJW_STORAGE_KEYS.BASE_BJW);
+    const index = baseItems.findIndex((i: any) => i.part_number === partNumber);
+    
+    if (index === -1) return false;
+    
+    baseItems[index] = {
+      ...baseItems[index],
+      ...updates,
+      updated_at: new Date().toISOString()
+    };
+    
+    saveToStorage(BJW_STORAGE_KEYS.BASE_BJW, baseItems);
+    return true;
+  } catch (error) {
+    console.error("Error updating BJW product:", error);
+    return false;
+  }
+};
+
+export const updateBJWPhotos = async (partNumber: string, photoUpdates: Record<string, string>): Promise<boolean> => {
+  try {
+    const fotos = getFromStorage<any>(BJW_STORAGE_KEYS.FOTO);
+    const index = fotos.findIndex((f: any) => f.part_number === partNumber);
+    
+    if (index === -1) {
+      // Create new foto entry
+      fotos.push({
+        id: generateId(),
+        part_number: partNumber,
+        ...photoUpdates,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    } else {
+      // Update existing foto entry
+      fotos[index] = {
+        ...fotos[index],
+        ...photoUpdates,
+        updated_at: new Date().toISOString()
+      };
+    }
+    
+    saveToStorage(BJW_STORAGE_KEYS.FOTO, fotos);
+    return true;
+  } catch (error) {
+    console.error("Error updating BJW photos:", error);
+    return false;
+  }
+};
+
+export const deleteBJWPhoto = async (partNumber: string, photoKey: string): Promise<boolean> => {
+  try {
+    const fotos = getFromStorage<any>(BJW_STORAGE_KEYS.FOTO);
+    const index = fotos.findIndex((f: any) => f.part_number === partNumber);
+    
+    if (index === -1) return false;
+    
+    // Set the photo field to null or empty string
+    fotos[index] = {
+      ...fotos[index],
+      [photoKey]: null,
+      updated_at: new Date().toISOString()
+    };
+    
+    saveToStorage(BJW_STORAGE_KEYS.FOTO, fotos);
+    return true;
+  } catch (error) {
+    console.error("Error deleting BJW photo:", error);
+    return false;
+  }
+};
+
+export const addBJWProduct = async (product: any): Promise<string | null> => {
+  try {
+    const baseItems = getFromStorage<any>(BJW_STORAGE_KEYS.BASE_BJW);
+    
+    // Check if product already exists
+    const exists = baseItems.some((i: any) => i.part_number === product.part_number);
+    if (exists) {
+      console.error("Product with this part number already exists");
+      return null;
+    }
+    
+    const newProduct = {
+      id: generateId(),
+      part_number: product.part_number,
+      name: product.name,
+      application: product.application || '',
+      shelf: product.shelf || '',
+      brand: product.brand || '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    baseItems.push(newProduct);
+    saveToStorage(BJW_STORAGE_KEYS.BASE_BJW, baseItems);
+    
+    return newProduct.id;
+  } catch (error) {
+    console.error("Error adding BJW product:", error);
+    return null;
   }
 };

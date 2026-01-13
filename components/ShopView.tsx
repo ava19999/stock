@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { InventoryItem, CartItem } from '../types';
 import { fetchShopItems } from '../services/supabaseService'; 
 import { compressImage } from '../utils';
-import { ShoppingCart } from 'lucide-react';
+import { ShoppingCart, Settings } from 'lucide-react';
 
 import { ImageCropper } from './shop/ImageCropper';
 import { ShopFilterBar } from './shop/ShopFilterBar';
@@ -12,32 +12,44 @@ import { ShopPagination } from './shop/ShopPagination';
 import { ShopCartModal } from './shop/ShopCartModal';
 import { ShopCheckoutModal } from './shop/ShopCheckoutModal';
 import { ReceiptModal } from './shop/ReceiptModal';
+import { BJWProductView } from './BJWProductView';
 
 interface ShopViewProps { 
     items: InventoryItem[]; 
     cart: CartItem[]; 
     isAdmin: boolean;
     isKingFano: boolean; 
-    bannerUrl: string; 
+    bannerUrl: string;
+    selectedStore: 'mjm' | 'bjw' | null;
     onAddToCart: (item: InventoryItem) => void; 
     onRemoveFromCart: (itemId: string) => void; 
     onUpdateCartItem: (itemId: string, changes: Partial<CartItem>) => void; 
     onCheckout: (customerName: string) => void; 
-    onUpdateBanner: (base64: string) => Promise<void>; 
+    onUpdateBanner: (base64: string) => Promise<void>;
+    showToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
 export const ShopView: React.FC<ShopViewProps> = ({ 
     cart = [], 
     isAdmin,
     isKingFano, 
-    bannerUrl, 
+    bannerUrl,
+    selectedStore,
     onAddToCart, 
     onRemoveFromCart, 
     onUpdateCartItem, 
     onCheckout, 
-    onUpdateBanner 
+    onUpdateBanner,
+    showToast
 }) => {
   // State Data
+  const [shopItems, setShopItems] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  
+  // BJW Product Management View Toggle
+  const [showBJWProductView, setShowBJWProductView] = useState(false);
+  
+  // State Filter & Pagination
   const [shopItems, setShopItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   
@@ -175,61 +187,90 @@ export const ShopView: React.FC<ShopViewProps> = ({
       {/* Scrollable Content Area */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
 
-          {/* FILTER BAR */}
-          <div className="sticky top-0 z-10 bg-gray-900 px-4 py-2 border-b border-gray-800 shadow-md">
-            <ShopFilterBar 
-                searchTerm={searchTerm} 
-                setSearchTerm={setSearchTerm}
-                partNumberSearch={partNumberSearch}
-                setPartNumberSearch={setPartNumberSearch}
-                nameSearch={nameSearch}
-                setNameSearch={setNameSearch}
-                brandSearch={brandSearch}
-                setBrandSearch={setBrandSearch}
-                applicationSearch={applicationSearch}
-                setApplicationSearch={setApplicationSearch}
-                isAdmin={isAdmin}
-                viewMode={viewMode}
-                setViewMode={setViewMode}
-            />
-          </div>
+          {/* BJW Product Management Toggle (Admin Only for BJW Store) */}
+          {isAdmin && selectedStore === 'bjw' && (
+            <div className="sticky top-0 z-20 bg-gray-800 px-4 py-3 border-b border-gray-700 shadow-lg">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-white">BJW Store</h2>
+                <button
+                  onClick={() => setShowBJWProductView(!showBJWProductView)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                    showBJWProductView 
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                      : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                  }`}
+                >
+                  <Settings size={18} />
+                  <span>{showBJWProductView ? 'Shop View' : 'Product Management'}</span>
+                </button>
+              </div>
+            </div>
+          )}
 
-          {/* LIST BARANG */}
-          <div className="p-4 pb-24">
-            <ShopItemList 
-                loading={loading}
-                // PERBAIKAN 5: Kirim 'items' (bukan shopItems) agar sesuai komponen ShopItemList yang baru
-                items={shopItems} 
-                // Kompatibilitas jika komponen masih pakai prop lama 'shopItems'
-                // @ts-ignore
-                shopItems={shopItems}
-                
-                viewMode={viewMode}
-                isAdmin={isAdmin}
-                isKingFano={isKingFano}
-                // @ts-ignore
-                adminPriceMode={'retail'} 
-                onAddToCart={onAddToCart}
-            />
+          {/* Conditionally show BJW Product View or Shop Items */}
+          {showBJWProductView && selectedStore === 'bjw' && isAdmin ? (
+            <BJWProductView onShowToast={showToast} />
+          ) : (
+            <>
+              {/* FILTER BAR */}
+              <div className="sticky top-0 z-10 bg-gray-900 px-4 py-2 border-b border-gray-800 shadow-md">
+                <ShopFilterBar 
+                    searchTerm={searchTerm} 
+                    setSearchTerm={setSearchTerm}
+                    partNumberSearch={partNumberSearch}
+                    setPartNumberSearch={setPartNumberSearch}
+                    nameSearch={nameSearch}
+                    setNameSearch={setNameSearch}
+                    brandSearch={brandSearch}
+                    setBrandSearch={setBrandSearch}
+                    applicationSearch={applicationSearch}
+                    setApplicationSearch={setApplicationSearch}
+                    isAdmin={isAdmin}
+                    viewMode={viewMode}
+                    setViewMode={setViewMode}
+                />
+              </div>
 
-            {!loading && shopItems.length > 0 && (
-                <div className="mt-8 flex justify-center">
-                    {/* PERBAIKAN 6: Pagination menggunakan setPage */}
-                    <ShopPagination 
-                        page={page} 
-                        totalPages={totalPages} 
-                        setPage={setPage} 
-                    />
-                </div>
-            )}
-          </div>
+              {/* LIST BARANG */}
+              <div className="p-4 pb-24">
+                <ShopItemList 
+                    loading={loading}
+                    // PERBAIKAN 5: Kirim 'items' (bukan shopItems) agar sesuai komponen ShopItemList yang baru
+                    items={shopItems} 
+                    // Kompatibilitas jika komponen masih pakai prop lama 'shopItems'
+                    // @ts-ignore
+                    shopItems={shopItems}
+                    
+                    viewMode={viewMode}
+                    isAdmin={isAdmin}
+                    isKingFano={isKingFano}
+                    // @ts-ignore
+                    adminPriceMode={'retail'} 
+                    onAddToCart={onAddToCart}
+                />
+
+                {!loading && shopItems.length > 0 && (
+                    <div className="mt-8 flex justify-center">
+                        {/* PERBAIKAN 6: Pagination menggunakan setPage */}
+                        <ShopPagination 
+                            page={page} 
+                            totalPages={totalPages} 
+                            setPage={setPage} 
+                        />
+                    </div>
+                )}
+              </div>
+            </>
+          )}
       </div>
 
-      {/* Floating Cart Button */}
-      <button onClick={() => setIsCartOpen(true)} className="fixed bottom-6 right-6 sm:bottom-8 sm:right-8 bg-blue-600 text-white p-4 rounded-full shadow-2xl hover:bg-blue-500 hover:scale-105 active:scale-95 transition-all z-40 flex items-center justify-center group border-2 border-blue-400">
-        <ShoppingCart size={24} />
-        {cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-gray-900 shadow-sm">{cartItemCount}</span>}
-      </button>
+      {/* Floating Cart Button - Only show in shop view */}
+      {!showBJWProductView && (
+        <button onClick={() => setIsCartOpen(true)} className="fixed bottom-6 right-6 sm:bottom-8 sm:right-8 bg-blue-600 text-white p-4 rounded-full shadow-2xl hover:bg-blue-500 hover:scale-105 active:scale-95 transition-all z-40 flex items-center justify-center group border-2 border-blue-400">
+          <ShoppingCart size={24} />
+          {cartItemCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center border-2 border-gray-900 shadow-sm">{cartItemCount}</span>}
+        </button>
+      )}
       
       {/* Modals */}
       <ShopCartModal 

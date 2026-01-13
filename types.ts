@@ -20,6 +20,39 @@ export interface InventoryItem {
   description?: string;
 }
 
+// BJW Store specific types
+export interface BaseBJW {
+  id: string;
+  part_number: string;
+  name: string;
+  application: string;
+  shelf: string;
+  brand: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Foto {
+  id: string;
+  part_number: string;
+  foto_1?: string;
+  foto_2?: string;
+  foto_3?: string;
+  foto_4?: string;
+  foto_5?: string;
+  foto_6?: string;
+  foto_7?: string;
+  foto_8?: string;
+  foto_9?: string;
+  foto_10?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BJWProduct extends BaseBJW {
+  photos: Foto | null;
+}
+
 export interface InventoryFormData {
   partNumber: string;
   name: string;
