@@ -896,3 +896,45 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[]): Prom
         return { success: true };
     } catch (error) { console.error("Error processing shipment:", error); return { success: false, message: "Terjadi kesalahan sistem." }; }
 };
+
+// Fetch BJW data from base_bjw table with foto join
+export const fetchBJWData = async () => {
+    console.log('fetchBJWData: Starting to fetch data from base_bjw...');
+    try {
+        // Query base_bjw and join with foto table
+        const { data, error } = await supabase
+            .from('base_bjw')
+            .select(`
+                part_number,
+                name,
+                application,
+                shelf,
+                brand,
+                foto (
+                    foto_1,
+                    foto_2,
+                    foto_3,
+                    foto_4,
+                    foto_5,
+                    foto_6,
+                    foto_7,
+                    foto_8,
+                    foto_9,
+                    foto_10
+                )
+            `);
+
+        if (error) {
+            console.error('fetchBJWData: Error fetching data:', error);
+            return { success: false, error: error.message, data: [] };
+        }
+
+        console.log(`fetchBJWData: Successfully fetched ${data?.length || 0} items`);
+        console.log('fetchBJWData: Sample data (first item):', data?.[0]);
+
+        return { success: true, data: data || [], error: null };
+    } catch (error: any) {
+        console.error('fetchBJWData: Exception occurred:', error);
+        return { success: false, error: error.message, data: [] };
+    }
+};
