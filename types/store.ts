@@ -16,6 +16,7 @@ export interface StoreConfig {
   id: StoreType;
   name: string;
   fullName: string;
+  subtitle: string;
   logo: string;
   theme: StoreTheme;
   adminPassword: string; // NOTE: In production, move passwords to environment variables or use a secure auth service
@@ -32,6 +33,7 @@ export const STORE_CONFIGS: Record<'mjm' | 'bjw', StoreConfig> = {
     id: 'mjm',
     name: 'MJM86',
     fullName: 'MJM86 AUTOPART',
+    subtitle: 'Suku Cadang Mobil',
     logo: '/assets/mjm-logo.png',
     theme: {
       primary: 'yellow-400',
@@ -47,6 +49,7 @@ export const STORE_CONFIGS: Record<'mjm' | 'bjw', StoreConfig> = {
     id: 'bjw',
     name: 'BJW',
     fullName: 'BJW AUTOPART',
+    subtitle: 'Sukucadang Mobil',
     logo: '/assets/bjw-logo.png',
     theme: {
       primary: 'red-500',
