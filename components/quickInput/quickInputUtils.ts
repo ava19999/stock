@@ -1,37 +1,47 @@
 // FILE: src/components/quickInput/quickInputUtils.ts
 import { QuickInputRow } from './types';
 
+// Helper to get today's date in YYYY-MM-DD format
+const getTodayDate = (): string => {
+    const today = new Date();
+    return today.toISOString().split('T')[0];
+};
+
 export const createEmptyRow = (id: number): QuickInputRow => ({
     id,
+    tanggal: getTodayDate(),
+    tempo: 'CASH',
+    customer: '',
     partNumber: '',
     namaBarang: '',
-    hargaModal: 0,
+    brand: '',
+    aplikasi: '',
+    qtySaatIni: 0,
+    qtyMasuk: 0, 
+    totalHarga: 0,
+    hargaSatuan: 0,
     hargaJual: 0,
-    quantity: 0, 
-    operation: 'out',
+    operation: 'in', // Default to 'in' for Input Barang
     via: '',
-    customer: '',
     resiTempo: '',
 });
 
 export const checkIsRowComplete = (row: QuickInputRow) => {
-    // Definisi "Harus Diisi":
-    // - Part Number & Nama Barang (String tidak kosong)
-    // - Quantity (Harus > 0) -> Wajib diisi agar masuk log transaksi
-    // - Harga Modal (Harus > 0) -> Wajib diisi
-    // - Via (String tidak kosong)
-    // - Resi/Tempo (String tidak kosong)
+    // Required fields for Input Barang:
+    // - Tanggal (Date)
+    // - Tempo (Payment terms)
+    // - Customer
+    // - Part Number & Nama Barang
+    // - Qty Masuk (Must be > 0)
+    // - Total Harga (Must be > 0)
     
-    // Definisi "Boleh Kosong":
-    // - Harga Jual (Boleh 0)
-    // - Customer (Boleh string kosong)
-
     return (
+        !!row.tanggal &&
+        !!row.tempo &&
+        !!row.customer.trim() &&
         !!row.partNumber && 
         !!row.namaBarang && 
-        row.quantity > 0 &&   // PERUBAHAN: Qty Wajib > 0
-        row.hargaModal > 0 && // Harga Modal Wajib > 0
-        row.via.trim().length > 0 && 
-        row.resiTempo.trim().length > 0
+        row.qtyMasuk > 0 &&
+        row.totalHarga > 0
     );
 };

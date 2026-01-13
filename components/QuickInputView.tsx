@@ -7,6 +7,7 @@ import { QuickInputRow } from './quickInput/types';
 import { QuickInputHeader } from './quickInput/QuickInputHeader';
 import { QuickInputFooter } from './quickInput/QuickInputFooter';
 import { QuickInputTable } from './quickInput/QuickInputTable';
+import { BarangMasukTableView } from './quickInput/BarangMasukTableView';
 
 interface QuickInputViewProps {
   items: InventoryItem[];
@@ -18,11 +19,11 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   // --- STATE ---
   const [rows, setRows] = useState<QuickInputRow[]>([]);
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
+  const [refreshTableTrigger, setRefreshTableTrigger] = useState(0);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
   const [isSavingAll, setIsSavingAll] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [activeTab, setActiveTab] = useState<'in' | 'out'>('out');
   
   const itemsPerPage = 100;
   const COLUMNS_COUNT = 8; 
@@ -32,22 +33,13 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   // --- INITIALIZATION ---
   useEffect(() => {
     if (rows.length === 0) {
-      const initialRows = Array.from({ length: 10 }).map((_, index) => ({
-          ...createEmptyRow(index + 1),
-          operation: activeTab,
-          totalModal: 0 // Inisialisasi field totalModal
-      }));
+      const initialRows = Array.from({ length: 10 }).map((_, index) => createEmptyRow(index + 1));
       setRows(initialRows);
       setTimeout(() => { inputRefs.current[0]?.focus(); }, 100);
     }
   }, []);
 
   // --- HANDLERS ---
-  const handleTabChange = (tab: 'in' | 'out') => {
-      setActiveTab(tab);
-      setRows(prev => prev.map(row => ({ ...row, operation: tab })));
-      setTimeout(() => { inputRefs.current[0]?.focus(); }, 50);
-  };
 
   const handleSearchKeyDown = (e: React.KeyboardEvent, id: number) => {
     if (suggestions.length > 0 && activeSearchIndex !== null) {
@@ -138,19 +130,22 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     setRows(prev => prev.map(row => row.id === id ? {
         ...row, 
         partNumber: item.partNumber, 
-        namaBarang: item.name, 
-        hargaModal: item.costPrice || 0, 
+        namaBarang: item.name,
+        brand: item.brand,
+        aplikasi: item.application,
+        qtySaatIni: item.quantity,
+        hargaSatuan: item.costPrice || 0, 
         hargaJual: item.price || 0, 
         error: undefined,
-        // Set Total Modal = Harga Satuan * 1 (karena default qty di row baru biasanya 0 atau 1)
-        totalModal: (item.costPrice || 0) * (row.quantity || 1)
+        // Set totalHarga based on current qtyMasuk
+        totalHarga: (item.costPrice || 0) * (row.qtyMasuk || 1)
     } : row));
     setSuggestions([]);
     setActiveSearchIndex(null);
     setHighlightedIndex(-1);
     
     const rowIndex = rows.findIndex(r => r.id === id);
-    const qtyInputIndex = (rowIndex * COLUMNS_COUNT) + 2;
+    const qtyInputIndex = (rowIndex * COLUMNS_COUNT) + 4; // Qty Masuk is now at column 4
     setTimeout(() => {
         inputRefs.current[qtyInputIndex]?.focus();
         inputRefs.current[qtyInputIndex]?.select();
@@ -159,7 +154,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
   const addNewRow = () => {
     const maxId = rows.length > 0 ? Math.max(...rows.map(r => r.id)) : 0;
-    setRows(prev => [...prev, { ...createEmptyRow(maxId + 1), operation: activeTab, totalModal: 0 }]);
+    setRows(prev => [...prev, createEmptyRow(maxId + 1)]);
     const newTotalPages = Math.ceil((rows.length + 1) / itemsPerPage);
     if (newTotalPages > currentPage) setCurrentPage(newTotalPages);
     
@@ -198,19 +193,30 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         return false;
       }
       
-      const transactionData = { type: row.operation, qty: row.quantity, ecommerce: row.via, resiTempo: row.resiTempo, customer: row.customer, price: row.operation === 'in' ? row.hargaModal : row.hargaJual };
+      // For Input Barang (incoming goods), we always use 'in' operation
+      const transactionData = { 
+        type: 'in', 
+        qty: row.qtyMasuk, 
+        ecommerce: row.via || '-', 
+        resiTempo: row.resiTempo || '-', 
+        customer: row.customer, 
+        price: row.hargaSatuan,
+        tanggal: row.tanggal,
+        tempo: row.tempo
+      };
+      
       const updatedItem = await updateInventory({
         ...existingItem,
         name: row.namaBarang,
-        quantity: row.operation === 'in' ? existingItem.quantity + row.quantity : Math.max(0, existingItem.quantity - row.quantity),
-        costPrice: row.hargaModal || existingItem.costPrice,
+        quantity: existingItem.quantity + row.qtyMasuk, // Always add for incoming goods
+        costPrice: row.hargaSatuan || existingItem.costPrice,
         price: row.hargaJual || existingItem.price,
         lastUpdated: Date.now()
       }, transactionData);
 
       if (updatedItem) {
         setRows(prev => prev.filter(r => r.id !== row.id));
-        if (showToast) showToast(`Item ${row.partNumber} updated`, 'success');
+        if (showToast) showToast(`Item ${row.partNumber} berhasil disimpan`, 'success');
         return true;
       } else {
         updateRow(row.id, 'error', 'Gagal simpan');
@@ -237,15 +243,14 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     const successCount = results.filter(r => r).length;
     
     if (showToast && successCount > 0) showToast(`${successCount} item berhasil disimpan`, 'success');
-    if (successCount > 0 && onRefresh) onRefresh();
+    if (successCount > 0) {
+        if (onRefresh) onRefresh();
+        setRefreshTableTrigger(prev => prev + 1); // Trigger refresh of table view
+    }
     
     const remainingRows = rows.length - successCount;
     if (remainingRows === 0) {
-       const initialRows = Array.from({ length: 10 }).map((_, index) => ({
-           ...createEmptyRow(index + 1), 
-           operation: activeTab,
-           totalModal: 0 
-       }));
+       const initialRows = Array.from({ length: 10 }).map((_, index) => createEmptyRow(index + 1));
        setRows(initialRows);
     }
     setIsSavingAll(false);
@@ -257,37 +262,41 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const totalPages = Math.ceil(rows.length / itemsPerPage);
 
   return (
-    <div className="bg-gray-800 min-h-[80vh] flex flex-col overflow-hidden text-gray-100">
-      <QuickInputHeader 
-        onAddRow={addNewRow} 
-        onSaveAll={saveAllRows} 
-        isSaving={isSavingAll} 
-        validCount={validRowsCount}
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
-      />
+    <div className="bg-gray-800 flex flex-col overflow-hidden text-gray-100">
+      {/* Input Section */}
+      <div className="min-h-[60vh]">
+        <QuickInputHeader 
+          onAddRow={addNewRow} 
+          onSaveAll={saveAllRows} 
+          isSaving={isSavingAll} 
+          validCount={validRowsCount}
+        />
 
-      <QuickInputTable
-        currentRows={currentRows}
-        startIndex={startIndex}
-        activeSearchIndex={activeSearchIndex}
-        suggestions={suggestions}
-        inputRefs={inputRefs}
-        onPartNumberChange={handlePartNumberChange}
-        onSelectItem={handleSelectItem}
-        onUpdateRow={updateRow}
-        onRemoveRow={removeRow}
-        highlightedIndex={highlightedIndex}
-        onSearchKeyDown={handleSearchKeyDown}
-        onGridKeyDown={handleGridKeyDown}
-      />
+        <QuickInputTable
+          currentRows={currentRows}
+          startIndex={startIndex}
+          activeSearchIndex={activeSearchIndex}
+          suggestions={suggestions}
+          inputRefs={inputRefs}
+          onPartNumberChange={handlePartNumberChange}
+          onSelectItem={handleSelectItem}
+          onUpdateRow={updateRow}
+          onRemoveRow={removeRow}
+          highlightedIndex={highlightedIndex}
+          onSearchKeyDown={handleSearchKeyDown}
+          onGridKeyDown={handleGridKeyDown}
+        />
 
-      <QuickInputFooter 
-        totalRows={rows.length} 
-        currentPage={currentPage} 
-        totalPages={totalPages} 
-        onPageChange={setCurrentPage} 
-      />
+        <QuickInputFooter 
+          totalRows={rows.length} 
+          currentPage={currentPage} 
+          totalPages={totalPages} 
+          onPageChange={setCurrentPage} 
+        />
+      </div>
+
+      {/* Table View Section */}
+      <BarangMasukTableView refreshTrigger={refreshTableTrigger} />
     </div>
   );
 };

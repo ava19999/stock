@@ -447,8 +447,22 @@ export const updateInventory = async (item: InventoryItem, transaction?: { type:
           let ketText = 'Manual Restock';
           if (transaction.customer && transaction.customer.trim() !== '') ketText = transaction.customer;
           if (transaction.isReturn) { const custName = transaction.customer || 'Customer'; ketText = `${custName} (RETUR)`; }
+          
+          // Use custom date from transaction if provided, otherwise use current time
+          // If tanggal is in YYYY-MM-DD format, append time to maintain date consistency
+          let txDate = wibNow;
+          if (transaction.tanggal) {
+              // If the date is in YYYY-MM-DD format, add timezone-neutral time
+              if (/^\d{4}-\d{2}-\d{2}$/.test(transaction.tanggal)) {
+                  txDate = `${transaction.tanggal}T00:00:00Z`;
+              } else {
+                  txDate = new Date(transaction.tanggal).toISOString();
+              }
+          }
+          const txTempo = transaction.tempo || transaction.resiTempo || '-';
+          
           await addBarangMasuk({
-              created_at: wibNow, tempo: transaction.resiTempo || '-', keterangan: ketText, ecommerce: sourceName, 
+              created_at: txDate, tempo: txTempo, keterangan: ketText, ecommerce: sourceName, 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
               rak: item.shelf, stockAhir: finalQty, qtyMasuk: txQty, hargaSatuan: txPrice, hargaTotal: txTotal, customer: transaction.customer 
           });
@@ -715,6 +729,19 @@ export const fetchPriceHistoryBySource = async (partNumber: string) => {
         } 
     }); 
     return Object.values(uniqueSources); 
+};
+
+export const fetchBarangMasuk = async (): Promise<BarangMasuk[]> => {
+    const { data, error } = await supabase
+        .from('barang_masuk')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(500);
+    if (error) { 
+        console.error("Gagal ambil data barang masuk:", error); 
+        return []; 
+    }
+    return data || [];
 };
 
 export const clearBarangKeluar = async (): Promise<boolean> => { 
