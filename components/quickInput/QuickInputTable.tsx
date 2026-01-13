@@ -12,7 +12,6 @@ interface QuickInputTableProps {
     inputRefs: React.MutableRefObject<(HTMLInputElement | null)[]>;
     onPartNumberChange: (id: number, val: string) => void;
     onSelectItem: (id: number, item: InventoryItem) => void;
-    // UPDATE TIPE DISINI:
     onUpdateRow: (id: number, updates: any, value?: any) => void; 
     onRemoveRow: (id: number) => void;
     highlightedIndex: number;
@@ -26,19 +25,18 @@ export const QuickInputTable: React.FC<QuickInputTableProps> = ({
 }) => {
     return (
         <div className="flex-1 overflow-auto p-2">
-            <div className="overflow-x-auto min-w-[1000px]">
+            <div className="overflow-x-auto min-w-[1400px]">
                 <table className="w-full text-left">
                     <thead className="bg-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700 sticky top-0 z-10">
                         <tr>
                             <th className="px-2 py-2 w-8 text-center">#</th>
-                            <th className="px-2 py-2 w-48">Part Number</th>
-                            <th className="px-2 py-2">Nama Barang</th>
-                            <th className="px-2 py-2 w-16 text-right">Qty</th>
-                            <th className="px-2 py-2 w-36 text-right">Total Modal</th> {/* Label Diubah */}
-                            <th className="px-2 py-2 w-28 text-right">Jual</th>
-                            <th className="px-2 py-2 w-24">Via</th>
+                            <th className="px-2 py-2 w-28">Tanggal</th>
+                            <th className="px-2 py-2 w-24">Tempo</th>
                             <th className="px-2 py-2 w-32">Customer</th>
-                            <th className="px-2 py-2 w-32">Resi/Tempo</th>
+                            <th className="px-2 py-2 w-48">Part Number</th>
+                            <th className="px-2 py-2 w-16 text-right">Qty Masuk</th>
+                            <th className="px-2 py-2 w-32 text-right">Total Harga</th>
+                            <th className="px-2 py-2 w-28 text-right">Harga Satuan</th>
                             <th className="px-2 py-2 w-16 text-center">Status</th>
                             <th className="px-2 py-2 w-8 text-center"></th>
                         </tr>
