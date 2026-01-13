@@ -47,7 +47,7 @@ const saveToStorage = <T>(key: string, data: T[]): void => {
 };
 
 const generateId = (): string => {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 };
 
 const getWIBISOString = (): string => {
@@ -670,7 +670,7 @@ export const saveChatSession = async (s: ChatSession): Promise<boolean> => {
 // Retur functions
 export const addReturTransaction = async (data: ReturRecord): Promise<boolean> => {
   const returs = getFromStorage<ReturRecord>(STORAGE_KEYS.RETUR);
-  returs.push({ ...data, id: Date.now() });
+  returs.push({ ...data, id: parseInt(generateId().split('-')[0]) });
   saveToStorage(STORAGE_KEYS.RETUR, returs);
   return true;
 };
@@ -732,7 +732,7 @@ export const addScanResiLog = async (resi: string, ecommerce: string, toko: stri
     saveToStorage(STORAGE_KEYS.SCAN_RESI, updated);
   } else {
     logs.push({
-      id: Date.now(),
+      id: parseInt(generateId().split('-')[0]),
       tanggal: getWIBISOString(),
       resi,
       ecommerce,
@@ -764,7 +764,7 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
       updatedCount++;
     } else {
       logs.push({
-        id: Date.now() + Math.random(),
+        id: parseInt(generateId().split('-')[0]),
         tanggal: getWIBISOString(),
         ...update,
         status: update.status || 'Order Masuk'
@@ -802,7 +802,7 @@ export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
   
   if (!sourceLog) return false;
   
-  const newLog = { ...sourceLog, id: Date.now(), status: 'Pending', tanggal: getWIBISOString() };
+  const newLog = { ...sourceLog, id: parseInt(generateId().split('-')[0]), status: 'Pending', tanggal: getWIBISOString() };
   logs.push(newLog as any);
   saveToStorage(STORAGE_KEYS.SCAN_RESI, logs);
   return true;
