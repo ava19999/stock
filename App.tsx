@@ -81,7 +81,7 @@ const AppContent: React.FC = () => {
   const refreshData = async () => {
     setLoading(true);
     try {
-        const inventoryData = await fetchInventory();
+        const inventoryData = await fetchInventory(selectedStore);
         const bannerItem = inventoryData.find(i => i.partNumber === BANNER_PART_NUMBER);
         if (bannerItem) setBannerUrl(bannerItem.imageUrl);
         setItems(inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER));
@@ -143,7 +143,7 @@ const AppContent: React.FC = () => {
   // --- FIX: FUNGSI UPDATE BANNER YANG SUDAH DIPERBAIKI ---
   const handleUpdateBanner = async (base64: string) => {
       // 1. Cek dulu apakah banner sudah ada di database untuk mendapatkan ID-nya
-      const existingItem = await getItemByPartNumber(BANNER_PART_NUMBER);
+      const existingItem = await getItemByPartNumber(BANNER_PART_NUMBER, selectedStore);
 
       const bannerData: any = { 
           partNumber: BANNER_PART_NUMBER, 
@@ -166,11 +166,11 @@ const AppContent: React.FC = () => {
       if (existingItem) {
           // Jika sudah ada, gunakan ID yang ditemukan untuk update
           const updateData = { ...bannerData, id: existingItem.id };
-          const result = await updateInventory(updateData);
+          const result = await updateInventory(updateData, undefined, selectedStore);
           success = !!result;
       } else {
           // Jika belum ada, buat baru
-          const result = await addInventory(bannerData);
+          const result = await addInventory(bannerData, selectedStore);
           success = !!result;
       }
 
@@ -185,7 +185,7 @@ const AppContent: React.FC = () => {
   const handleDelete = async (id: string) => {
       if(confirm('Hapus Barang Permanen?')) {
           setLoading(true);
-          if (await deleteInventory(id)) { showToast('Dihapus'); refreshData(); }
+          if (await deleteInventory(id, selectedStore)) { showToast('Dihapus'); refreshData(); }
           setLoading(false);
       }
   }
@@ -233,12 +233,12 @@ const AppContent: React.FC = () => {
       for (const retur of returnedItems) {
           const itemInOrder = order.items.find(i => i.id === retur.itemId);
           if (!itemInOrder) continue;
-          const currentItem = await getItemByPartNumber(itemInOrder.partNumber);
+          const currentItem = await getItemByPartNumber(itemInOrder.partNumber, selectedStore);
           if (currentItem) {
               const restoreQty = retur.qty;
               const newQuantity = currentItem.quantity + restoreQty;
               const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
-              await updateInventory(itemToUpdate);
+              await updateInventory(itemToUpdate, undefined, selectedStore);
               await addBarangMasuk({ tanggal: today, tempo: `${resiVal} / ${shopVal}`, ecommerce: ecommerceVal, keterangan: `${pureName} (RETUR)`, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name, brand: itemToUpdate.brand, application: itemToUpdate.application, rak: itemToUpdate.shelf, stockAhir: newQuantity, qtyMasuk: restoreQty, hargaSatuan: itemInOrder.customPrice ?? itemInOrder.price, hargaTotal: (itemInOrder.customPrice ?? itemInOrder.price) * restoreQty });
           }
       }
@@ -272,12 +272,12 @@ const AppContent: React.FC = () => {
       if (order.status === 'pending' && newStatus === 'processing') {
           if (await updateOrderStatusService(orderId, newStatus)) { 
               for (const orderItem of order.items) {
-                  const currentItem = await getItemByPartNumber(orderItem.partNumber);
+                  const currentItem = await getItemByPartNumber(orderItem.partNumber, selectedStore);
                   if (currentItem) {
                       const qtySold = orderItem.cartQuantity;
                       const newQuantity = Math.max(0, currentItem.quantity - qtySold);
                       const itemToUpdate = { ...currentItem, qtyOut: (currentItem.qtyOut || 0) + qtySold, quantity: newQuantity, lastUpdated: Date.now() };
-                      await updateInventory(itemToUpdate);
+                      await updateInventory(itemToUpdate, undefined, selectedStore);
                       await addBarangKeluar({ tanggal: today, kodeToko: 'APP', tempo: shopVal, ecommerce: ecommerceVal, customer: pureName, partNumber: currentItem.partNumber, name: currentItem.name, brand: currentItem.brand, application: currentItem.application, rak: currentItem.shelf, stockAhir: newQuantity, qtyKeluar: qtySold, hargaSatuan: orderItem.customPrice ?? orderItem.price, hargaTotal: (orderItem.customPrice ?? orderItem.price) * qtySold, resi: resiVal });
                   }
               }
@@ -288,12 +288,12 @@ const AppContent: React.FC = () => {
           if (await updateOrderStatusService(orderId, newStatus, updateTime)) {
               if (order.status !== 'pending') {
                   for (const orderItem of order.items) {
-                      const currentItem = await getItemByPartNumber(orderItem.partNumber);
+                      const currentItem = await getItemByPartNumber(orderItem.partNumber, selectedStore);
                       if (currentItem) {
                           const restoreQty = orderItem.cartQuantity;
                           const newQuantity = currentItem.quantity + restoreQty;
                           const itemToUpdate = { ...currentItem, qtyOut: Math.max(0, (currentItem.qtyOut || 0) - restoreQty), quantity: newQuantity, lastUpdated: Date.now() };
-                          await updateInventory(itemToUpdate);
+                          await updateInventory(itemToUpdate, undefined, selectedStore);
                           await addBarangMasuk({ tanggal: today, tempo: `${resiVal} / ${shopVal}`, ecommerce: ecommerceVal, keterangan: `${pureName} (RETUR FULL)`, partNumber: itemToUpdate.partNumber, name: itemToUpdate.name, brand: itemToUpdate.brand, application: itemToUpdate.application, rak: itemToUpdate.shelf, stockAhir: newQuantity, qtyMasuk: restoreQty, hargaSatuan: orderItem.customPrice ?? orderItem.price, hargaTotal: (orderItem.customPrice ?? orderItem.price) * restoreQty });
                       }
                   }

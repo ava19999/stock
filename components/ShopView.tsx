@@ -4,6 +4,7 @@ import { InventoryItem, CartItem } from '../types';
 import { fetchShopItems } from '../services/supabaseService'; 
 import { compressImage } from '../utils';
 import { ShoppingCart } from 'lucide-react';
+import { useStore } from '../context/StoreContext';
 
 import { ImageCropper } from './shop/ImageCropper';
 import { ShopFilterBar } from './shop/ShopFilterBar';
@@ -37,6 +38,8 @@ export const ShopView: React.FC<ShopViewProps> = ({
     onCheckout, 
     onUpdateBanner 
 }) => {
+  const { selectedStore } = useStore();
+  
   // State Data
   const [shopItems, setShopItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -100,7 +103,8 @@ export const ShopView: React.FC<ShopViewProps> = ({
                 debouncedPartNumber,
                 debouncedName,
                 debouncedBrand,
-                debouncedApplication
+                debouncedApplication,
+                selectedStore
             );
             
             setShopItems(data || []);
@@ -115,7 +119,7 @@ export const ShopView: React.FC<ShopViewProps> = ({
     };
 
     loadData();
-  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication]); // Hanya jalan jika ini berubah
+  }, [page, debouncedSearch, category, debouncedPartNumber, debouncedName, debouncedBrand, debouncedApplication, selectedStore]); // Hanya jalan jika ini berubah
 
   // --- Banner Upload Handlers ---
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { 
