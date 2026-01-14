@@ -4,6 +4,7 @@ import { InventoryFormData, InventoryItem } from '../types';
 import { fetchPriceHistoryBySource, updateInventory, addInventory, saveItemImages } from '../services/supabaseService';
 import { X, Save, Upload, Loader2, Package, Layers, DollarSign, History, AlertCircle, ArrowLeft, Plus, ShoppingBag, User, Calendar, Truck } from 'lucide-react';
 import { compressImage, formatRupiah } from '../utils';
+import { useStore } from '../context/StoreContext';
 
 interface ItemFormProps {
   initialData?: InventoryItem;
@@ -13,6 +14,7 @@ interface ItemFormProps {
 
 export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuccess }) => {
   const isEditMode = !!initialData;
+  const { selectedStore } = useStore();
   
   // Base Form State
   const [formData, setFormData] = useState<InventoryFormData>({
@@ -155,13 +157,13 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
             ...initialData, 
             ...formData, 
             images: formData.images 
-        }, transactionData);
+        }, transactionData, selectedStore);
         
         if (updated) onSuccess(updated);
         else setError("Gagal update database.");
 
       } else {
-        const newId = await addInventory(formData);
+        const newId = await addInventory(formData, selectedStore);
         if (newId) onSuccess();
         else setError("Gagal tambah barang.");
       }

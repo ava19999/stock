@@ -7,6 +7,7 @@ import {
 } from '../../services/supabaseService';
 import { compressImage, formatRupiah } from '../../utils';
 import { analyzeResiImage } from '../../services/geminiService';
+import { useStore } from '../../context/StoreContext';
 import * as XLSX from 'xlsx';
 import { 
   ScanBarcode, Loader2, Upload, Camera, Send, ChevronDown, Check, 
@@ -23,11 +24,13 @@ interface OrderScanViewProps {
 }
 
 export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRefreshParent, searchTerm }) => {
+  const { selectedStore: currentStore } = useStore(); // Get store from context
+  
   // --- STATE ---
   const [scanLogs, setScanLogs] = useState<ScanResiLog[]>([]);
   const [selectedResis, setSelectedResis] = useState<string[]>([]);
   const [barcodeInput, setBarcodeInput] = useState('');
-  const [selectedStore, setSelectedStore] = useState(STORE_LIST[0]);
+  const [selectedStore, setSelectedStore] = useState(STORE_LIST[0]); // This is for the scanning UI, different from inventory store
   const [selectedMarketplace, setSelectedMarketplace] = useState('Shopee');
   const [showMarketplacePopup, setShowMarketplacePopup] = useState(false);
   const [inventoryCache, setInventoryCache] = useState<InventoryItem[]>([]);
@@ -222,7 +225,7 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
     if (invalidItem) { onShowToast(`Gagal: Resi ${invalidItem.resi} belum ada Part Number!`, 'error'); return; }
 
     setIsProcessingShipment(true);
-    const result = await processShipmentToOrders(logsToProcess);
+    const result = await processShipmentToOrders(logsToProcess, currentStore);
     if (result.success) {
         onShowToast("Berhasil diproses! Stok terupdate.", 'success');
         await loadScanLogs();

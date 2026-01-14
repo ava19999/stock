@@ -8,6 +8,7 @@ import { QuickInputHeader } from './quickInput/QuickInputHeader';
 import { QuickInputFooter } from './quickInput/QuickInputFooter';
 import { QuickInputTable } from './quickInput/QuickInputTable';
 import { BarangMasukTableView } from './quickInput/BarangMasukTableView';
+import { useStore } from '../context/StoreContext';
 
 interface QuickInputViewProps {
   items: InventoryItem[];
@@ -16,6 +17,8 @@ interface QuickInputViewProps {
 }
 
 export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh, showToast }) => {
+  const { selectedStore } = useStore();
+  
   // --- STATE ---
   const [rows, setRows] = useState<QuickInputRow[]>([]);
   const [suggestions, setSuggestions] = useState<InventoryItem[]>([]);
@@ -186,7 +189,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
     updateRow(row.id, 'isLoading', true);
 
     try {
-      const existingItem = await getItemByPartNumber(row.partNumber);
+      const existingItem = await getItemByPartNumber(row.partNumber, selectedStore);
       if (!existingItem) {
         updateRow(row.id, 'error', `Item tidak ditemukan`);
         updateRow(row.id, 'isLoading', false);
@@ -212,7 +215,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         costPrice: row.hargaSatuan || existingItem.costPrice,
         price: row.hargaJual || existingItem.price,
         lastUpdated: Date.now()
-      }, transactionData);
+      }, transactionData, selectedStore);
 
       if (updatedItem) {
         setRows(prev => prev.filter(r => r.id !== row.id));
