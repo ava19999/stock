@@ -11,7 +11,7 @@ SUPABASE_URL="https://doyyghsijggiibkcktuq.supabase.co"
 SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRveXlnaHNpamdnaWlia2NrdHVxIiwicm9sZSIsImlhdCI6MTc2NTI1OTc1NiwiZXhwIjoyMDgwODM1NzU2fQ.HMq3LhppPRiHenYYZPtOMIX9BKkyqQUqCoCdAjIN3bo"
 ```
 
-**Note:** The ANON_KEY was updated on 2026-01-14 to extend the expiration date to 2080.
+**Note:** The ANON_KEY was updated on 2026-01-14. The JWT payload in this key appears to be missing the role value field (shows `"role",` instead of `"role":"anon",`). While the key is used as provided, if authentication issues occur with Supabase API, the key should be regenerated in the Supabase dashboard with a proper payload structure.
 
 ### 2. Supabase Client (`lib/supabase.ts`)
 The Supabase client is initialized with the URL and ANON_KEY from the environment configuration.

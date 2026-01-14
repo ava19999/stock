@@ -16,11 +16,10 @@ const TABLE_NAME = 'base';
 
 // Function to get the appropriate table name based on store selection
 const getTableName = (store?: string | null): string => {
-    const tableName = store === 'mjm' ? 'base_mjm' : 
-                      store === 'bjw' ? 'base_bjw' : 
-                      TABLE_NAME; // Fallback to 'base' for backward compatibility
-    console.log(`[SupabaseService] Using table: ${tableName} for store: ${store || 'default'}`);
-    return tableName;
+    if (store === 'mjm') return 'base_mjm';
+    if (store === 'bjw') return 'base_bjw';
+    console.log(`[SupabaseService] Using table: ${store ? `base_${store}` : TABLE_NAME} for store: ${store || 'default'}`);
+    return TABLE_NAME; // Fallback to 'base' for backward compatibility
 };
 
 // Cache Foto (Memori Sementara)
