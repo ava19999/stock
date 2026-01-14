@@ -31,16 +31,8 @@ type TableType = 'base' | 'barang_masuk' | 'barang_keluar' | 'orders' | 'scan_re
  * @returns Full table name with store suffix if applicable
  */
 const getTableName = (store?: string | null, tableType: TableType = 'base'): string => {
-    // Map table types to their base names
-    const tableMap: Record<TableType, string> = {
-        'base': 'base',
-        'barang_masuk': 'barang_masuk',
-        'barang_keluar': 'barang_keluar',
-        'orders': 'orders',
-        'scan_resi': 'scan_resi'
-    };
-    
-    const baseTableName = tableMap[tableType];
+    // Use tableType directly as the base table name
+    const baseTableName = tableType;
     
     // Apply store suffix if store is specified
     if (store === 'mjm') return `${baseTableName}_mjm`;
