@@ -46,7 +46,7 @@ export const BarangKosong: React.FC = () => {
           </div>
           <h3 className="text-gray-400 text-sm mb-2">Barang Tersedia</h3>
           <p className="text-3xl font-bold text-gray-100">0</p>
-          <p className="text-xs text-gray-500 mt-2">Stok > 0</p>
+          <p className="text-xs text-gray-500 mt-2">Stok &gt; 0</p>
         </div>
 
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 hover:border-red-500/50 transition-all">
