@@ -1,6 +1,6 @@
 // FILE: src/types/store.ts
 
-export type StoreType = 'mjm' | 'bjw' | null;
+export type StoreType = 'mjm' | 'bjw' | 'kosongan' | null;
 export type UserRole = 'admin' | 'guest' | null;
 
 export interface StoreTheme {
@@ -28,7 +28,7 @@ export interface AuthState {
   userName: string;
 }
 
-export const STORE_CONFIGS: Record<'mjm' | 'bjw', StoreConfig> = {
+export const STORE_CONFIGS: Record<'mjm' | 'bjw' | 'kosongan', StoreConfig> = {
   mjm: {
     id: 'mjm',
     name: 'MJM86',
@@ -60,5 +60,21 @@ export const STORE_CONFIGS: Record<'mjm' | 'bjw', StoreConfig> = {
       glow: 'shadow-red-500/50',
     },
     adminPassword: 'bjw123',
+  },
+  kosongan: {
+    id: 'kosongan',
+    name: 'GUDANG',
+    fullName: 'GUDANG MJM-BJW KOSONGAN',
+    subtitle: 'Keuangan dan Barang Kosong',
+    logo: '/assets/kosongan-logo.png',
+    theme: {
+      primary: 'emerald-500',
+      secondary: 'blue-400',
+      accent: 'emerald-600',
+      hover: 'emerald-400',
+      gradient: 'from-emerald-600/20 to-blue-600/20',
+      glow: 'shadow-emerald-500/50',
+    },
+    adminPassword: 'kosongan123',
   },
 };
