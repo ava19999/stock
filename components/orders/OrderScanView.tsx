@@ -8,7 +8,7 @@ import {
 import { compressImage, formatRupiah } from '../../utils';
 import { analyzeResiImage } from '../../services/geminiService';
 import { useStore } from '../../context/StoreContext';
-import * as XLSX from 'xlsx';
+// Excel import removed in static version
 import { 
   ScanBarcode, Loader2, Upload, Camera, Send, ChevronDown, Check, 
   CheckSquare, Square, Plus, Trash2, Search, XCircle, FileSpreadsheet, AlertTriangle 
@@ -319,105 +319,14 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
+    const file = e.target.files?.[0]; 
+    if (!file) return;
+    
     setIsUploading(true);
-    let inventoryMap = new Map<string, string>(); 
-    let allPartNumbers: string[] = [];
-    try {
-        const inventoryData = await fetchInventory();
-        inventoryData.forEach(item => {
-            if(item.name) inventoryMap.set(item.name.toLowerCase().trim(), item.partNumber);
-            if(item.partNumber) allPartNumbers.push(item.partNumber);
-        });
-        allPartNumbers.sort((a, b) => b.length - a.length);
-    } catch (err) { console.error("Gagal ambil inventory:", err); }
-
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-        try {
-            const bstr = evt.target?.result;
-            const wb = XLSX.read(bstr, { type: 'binary' });
-            const wsname = wb.SheetNames[0];
-            const ws = wb.Sheets[wsname];
-            const data: any[] = XLSX.utils.sheet_to_json(ws, { raw: false });
-            
-            const updates = data.map((row: any) => {
-                const getVal = (keys: string[]) => {
-                    for (let k of keys) {
-                        if (row[k] !== undefined) return row[k];
-                        const lowerKey = Object.keys(row).find(rk => rk.toLowerCase() === k.toLowerCase());
-                        if (lowerKey) return row[lowerKey];
-                    } return null;
-                };
-
-                const resiRaw = getVal(['No. Resi', 'No. Pesanan', 'Resi']);
-                let partNoRaw = getVal(['No. Referensi', 'SKU Induk', 'Part Number', 'Kode Barang']);
-                const produkRaw = getVal(['Nama Produk', 'Nama Barang']);
-                const customerRaw = getVal(['Username (Pembeli)', 'Username', 'Pembeli', 'Nama Penerima']);
-                const totalHargaProdukRaw = getVal(['Total Harga Produk']);
-                const hargaSatuanRaw = getVal(['Harga', 'Harga Satuan', 'Price']);
-                
-                const produkNameClean = String(produkRaw || '').trim();
-                const produkLower = produkNameClean.toLowerCase();
-                
-                if ((!partNoRaw || partNoRaw === '-' || partNoRaw === '') && produkNameClean) {
-                    const foundByExactName = inventoryMap.get(produkLower);
-                    if (foundByExactName) partNoRaw = foundByExactName;
-                    else {
-                        const foundInText = allPartNumbers.find(pn => produkLower.includes(pn.toLowerCase()));
-                        if (foundInText) partNoRaw = foundInText;
-                        else {
-                            const match = produkNameClean.match(/\b[A-Z0-9]{5,}-[A-Z0-9]{4,}\b/i);
-                            if (match) partNoRaw = match[0].toUpperCase();
-                        }
-                    }
-                }
-
-                if (resiRaw) {
-                    const qty = parseIndonesianNumber(getVal(['Jumlah', 'Qty', 'Kuantitas']));
-                    let finalHargaTotal = 0;
-                    let finalHargaSatuan = 0;
-
-                    if (totalHargaProdukRaw) {
-                         finalHargaTotal = parseIndonesianNumber(totalHargaProdukRaw);
-                         finalHargaSatuan = qty > 0 ? (finalHargaTotal / qty) : 0;
-                    } else {
-                         finalHargaSatuan = parseIndonesianNumber(hargaSatuanRaw);
-                         finalHargaTotal = finalHargaSatuan * qty;
-                    }
-
-                    // Pastikan Status Awal CSV adalah 'Order Masuk'
-                    // Kecuali jika resi ini SUDAH ADA di database sebelumnya (sudah discan)
-                    // Maka logika status ditangani oleh importScanResiFromExcel di backend atau dibiarkan
-                    // Untuk amannya, kita set default 'Order Masuk' jika belum ada.
-                    // (Logika merge status ada di backend atau handled here if we check logs)
-                    
-                    return {
-                        resi: String(resiRaw).trim(), 
-                        toko: selectedStore, 
-                        ecommerce: selectedMarketplace, 
-                        customer: customerRaw ? String(customerRaw).trim() : '-',
-                        part_number: (partNoRaw && partNoRaw !== '-') ? String(partNoRaw).trim() : null,
-                        nama_barang: produkRaw ? String(produkRaw).trim() : '-',
-                        quantity: qty, 
-                        harga_satuan: finalHargaSatuan, 
-                        harga_total: finalHargaTotal, 
-                        status: 'Order Masuk' 
-                    };
-                } return null;
-            }).filter(item => item !== null);
-
-            if (updates.length > 0) {
-                const result = await importScanResiFromExcel(updates);
-                if (result.success) {
-                    onShowToast(`Import ${updates.length - result.skippedCount} Data Berhasil`, 'success');
-                    await loadScanLogs();
-                } else onShowToast("Gagal update DB", 'error');
-            } else onShowToast("Tidak ada data valid", 'error');
-        } catch (error) { onShowToast("Gagal baca Excel", 'error'); } 
-        finally { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
-    };
-    reader.readAsBinaryString(file);
+    // Excel import functionality disabled in static version
+    onShowToast("Excel import tidak tersedia di versi statis", 'error');
+    setIsUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   // --- RENDER HELPERS ---
