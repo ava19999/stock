@@ -16,9 +16,12 @@ const TABLE_NAME = 'base';
 
 // Function to get the appropriate table name based on store selection
 const getTableName = (store?: string | null): string => {
-    if (store === 'mjm') return 'base_mjm';
-    if (store === 'bjw') return 'base_bjw';
-    return TABLE_NAME; // Fallback to 'base' for backward compatibility
+    let tableName = TABLE_NAME; // Default to 'base'
+    if (store === 'mjm') tableName = 'base_mjm';
+    else if (store === 'bjw') tableName = 'base_bjw';
+    
+    console.log(`[SupabaseService] Using table: ${tableName} for store: ${store || 'default'}`);
+    return tableName;
 };
 
 // Cache Foto (Memori Sementara)
@@ -175,6 +178,8 @@ export const saveItemImages = async (partNumber: string, images: string[]) => {
 // 1. Fetch Gudang (Pagination)
 export const fetchInventoryPaginated = async (page: number, limit: number, search: string, filter: string = 'all', brand?: string, application?: string, store?: string | null) => {
     const tableName = getTableName(store);
+    console.log(`[fetchInventoryPaginated] Fetching from table: ${tableName}, page: ${page}, limit: ${limit}`);
+    
     let query = supabase.from(tableName).select('*', { count: 'exact' });
     if (search) query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`);
     if (brand && brand.trim() !== '') query = query.ilike('brand', `%${brand}%`);
@@ -185,7 +190,14 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
     const from = (page - 1) * limit;
     const to = from + limit - 1;
     const { data, error, count } = await query.order('date', { ascending: false, nullsFirst: false }).range(from, to);
-    if (error) { console.error(error); return { data: [], count: 0 }; }
+    
+    if (error) { 
+        console.error(`[fetchInventoryPaginated] Error fetching from ${tableName}:`, error);
+        console.error('[fetchInventoryPaginated] Error details:', { message: error.message, code: error.code, hint: error.hint });
+        return { data: [], count: 0 }; 
+    }
+    
+    console.log(`[fetchInventoryPaginated] Successfully fetched ${data?.length || 0} items from ${tableName}`);
     
     const baseItems = (data || []).map(mapBaseItem);
     if (baseItems.length > 0) {
@@ -199,7 +211,9 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
                 if (sellMap && sellMap[key] !== undefined) item.price = sellMap[key];
                 if (photoMap && photoMap[key] && photoMap[key].length > 0) { item.images = photoMap[key]; item.imageUrl = photoMap[key][0]; }
             });
-        } catch (e) {}
+        } catch (e) {
+            console.error('[fetchInventoryPaginated] Error fetching supplementary data:', e);
+        }
     }
     return { data: baseItems, count: count || 0 };
 };
@@ -207,6 +221,8 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
 // Fetch all inventory with filters (no pagination) - for sorting
 export const fetchInventoryAllFiltered = async (search: string, filter: string = 'all', brand?: string, application?: string, store?: string | null): Promise<InventoryItem[]> => {
     const tableName = getTableName(store);
+    console.log(`[fetchInventoryAllFiltered] Fetching filtered items from table: ${tableName}`);
+    
     let query = supabase.from(tableName).select('*');
     if (search) query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,brand.ilike.%${search}%,application.ilike.%${search}%`);
     if (brand && brand.trim() !== '') query = query.ilike('brand', `%${brand}%`);
@@ -215,7 +231,14 @@ export const fetchInventoryAllFiltered = async (search: string, filter: string =
     else if (filter === 'empty') query = query.or('quantity.lte.0,quantity.is.null');
     
     const { data, error } = await query.order('date', { ascending: false, nullsFirst: false });
-    if (error) { console.error(error); return []; }
+    
+    if (error) { 
+        console.error(`[fetchInventoryAllFiltered] Error fetching from ${tableName}:`, error);
+        console.error('[fetchInventoryAllFiltered] Error details:', { message: error.message, code: error.code, hint: error.hint });
+        return []; 
+    }
+    
+    console.log(`[fetchInventoryAllFiltered] Successfully fetched ${data?.length || 0} items from ${tableName}`);
     
     const baseItems = (data || []).map(mapBaseItem);
     if (baseItems.length > 0) {
@@ -229,7 +252,9 @@ export const fetchInventoryAllFiltered = async (search: string, filter: string =
                 if (sellMap && sellMap[key] !== undefined) item.price = sellMap[key];
                 if (photoMap && photoMap[key] && photoMap[key].length > 0) { item.images = photoMap[key]; item.imageUrl = photoMap[key][0]; }
             });
-        } catch (e) {}
+        } catch (e) {
+            console.error('[fetchInventoryAllFiltered] Error fetching supplementary data:', e);
+        }
     }
     return baseItems;
 };
@@ -317,8 +342,18 @@ export const fetchShopItems = async (
 
 export const fetchInventory = async (store?: string | null): Promise<InventoryItem[]> => {
   const tableName = getTableName(store);
+  console.log(`[fetchInventory] Fetching all items from table: ${tableName}`);
+  
   const { data: baseData, error } = await supabase.from(tableName).select('*').order('date', { ascending: false, nullsFirst: false });
-  if (error) { console.error(error); return []; }
+  
+  if (error) { 
+    console.error(`[fetchInventory] Error fetching from ${tableName}:`, error); 
+    console.error('[fetchInventory] Error details:', { message: error.message, code: error.code, hint: error.hint });
+    return []; 
+  }
+  
+  console.log(`[fetchInventory] Successfully fetched ${baseData?.length || 0} items from ${tableName}`);
+  
   const baseItems = (baseData || []).map(mapBaseItem);
   const partNumbers = baseItems.map((item: any) => item.partNumber).filter(Boolean);
   try {
@@ -330,7 +365,9 @@ export const fetchInventory = async (store?: string | null): Promise<InventoryIt
           if (sellMap && sellMap[key] !== undefined) item.price = sellMap[key];
           if (photoMap && photoMap[key] && photoMap[key].length > 0) { item.images = photoMap[key]; item.imageUrl = photoMap[key][0]; }
       });
-  } catch (e) {}
+  } catch (e) {
+    console.error('[fetchInventory] Error fetching supplementary data:', e);
+  }
   return baseItems;
 };
 
