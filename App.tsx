@@ -10,6 +10,7 @@ import { ShopView } from './components/ShopView';
 import { OrderManagement } from './components/OrderManagement';
 import { CustomerOrderView } from './components/CustomerOrderView';
 import { QuickInputView } from './components/QuickInputView';
+import { KosonganView } from './components/kosongan/KosonganView';
 
 // --- NEW SPLIT COMPONENTS ---
 import { Toast } from './components/common/Toast';
@@ -79,6 +80,9 @@ const AppContent: React.FC = () => {
   }, [isAuthenticated]);
 
   const refreshData = async () => {
+    // Skip data loading for kosongan store
+    if (selectedStore === 'kosongan') return;
+    
     setLoading(true);
     try {
         const inventoryData = await fetchInventory(selectedStore);
@@ -98,7 +102,7 @@ const AppContent: React.FC = () => {
   };
 
   // --- HANDLERS AUTH ---
-  const handleSelectStore = (store: 'mjm' | 'bjw') => {
+  const handleSelectStore = (store: 'mjm' | 'bjw' | 'kosongan') => {
     setStore(store);
   };
 
@@ -106,12 +110,19 @@ const AppContent: React.FC = () => {
     setUserRole(role);
     setUserName(name);
     if (role === 'admin') {
-      setActiveView('inventory');
+      // For kosongan store, start with saldo_awal view
+      if (selectedStore === 'kosongan') {
+        setActiveView('saldo_awal');
+      } else {
+        setActiveView('inventory');
+      }
     } else {
       setActiveView('shop');
     }
     showToast(`Selamat Datang di ${selectedStore?.toUpperCase()}, ${name}!`);
-    refreshData();
+    if (selectedStore !== 'kosongan') {
+      refreshData();
+    }
   };
 
   const handleBackToStoreSelection = () => {
@@ -336,7 +347,12 @@ const AppContent: React.FC = () => {
           activeView={activeView} 
           setActiveView={setActiveView} 
           loading={loading} 
-          onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} 
+          onRefresh={() => { 
+            if (selectedStore !== 'kosongan') {
+              refreshData(); 
+              showToast('Data diperbarui'); 
+            }
+          }} 
           loginName={loginName} 
           onLogout={handleLogout} 
           pendingOrdersCount={pendingOrdersCount} 
@@ -346,13 +362,23 @@ const AppContent: React.FC = () => {
       )}
 
       <div className="flex-1 overflow-y-auto bg-gray-900">
-        {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
-        {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
-        {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}
-        {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} isLoading={loading} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
-        {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
+        {/* Kosongan Store Views */}
+        {selectedStore === 'kosongan' && (activeView === 'saldo_awal' || activeView === 'saldo_akhir' || activeView === 'transaksi' || activeView === 'barang_kosong') && (
+          <KosonganView activeView={activeView} setActiveView={setActiveView} />
+        )}
         
-        {isEditing && isAdmin && (
+        {/* Regular Store Views */}
+        {selectedStore !== 'kosongan' && (
+          <>
+            {activeView === 'shop' && <ShopView items={items} cart={cart} isAdmin={isAdmin} isKingFano={isKingFano} bannerUrl={bannerUrl} onAddToCart={addToCart} onRemoveFromCart={(id) => setCart(prev => prev.filter(c => c.id !== id))} onUpdateCartItem={updateCartItem} onCheckout={doCheckout} onUpdateBanner={handleUpdateBanner} />}
+            {activeView === 'inventory' && isAdmin && <Dashboard items={items} orders={orders} history={history} refreshTrigger={refreshTrigger} onViewOrders={() => setActiveView('orders')} onAddNew={() => { setEditItem(null); setIsEditing(true); }} onEdit={(item) => { setEditItem(item); setIsEditing(true); }} onDelete={handleDelete} />}
+            {activeView === 'quick_input' && isAdmin && <QuickInputView items={items} onRefresh={refreshData} showToast={showToast} />}
+            {activeView === 'orders' && isAdmin && <OrderManagement orders={orders} isLoading={loading} onUpdateStatus={handleUpdateStatus} onProcessReturn={handleProcessReturn} onRefresh={refreshData} />}
+            {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={orders.filter(o => o.customerName === loginName)} />}
+          </>
+        )}
+        
+        {isEditing && isAdmin && selectedStore !== 'kosongan' && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in">
                 <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl">
                     <ItemForm initialData={editItem || undefined} onCancel={() => { setIsEditing(false); setEditItem(null); }} onSuccess={(item) => { handleSaveItem(item as any); }} />
@@ -361,7 +387,9 @@ const AppContent: React.FC = () => {
         )}
       </div>
 
-      <MobileNav isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} />
+      {selectedStore !== 'kosongan' && (
+        <MobileNav isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} pendingOrdersCount={pendingOrdersCount} myPendingOrdersCount={myPendingOrdersCount} />
+      )}
     </div>
   );
 };

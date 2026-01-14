@@ -62,6 +62,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const getStoreConfig = () => {
     if (!selectedStore) return null;
+    if (selectedStore === 'kosongan') return STORE_CONFIGS[selectedStore];
     return STORE_CONFIGS[selectedStore];
   };
 

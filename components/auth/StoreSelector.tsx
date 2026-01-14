@@ -13,7 +13,7 @@ export const StoreSelector: React.FC<StoreSelectorProps> = ({ onSelectStore }) =
   const [selectedStore, setSelectedStore] = useState<StoreType>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
-  const handleStoreClick = (storeId: 'mjm' | 'bjw') => {
+  const handleStoreClick = (storeId: 'mjm' | 'bjw' | 'kosongan') => {
     setSelectedStore(storeId);
     setIsTransitioning(true);
     
@@ -55,14 +55,14 @@ export const StoreSelector: React.FC<StoreSelectorProps> = ({ onSelectStore }) =
               <Loader2 size={64} className="text-blue-400 animate-spin mx-auto" />
               <div className="space-y-2">
                 <p className="text-2xl font-bold text-white">Memuat...</p>
-                <p className="text-gray-400">Menghubungkan ke {selectedStore === 'mjm' ? 'MJM86' : 'BJW'} AUTOPART</p>
+                <p className="text-gray-400">Menghubungkan ke {selectedStore === 'mjm' ? 'MJM86' : selectedStore === 'bjw' ? 'BJW' : 'GUDANG KOSONGAN'} {selectedStore !== 'kosongan' && 'AUTOPART'}</p>
               </div>
             </div>
           </div>
         )}
 
         {/* Store Cards */}
-        <div className="grid md:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom duration-700 delay-200">
+        <div className="grid md:grid-cols-3 gap-8 animate-in fade-in slide-in-from-bottom duration-700 delay-200">
           {stores.map((store, index) => {
             const isSelected = selectedStore === store.id;
             const isOther = selectedStore && selectedStore !== store.id;

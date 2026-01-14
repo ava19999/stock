@@ -42,7 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div>
                 <div className="font-bold leading-none text-gray-100 text-lg">{storeConfig.name}</div>
-                <div className="text-[10px] font-bold text-gray-400 leading-none mt-0.5">Autopart</div>
+                {storeConfig.id !== 'kosongan' && <div className="text-[10px] font-bold text-gray-400 leading-none mt-0.5">Autopart</div>}
                 <div className="text-[9px] text-gray-500 leading-none">{storeConfig.subtitle}</div>
                 <div className={`text-[9px] font-bold mt-1 px-1.5 py-0.5 rounded-md inline-block ${isAdmin ? 'bg-purple-900/30 text-purple-300 border border-purple-800' : 'bg-blue-900/30 text-blue-300 border border-blue-800'}`}>
                     {isAdmin ? 'ADMIN ACCESS' : 'STORE FRONT'}
@@ -55,7 +55,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
             
             {/* NAVIGASI DESKTOP */}
-            {isAdmin ? (
+            {storeConfig.id !== 'kosongan' && isAdmin ? (
                 <>
                   <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-purple-900/30 text-purple-300 ring-1 ring-purple-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><ShoppingCart size={18}/> Beranda</button>
                   <button onClick={() => setActiveView('inventory')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='inventory'?'bg-purple-900/30 text-purple-300 ring-1 ring-purple-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><Package size={18}/> Gudang</button>
@@ -64,14 +64,14 @@ export const Header: React.FC<HeaderProps> = ({
                     <ClipboardList size={18}/> Manajemen Pesanan {pendingOrdersCount > 0 && <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">{pendingOrdersCount}</span>}
                   </button>
                 </>
-            ) : (
+            ) : storeConfig.id !== 'kosongan' && !isAdmin ? (
                 <>
                   <button onClick={() => setActiveView('shop')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='shop'?'bg-blue-900/30 text-blue-300 ring-1 ring-blue-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}><Home size={18}/> Belanja</button>
                   <button onClick={() => setActiveView('orders')} className={`hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-full transition-all ${activeView==='orders'?'bg-blue-900/30 text-blue-300 ring-1 ring-blue-800':'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}`}>
                     <ClipboardList size={18}/> Pesanan {myPendingOrdersCount > 0 && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-gray-900"></span>}
                   </button>
                 </>
-            )}
+            ) : null}
 
             <div className="h-8 w-px bg-gray-700 mx-2"></div>
             <button onClick={onLogout} className="flex items-center gap-2 px-3 py-2 text-gray-400 hover:bg-red-900/20 hover:text-red-400 rounded-lg transition-all" title="Keluar">
