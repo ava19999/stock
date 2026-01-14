@@ -14,10 +14,22 @@ import {
 
 const TABLE_NAME = 'base';
 
-// Type for different table categories
+/**
+ * Type for different table categories in the database
+ * - 'base': Inventory/stock master data tables (base_mjm, base_bjw)
+ * - 'barang_masuk': Incoming goods/stock-in transaction tables
+ * - 'barang_keluar': Outgoing goods/stock-out transaction tables  
+ * - 'orders': Sales orders tables
+ * - 'scan_resi': Shipping tracking/receipt scan tables
+ */
 type TableType = 'base' | 'barang_masuk' | 'barang_keluar' | 'orders' | 'scan_resi';
 
-// Function to get the appropriate table name based on store selection and table type
+/**
+ * Function to get the appropriate table name based on store selection and table type
+ * @param store - Store identifier ('mjm' or 'bjw'), null/undefined for default tables
+ * @param tableType - Type of table operation (defaults to 'base' for inventory tables)
+ * @returns Full table name with store suffix if applicable
+ */
 const getTableName = (store?: string | null, tableType: TableType = 'base'): string => {
     // Map table types to their base names
     const tableMap: Record<TableType, string> = {
@@ -969,7 +981,7 @@ export const deleteScanResiLog = async (id: number, store?: string | null): Prom
 };
 
 export const processShipmentToOrders = async (selectedLogs: ScanResiLog[], store?: string | null): Promise<{ success: boolean; message?: string }> => {
-    const tableName = getTableName(store);
+    const tableName = getTableName(store, 'base');
     const ordersTable = getTableName(store, 'orders');
     const scanResiTable = getTableName(store, 'scan_resi');
     try {
