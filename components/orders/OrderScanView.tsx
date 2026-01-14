@@ -8,7 +8,7 @@ import {
 import { compressImage, formatRupiah } from '../../utils';
 import { analyzeResiImage } from '../../services/geminiService';
 import { useStore } from '../../context/StoreContext';
-import * as XLSX from 'xlsx';
+// Excel import removed in static version
 import { 
   ScanBarcode, Loader2, Upload, Camera, Send, ChevronDown, Check, 
   CheckSquare, Square, Plus, Trash2, Search, XCircle, FileSpreadsheet, AlertTriangle 
@@ -321,6 +321,14 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     setIsUploading(true);
+    
+    // Excel import functionality disabled in static version
+    onShowToast("Excel import tidak tersedia di versi statis", 'error');
+    setIsUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    return;
+    
+    /* DISABLED - Excel import code
     let inventoryMap = new Map<string, string>(); 
     let allPartNumbers: string[] = [];
     try {
@@ -336,11 +344,12 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
     reader.onload = async (evt) => {
         try {
             const bstr = evt.target?.result;
-            const wb = XLSX.read(bstr, { type: 'binary' });
-            const wsname = wb.SheetNames[0];
-            const ws = wb.Sheets[wsname];
-            const data: any[] = XLSX.utils.sheet_to_json(ws, { raw: false });
+            // Excel parsing removed
+            const data: any[] = [];
+            */ // END DISABLED
             
+            // Rest of code commented out
+            /*
             const updates = data.map((row: any) => {
                 const getVal = (keys: string[]) => {
                     for (let k of keys) {
@@ -417,7 +426,8 @@ export const OrderScanView: React.FC<OrderScanViewProps> = ({ onShowToast, onRef
         } catch (error) { onShowToast("Gagal baca Excel", 'error'); } 
         finally { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
     };
-    reader.readAsBinaryString(file);
+    */ // END DISABLED
+    // reader.readAsBinaryString(file);
   };
 
   // --- RENDER HELPERS ---
