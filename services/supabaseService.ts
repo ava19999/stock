@@ -428,7 +428,21 @@ export const addInventory = async (item: InventoryFormData, store?: string | nul
   return data ? data.id : null;
 };
 
-export const updateInventory = async (item: InventoryItem, transaction?: { type: 'in' | 'out', qty: number, ecommerce: string, resiTempo: string, customer?: string, price?: number, isReturn?: boolean, store?: string, tanggal?: string }, store?: string | null): Promise<InventoryItem | null> => {
+export const updateInventory = async (
+  item: InventoryItem, 
+  transaction?: { 
+    type: 'in' | 'out', 
+    qty: number, 
+    ecommerce: string, 
+    resiTempo: string, 
+    customer?: string, 
+    price?: number, 
+    isReturn?: boolean, 
+    store?: string,  // Retail store name for transaction record (e.g., 'MJM', 'BJW', 'LARIS')
+    tanggal?: string 
+  }, 
+  store?: string | null  // Inventory database table selector ('mjm' or 'bjw')
+): Promise<InventoryItem | null> => {
   const tableName = getTableName(store);
   const { data: currentDbItem, error: fetchError } = await supabase.from(tableName).select('quantity').eq('id', item.id).single();
   if (fetchError || !currentDbItem) { console.error("Gagal ambil stok terbaru:", fetchError); return null; }
@@ -485,6 +499,8 @@ export const updateInventory = async (item: InventoryItem, transaction?: { type:
           });
       } else {
           let finalResi = transaction.resiTempo || '-';
+          // Note: transaction.store is the retail store name for the transaction record (e.g., 'MJM', 'BJW')
+          // This is different from the 'store' parameter which determines the inventory table
           let finalTempo = transaction.store || ''; 
           if (finalResi.includes('/')) { const parts = finalResi.split('/'); finalResi = parts[0].trim(); if (parts.length > 1) finalTempo = parts[1].trim(); }
           await addBarangKeluar({
@@ -928,6 +944,8 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[], store
                 const item = await getItemByPartNumber(log.part_number, store);
                 if (item) {
                     realItemName = item.name;
+                    // Note: log.toko is the retail store name (e.g., 'MJM', 'BJW') for the transaction record
+                    // The 'store' parameter determines which inventory table to use
                     await updateInventory(item, { type: 'out', qty: log.quantity, ecommerce: log.ecommerce, resiTempo: log.resi, customer: log.customer, price: log.harga_satuan, store: log.toko }, store);
                 }
             }
