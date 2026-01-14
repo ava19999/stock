@@ -22,12 +22,15 @@ export const fetchInventory = async (store?: string | null): Promise<InventoryIt
 };
 
 export const fetchInventoryPaginated = async (
-  store: string | null,
   page: number,
   perPage: number,
-  filters?: any
-): Promise<{ data: InventoryItem[]; total: number }> => {
-  return Promise.resolve({ data: [], total: 0 });
+  search?: string,
+  filterType?: string,
+  brand?: string,
+  application?: string,
+  store?: string | null
+): Promise<{ data: InventoryItem[]; count: number }> => {
+  return Promise.resolve({ data: [], count: 0 });
 };
 
 export const fetchInventoryStats = async (store: string | null): Promise<any> => {
@@ -48,12 +51,12 @@ export const addInventory = async (data: InventoryFormData, store?: string | nul
 };
 
 export const updateInventory = async (
-  id: string,
-  data: Partial<InventoryFormData>,
+  data: InventoryItem,
+  transactionData?: any,
   store?: string | null
-): Promise<void> => {
-  console.log('Mock: updateInventory called', id, data);
-  return Promise.resolve();
+): Promise<InventoryItem> => {
+  console.log('Mock: updateInventory called', data);
+  return Promise.resolve(data);
 };
 
 export const deleteInventory = async (id: string, store?: string | null): Promise<void> => {
