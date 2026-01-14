@@ -14,11 +14,28 @@ import {
 
 const TABLE_NAME = 'base';
 
-// Function to get the appropriate table name based on store selection
-const getTableName = (store?: string | null): string => {
-    if (store === 'mjm') return 'base_mjm';
-    if (store === 'bjw') return 'base_bjw';
-    return TABLE_NAME; // Fallback to 'base' for backward compatibility
+// Type for different table categories
+type TableType = 'base' | 'barang_masuk' | 'barang_keluar' | 'orders' | 'scan_resi';
+
+// Function to get the appropriate table name based on store selection and table type
+const getTableName = (store?: string | null, tableType: TableType = 'base'): string => {
+    // Map table types to their base names
+    const tableMap: Record<TableType, string> = {
+        'base': 'base',
+        'barang_masuk': 'barang_masuk',
+        'barang_keluar': 'barang_keluar',
+        'orders': 'orders',
+        'scan_resi': 'scan_resi'
+    };
+    
+    const baseTableName = tableMap[tableType];
+    
+    // Apply store suffix if store is specified
+    if (store === 'mjm') return `${baseTableName}_mjm`;
+    if (store === 'bjw') return `${baseTableName}_bjw`;
+    
+    // Fallback to base table name without suffix for backward compatibility
+    return baseTableName;
 };
 
 // Cache Foto (Memori Sementara)
@@ -91,9 +108,10 @@ const normalizeKey = (key: string | null | undefined): string => {
 
 // --- DATA FETCHING HELPERS ---
 
-const fetchLatestCostPrices = async (partNumbers?: string[]) => {
+const fetchLatestCostPrices = async (partNumbers?: string[], store?: string | null) => {
     try {
-        let query = supabase.from('barang_masuk').select('part_number, harga_satuan').order('created_at', { ascending: false, nullsFirst: false });
+        const tableName = getTableName(store, 'barang_masuk');
+        let query = supabase.from(tableName).select('part_number, harga_satuan').order('created_at', { ascending: false, nullsFirst: false });
         if (partNumbers && partNumbers.length > 0) { query = query.in('part_number', partNumbers); }
         const { data, error } = await query;
         if (error || !data) return {};
@@ -191,7 +209,7 @@ export const fetchInventoryPaginated = async (page: number, limit: number, searc
     if (baseItems.length > 0) {
         try {
             const partNumbers = baseItems.map(i => i.partNumber).filter(Boolean);
-            const [costMap, sellMap, photoMapResult] = await Promise.all([fetchLatestCostPrices(partNumbers), fetchLatestSellingPrices(partNumbers), fetchPhotos(partNumbers)]);
+            const [costMap, sellMap, photoMapResult] = await Promise.all([fetchLatestCostPrices(partNumbers, store), fetchLatestSellingPrices(partNumbers), fetchPhotos(partNumbers)]);
             const photoMap = photoMapResult || {};
             baseItems.forEach(item => {
                 const key = normalizeKey(item.partNumber);
@@ -221,7 +239,7 @@ export const fetchInventoryAllFiltered = async (search: string, filter: string =
     if (baseItems.length > 0) {
         try {
             const partNumbers = baseItems.map(i => i.partNumber).filter(Boolean);
-            const [costMap, sellMap, photoMapResult] = await Promise.all([fetchLatestCostPrices(partNumbers), fetchLatestSellingPrices(partNumbers), fetchPhotos(partNumbers)]);
+            const [costMap, sellMap, photoMapResult] = await Promise.all([fetchLatestCostPrices(partNumbers, store), fetchLatestSellingPrices(partNumbers), fetchPhotos(partNumbers)]);
             const photoMap = photoMapResult || {};
             baseItems.forEach(item => {
                 const key = normalizeKey(item.partNumber);
@@ -322,7 +340,7 @@ export const fetchInventory = async (store?: string | null): Promise<InventoryIt
   const baseItems = (baseData || []).map(mapBaseItem);
   const partNumbers = baseItems.map((item: any) => item.partNumber).filter(Boolean);
   try {
-      const [costMap, sellMap, photoMapResult] = await Promise.all([fetchLatestCostPrices(partNumbers), fetchLatestSellingPrices(partNumbers), fetchPhotos(partNumbers)]);
+      const [costMap, sellMap, photoMapResult] = await Promise.all([fetchLatestCostPrices(partNumbers, store), fetchLatestSellingPrices(partNumbers), fetchPhotos(partNumbers)]);
       const photoMap = photoMapResult || {};
       baseItems.forEach((item) => {
           const key = normalizeKey(item.partNumber);
@@ -341,7 +359,8 @@ export const getItemById = async (id: string, store?: string | null): Promise<In
   const mapped = mapBaseItem(data);
   const key = normalizeKey(mapped.partNumber);
   try {
-      const { data: costData } = await supabase.from('barang_masuk').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+      const barangMasukTable = getTableName(store, 'barang_masuk');
+      const { data: costData } = await supabase.from(barangMasukTable).select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
       if (costData) mapped.costPrice = Number(costData.harga_satuan) || 0;
       const { data: sellData } = await supabase.from('list_harga_jual').select('harga').eq('part_number', mapped.partNumber).limit(1).maybeSingle();
       if (sellData) mapped.price = Number(sellData.harga) || 0;
@@ -360,7 +379,8 @@ export const getItemByPartNumber = async (partNumber: string, store?: string | n
   const mapped = mapBaseItem(data);
   const key = normalizeKey(mapped.partNumber);
   try {
-      const { data: costData } = await supabase.from('barang_masuk').select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+      const barangMasukTable = getTableName(store, 'barang_masuk');
+      const { data: costData } = await supabase.from(barangMasukTable).select('harga_satuan').eq('part_number', mapped.partNumber).order('created_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
       if (costData) mapped.costPrice = Number(costData.harga_satuan) || 0;
       const { data: sellData } = await supabase.from('list_harga_jual').select('harga').eq('part_number', mapped.partNumber).limit(1).maybeSingle();
       if (sellData) mapped.price = Number(sellData.harga) || 0;
@@ -381,7 +401,7 @@ export const fetchInventoryStats = async (store?: string | null) => {
     try {
         const batches = chunkArray(partNumbers, 50);
         let costMap: Record<string, number> = {};
-        const results = await Promise.all(batches.map(batch => fetchLatestCostPrices(batch)));
+        const results = await Promise.all(batches.map(batch => fetchLatestCostPrices(batch, store)));
         results.forEach(res => { costMap = { ...costMap, ...res }; });
         let totalStock = 0; let totalAsset = 0;
         all.forEach((item: any) => {
@@ -423,7 +443,7 @@ export const addInventory = async (item: InventoryFormData, store?: string | nul
           partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
           rak: item.shelf, stockAhir: item.quantity, qtyMasuk: item.quantity,
           hargaSatuan: item.costPrice || 0, hargaTotal: (item.costPrice || 0) * item.quantity
-      });
+      }, store);
   }
   return data ? data.id : null;
 };
@@ -496,7 +516,7 @@ export const updateInventory = async (
               created_at: txDate, tempo: txTempo, keterangan: ketText, ecommerce: sourceName, 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
               rak: item.shelf, stockAhir: finalQty, qtyMasuk: txQty, hargaSatuan: txPrice, hargaTotal: txTotal, customer: transaction.customer 
-          });
+          }, store);
       } else {
           let finalResi = transaction.resiTempo || '-';
           // Note: transaction.store is the retail store name for the transaction record (e.g., 'MJM', 'BJW')
@@ -507,7 +527,7 @@ export const updateInventory = async (
               created_at: wibNow, kodeToko: 'MANUAL', tempo: finalTempo, ecommerce: sourceName, customer: transaction.customer || '', 
               partNumber: item.partNumber, name: item.name, brand: item.brand, application: item.application,
               rak: item.shelf, stockAhir: finalQty, qtyKeluar: txQty, hargaSatuan: txPrice, hargaTotal: txTotal, resi: finalResi 
-          });
+          }, store);
       }
   }
   return { ...item, quantity: finalQty, imageUrl: mainImage, name: baseUpdated.name, brand: baseUpdated.brand, application: baseUpdated.application, shelf: baseUpdated.shelf, lastUpdated: new Date(wibNow).getTime() };
@@ -521,9 +541,11 @@ export const deleteInventory = async (id: string, store?: string | null): Promis
 };
 
 // ... History & Log Functions (Sisa Sama) ...
-export const fetchHistory = async (): Promise<StockHistory[]> => {
-    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
-    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
+export const fetchHistory = async (store?: string | null): Promise<StockHistory[]> => {
+    const barangMasukTable = getTableName(store, 'barang_masuk');
+    const barangKeluarTable = getTableName(store, 'barang_keluar');
+    const { data: dataMasuk } = await supabase.from(barangMasukTable).select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
+    const { data: dataKeluar } = await supabase.from(barangKeluarTable).select('*').order('created_at', { ascending: false, nullsFirst: false }).limit(100);
     const history: StockHistory[] = [];
     (dataMasuk || []).forEach((m: any) => {
         const ket = m.keterangan || 'Restock';
@@ -547,8 +569,8 @@ export const fetchHistory = async (): Promise<StockHistory[]> => {
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
-export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number, limit: number, search: string) => {
-    const table = type === 'in' ? 'barang_masuk' : 'barang_keluar';
+export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number, limit: number, search: string, store?: string | null) => {
+    const table = type === 'in' ? getTableName(store, 'barang_masuk') : getTableName(store, 'barang_keluar');
     let query = supabase.from(table).select('*', { count: 'exact' });
     if (search) {
         if (type === 'in') query = query.or(`name.ilike.%${search}%,part_number.ilike.%${search}%,ecommerce.ilike.%${search}%,keterangan.ilike.%${search}%,tempo.ilike.%${search}%,customer.ilike.%${search}%`);
@@ -580,9 +602,11 @@ export const fetchHistoryLogsPaginated = async (type: 'in' | 'out', page: number
     return { data: mappedData, count: count || 0 };
 };
 
-export const fetchItemHistory = async (partNumber: string): Promise<StockHistory[]> => {
-    const { data: dataMasuk } = await supabase.from('barang_masuk').select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
-    const { data: dataKeluar } = await supabase.from('barang_keluar').select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
+export const fetchItemHistory = async (partNumber: string, store?: string | null): Promise<StockHistory[]> => {
+    const barangMasukTable = getTableName(store, 'barang_masuk');
+    const barangKeluarTable = getTableName(store, 'barang_keluar');
+    const { data: dataMasuk } = await supabase.from(barangMasukTable).select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
+    const { data: dataKeluar } = await supabase.from(barangKeluarTable).select('*').eq('part_number', partNumber).order('created_at', { ascending: false, nullsFirst: false });
     const history: StockHistory[] = [];
     (dataMasuk || []).forEach((m: any) => {
         const ket = m.keterangan || 'Restock';
@@ -606,10 +630,11 @@ export const fetchItemHistory = async (partNumber: string): Promise<StockHistory
     return history.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 };
 
-export const addBarangMasuk = async (data: any) => { 
+export const addBarangMasuk = async (data: any, store?: string | null) => { 
     const ecommerceVal = data.ecommerce || 'Lainnya';
-    const keteranganVal = data.keterangan || 'Restock'; 
-    const { error } = await supabase.from('barang_masuk').insert([{ 
+    const keteranganVal = data.keterangan || 'Restock';
+    const tableName = getTableName(store, 'barang_masuk');
+    const { error } = await supabase.from(tableName).insert([{ 
         created_at: data.created_at || getWIBISOString(), tempo: data.tempo, ecommerce: ecommerceVal, keterangan: keteranganVal, 
         part_number: data.partNumber || data.part_number, name: data.name, brand: data.brand, application: data.application, rak: data.rak, 
         stock_ahir: data.stockAhir || data.stock_ahir, qty_masuk: data.qtyMasuk || data.qty_masuk, 
@@ -619,8 +644,9 @@ export const addBarangMasuk = async (data: any) => {
     return !error; 
 };
 
-export const addBarangKeluar = async (data: any) => { 
-    const { error } = await supabase.from('barang_keluar').insert([{ 
+export const addBarangKeluar = async (data: any, store?: string | null) => {
+    const tableName = getTableName(store, 'barang_keluar');
+    const { error } = await supabase.from(tableName).insert([{ 
         created_at: data.created_at || getWIBISOString(), kode_toko: data.kodeToko || data.kode_toko, tempo: data.tempo, ecommerce: data.ecommerce, customer: data.customer, 
         part_number: data.partNumber || data.part_number, name: data.name, brand: data.brand, application: data.application, rak: data.rak, 
         stock_ahir: data.stockAhir || data.stock_ahir, qty_keluar: data.qtyKeluar || data.qty_keluar, 
@@ -630,7 +656,7 @@ export const addBarangKeluar = async (data: any) => {
     return !error; 
 };
 
-export const addHistoryLog = async (h: StockHistory) => { 
+export const addHistoryLog = async (h: StockHistory, store?: string | null) => { 
     const now = getWIBISOString(); 
     if (h.type === 'in') {
         return addBarangMasuk({ 
@@ -638,21 +664,22 @@ export const addHistoryLog = async (h: StockHistory) => {
             partNumber: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-', 
             stockAhir: h.previousStock + h.quantity, qtyMasuk: h.quantity, 
             hargaSatuan: h.price, hargaTotal: h.totalPrice, customer: '-'
-        }); 
+        }, store); 
     } else {
         return addBarangKeluar({ 
             created_at: now, kodeToko: 'SYS', tempo: '', ecommerce: 'SYSTEM', customer: '', 
             partNumber: h.partNumber, name: h.name, brand: '-', application: '-', rak: '-', 
             stockAhir: h.previousStock - h.quantity, qtyKeluar: h.quantity, 
             hargaSatuan: h.price, hargaTotal: h.totalPrice, resi: '-' 
-        }); 
+        }, store); 
     }
 };
 
-export const updateOrderData = async (orderId: string, newItems: any[], newTotal: number, newStatus: string): Promise<boolean> => {
-    const { data: oldData } = await supabase.from('orders').select('*').eq('resi', orderId).limit(1).single();
+export const updateOrderData = async (orderId: string, newItems: any[], newTotal: number, newStatus: string, store?: string | null): Promise<boolean> => {
+    const ordersTable = getTableName(store, 'orders');
+    const { data: oldData } = await supabase.from(ordersTable).select('*').eq('resi', orderId).limit(1).single();
     if (!oldData) return false;
-    const { error: delError } = await supabase.from('orders').delete().eq('resi', orderId);
+    const { error: delError } = await supabase.from(ordersTable).delete().eq('resi', orderId);
     if (delError) { console.error("Gagal hapus order lama:", delError); return false; }
     const rows = newItems.map((item: any) => ({
         tanggal: oldData.tanggal, resi: orderId, toko: oldData.toko, ecommerce: oldData.ecommerce,
@@ -661,14 +688,15 @@ export const updateOrderData = async (orderId: string, newItems: any[], newTotal
         harga_total: (item.customPrice || item.price) * item.cartQuantity, status: newStatus
     }));
     if (rows.length > 0) {
-        const { error: insError } = await supabase.from('orders').insert(rows);
+        const { error: insError } = await supabase.from(ordersTable).insert(rows);
         if (insError) { console.error("Gagal insert order baru:", insError); return false; }
     }
     return true;
 };
 
-export const fetchOrders = async (): Promise<Order[]> => { 
-    const { data } = await supabase.from('orders').select('*').order('tanggal', { ascending: false }).limit(300); 
+export const fetchOrders = async (store?: string | null): Promise<Order[]> => {
+    const ordersTable = getTableName(store, 'orders');
+    const { data } = await supabase.from(ordersTable).select('*').order('tanggal', { ascending: false }).limit(300); 
     if (!data) return [];
     const groupedOrders: Record<string, Order> = {};
     data.forEach((row: any) => {
@@ -695,7 +723,7 @@ export const fetchOrders = async (): Promise<Order[]> => {
     return Object.values(groupedOrders);
 };
 
-export const saveOrder = async (order: Order): Promise<boolean> => { 
+export const saveOrder = async (order: Order, store?: string | null): Promise<boolean> => { 
     const parseDetails = (name: string) => {
         let cleanName = name;
         let toko = '-'; let ecommerce = '-'; let resi = order.id; 
@@ -711,15 +739,17 @@ export const saveOrder = async (order: Order): Promise<boolean> => {
         part_number: item.partNumber || '-', nama_barang: item.name, quantity: item.cartQuantity, 
         harga_satuan: item.customPrice || item.price, harga_total: (item.customPrice || item.price) * item.cartQuantity, status: order.status
     }));
-    const { error } = await supabase.from('orders').insert(rows);
+    const ordersTable = getTableName(store, 'orders');
+    const { error } = await supabase.from(ordersTable).insert(rows);
     if (error) { console.error("Gagal simpan order:", error); return false; }
     return true; 
 };
 
-export const updateOrderStatusService = async (id: string, status: string, timestamp?: number): Promise<boolean> => { 
+export const updateOrderStatusService = async (id: string, status: string, timestamp?: number, store?: string | null): Promise<boolean> => {
+    const ordersTable = getTableName(store, 'orders');
     const updateData: any = { status }; 
     if (timestamp) updateData.tanggal = getWIBISOStringFromTimestamp(timestamp); 
-    const { error } = await supabase.from('orders').update(updateData).eq('resi', id); 
+    const { error } = await supabase.from(ordersTable).update(updateData).eq('resi', id); 
     return !error; 
 };
 
@@ -749,8 +779,9 @@ export const updateReturKeterangan = async (resi: string, keterangan: string): P
     return true;
 };
 
-export const fetchPriceHistoryBySource = async (partNumber: string) => { 
-    const { data, error } = await supabase.from('barang_masuk').select('ecommerce, harga_satuan, created_at').eq('part_number', partNumber).order('created_at', { ascending: false }); 
+export const fetchPriceHistoryBySource = async (partNumber: string, store?: string | null) => {
+    const barangMasukTable = getTableName(store, 'barang_masuk');
+    const { data, error } = await supabase.from(barangMasukTable).select('ecommerce, harga_satuan, created_at').eq('part_number', partNumber).order('created_at', { ascending: false }); 
     if (error || !data) return []; 
     const uniqueSources: Record<string, any> = {}; 
     data.forEach((item: any) => { 
@@ -765,9 +796,10 @@ export const fetchPriceHistoryBySource = async (partNumber: string) => {
     return Object.values(uniqueSources); 
 };
 
-export const fetchBarangMasuk = async (): Promise<BarangMasuk[]> => {
+export const fetchBarangMasuk = async (store?: string | null): Promise<BarangMasuk[]> => {
+    const barangMasukTable = getTableName(store, 'barang_masuk');
     const { data, error } = await supabase
-        .from('barang_masuk')
+        .from(barangMasukTable)
         .select('*')
         .order('created_at', { ascending: false })
         .limit(500);
@@ -778,31 +810,34 @@ export const fetchBarangMasuk = async (): Promise<BarangMasuk[]> => {
     return data || [];
 };
 
-export const clearBarangKeluar = async (): Promise<boolean> => { 
-    const { error } = await supabase.from('barang_keluar').delete().neq('id', 0); 
+export const clearBarangKeluar = async (store?: string | null): Promise<boolean> => {
+    const barangKeluarTable = getTableName(store, 'barang_keluar');
+    const { error } = await supabase.from(barangKeluarTable).delete().neq('id', 0); 
     if (error) { console.error("Gagal hapus barang keluar:", error); return false; } 
     return true; 
 };
 
-export const fetchScanResiLogs = async (): Promise<ScanResiLog[]> => {
-    const { data, error } = await supabase.from('scan_resi').select('*').order('tanggal', { ascending: false }).limit(500); 
+export const fetchScanResiLogs = async (store?: string | null): Promise<ScanResiLog[]> => {
+    const scanResiTable = getTableName(store, 'scan_resi');
+    const { data, error } = await supabase.from(scanResiTable).select('*').order('tanggal', { ascending: false }).limit(500); 
     if (error) { console.error("Gagal ambil log scan resi:", error); return []; }
     return data || [];
 };
 
-export const addScanResiLog = async (resi: string, ecommerce: string, toko: string): Promise<boolean> => {
+export const addScanResiLog = async (resi: string, ecommerce: string, toko: string, store?: string | null): Promise<boolean> => {
     try {
-        const { data: existingItems } = await supabase.from('scan_resi').select('*').eq('resi', resi);
+        const scanResiTable = getTableName(store, 'scan_resi');
+        const { data: existingItems } = await supabase.from(scanResiTable).select('*').eq('resi', resi);
         if (existingItems && existingItems.length > 0) {
             const updatePromises = existingItems.map(async (item) => {
                 const isComplete = checkIsComplete({ customer: item.customer, part_number: item.part_number, nama_barang: item.nama_barang, quantity: item.quantity, harga_total: item.harga_total });
                 const newStatus = isComplete ? 'Siap Kirim' : 'Pending';
-                return supabase.from('scan_resi').update({ status: newStatus, tanggal: getWIBISOString() }).eq('id', item.id);
+                return supabase.from(scanResiTable).update({ status: newStatus, tanggal: getWIBISOString() }).eq('id', item.id);
             });
             await Promise.all(updatePromises);
             return true;
         } else {
-            const { error } = await supabase.from('scan_resi').insert([{
+            const { error } = await supabase.from(scanResiTable).insert([{
                 tanggal: getWIBISOString(), resi: resi, ecommerce: ecommerce, toko: toko, status: 'Pending', 
             }]);
             return !error;
@@ -810,11 +845,12 @@ export const addScanResiLog = async (resi: string, ecommerce: string, toko: stri
     } catch (err) { console.error("Error scanning:", err); return false; }
 };
 
-export const importScanResiFromExcel = async (updates: any[]): Promise<{ success: boolean, skippedCount: number, updatedCount: number }> => {
+export const importScanResiFromExcel = async (updates: any[], store?: string | null): Promise<{ success: boolean, skippedCount: number, updatedCount: number }> => {
     try {
+        const scanResiTable = getTableName(store, 'scan_resi');
         const resiList = updates.map(u => u.resi).filter(Boolean);
         if (resiList.length === 0) return { success: false, skippedCount: 0, updatedCount: 0 };
-        const { data: existingData, error: checkError } = await supabase.from('scan_resi').select('*').in('resi', resiList);
+        const { data: existingData, error: checkError } = await supabase.from(scanResiTable).select('*').in('resi', resiList);
         if (checkError) return { success: false, skippedCount: 0, updatedCount: 0 };
 
         const existingGrouped = new Map<string, any[]>();
@@ -864,7 +900,7 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
                     nama_barang: item.nama_barang, quantity: item.quantity, status: statusToUse 
                 };
                 if (!isSplitItem) { updateData.harga_satuan = item.harga_satuan; updateData.harga_total = item.harga_total; }
-                updatePromises.push(supabase.from('scan_resi').update(updateData).eq('id', existing.id));
+                updatePromises.push(supabase.from(scanResiTable).update(updateData).eq('id', existing.id));
             } else {
                 insertPayload.push({
                     tanggal: getWIBISOString(), resi: item.resi, toko: item.toko, ecommerce: item.ecommerce,
@@ -875,15 +911,16 @@ export const importScanResiFromExcel = async (updates: any[]): Promise<{ success
             }
         });
 
-        if (insertPayload.length > 0) await supabase.from('scan_resi').insert(insertPayload);
+        if (insertPayload.length > 0) await supabase.from(scanResiTable).insert(insertPayload);
         if (updatePromises.length > 0) await Promise.all(updatePromises);
 
         return { success: true, skippedCount: updates.length - insertPayload.length - updatePromises.length, updatedCount: updatePromises.length };
     } catch (error) { console.error("Error import excel:", error); return { success: false, skippedCount: 0, updatedCount: 0 }; }
 };
 
-export const updateScanResiLogField = async (id: number, field: string, value: any): Promise<boolean> => {
-    const { data, error } = await supabase.from('scan_resi').update({ [field]: value }).eq('id', id).select().single();
+export const updateScanResiLogField = async (id: number, field: string, value: any, store?: string | null): Promise<boolean> => {
+    const scanResiTable = getTableName(store, 'scan_resi');
+    const { data, error } = await supabase.from(scanResiTable).update({ [field]: value }).eq('id', id).select().single();
     if (error) return false;
 
     if (data) {
@@ -897,37 +934,44 @@ export const updateScanResiLogField = async (id: number, field: string, value: a
             });
             const newStatus = isComplete ? 'Siap Kirim' : 'Pending';
             if (data.status !== newStatus) {
-                await supabase.from('scan_resi').update({ status: newStatus }).eq('id', id);
+                await supabase.from(scanResiTable).update({ status: newStatus }).eq('id', id);
             }
         }
     }
     return true;
 };
 
-export const duplicateScanResiLog = async (id: number): Promise<boolean> => {
+export const duplicateScanResiLog = async (id: number, store?: string | null): Promise<boolean> => {
     try {
-        const { data: sourceItem, error: fetchError } = await supabase.from('scan_resi').select('*').eq('id', id).single();
+        const scanResiTable = getTableName(store, 'scan_resi');
+        const { data: sourceItem, error: fetchError } = await supabase.from(scanResiTable).select('*').eq('id', id).single();
         if (fetchError || !sourceItem) return false;
-        const { data: siblings } = await supabase.from('scan_resi').select('*').eq('resi', sourceItem.resi).eq('nama_barang', sourceItem.nama_barang); 
+        const { data: siblings } = await supabase.from(scanResiTable).select('*').eq('resi', sourceItem.resi).eq('nama_barang', sourceItem.nama_barang); 
         if (!siblings) return false;
         const totalPoolPrice = siblings.reduce((sum, item) => sum + (Number(item.harga_total) || 0), 0);
         const totalQuantity = siblings.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
         const pricePerUnit = totalQuantity > 0 ? Math.floor(totalPoolPrice / totalQuantity) : 0;
-        const updatePromises = siblings.map(item => supabase.from('scan_resi').update({ harga_satuan: pricePerUnit, harga_total: pricePerUnit * (Number(item.quantity) || 0) }).eq('id', item.id));
+        const updatePromises = siblings.map(item => supabase.from(scanResiTable).update({ harga_satuan: pricePerUnit, harga_total: pricePerUnit * (Number(item.quantity) || 0) }).eq('id', item.id));
         await Promise.all(updatePromises);
         const { id: oldId, ...cleanItemData } = sourceItem;
-        const { error: insertError } = await supabase.from('scan_resi').insert([{ ...cleanItemData, tanggal: getWIBISOString(), harga_satuan: pricePerUnit, harga_total: pricePerUnit * (Number(cleanItemData.quantity) || 0), status: 'Pending' }]);
+        const { error: insertError } = await supabase.from(scanResiTable).insert([{ ...cleanItemData, tanggal: getWIBISOString(), harga_satuan: pricePerUnit, harga_total: pricePerUnit * (Number(cleanItemData.quantity) || 0), status: 'Pending' }]);
         if (insertError) return false;
         return true;
     } catch (err) { console.error("Error duplicating:", err); return false; }
 };
 
-export const deleteScanResiLog = async (id: number): Promise<boolean> => {
-    try { const { error } = await supabase.from('scan_resi').delete().eq('id', id); return !error; } catch (err) { console.error("Error deleting:", err); return false; }
+export const deleteScanResiLog = async (id: number, store?: string | null): Promise<boolean> => {
+    try { 
+        const scanResiTable = getTableName(store, 'scan_resi');
+        const { error } = await supabase.from(scanResiTable).delete().eq('id', id); 
+        return !error; 
+    } catch (err) { console.error("Error deleting:", err); return false; }
 };
 
 export const processShipmentToOrders = async (selectedLogs: ScanResiLog[], store?: string | null): Promise<{ success: boolean; message?: string }> => {
     const tableName = getTableName(store);
+    const ordersTable = getTableName(store, 'orders');
+    const scanResiTable = getTableName(store, 'scan_resi');
     try {
         const partNumbersToCheck = selectedLogs.map(log => log.part_number).filter(pn => pn !== null && pn !== '') as string[];
         const uniquePartNumbers = [...new Set(partNumbersToCheck)];
@@ -950,12 +994,12 @@ export const processShipmentToOrders = async (selectedLogs: ScanResiLog[], store
                 }
             }
             const harga_total = (log.harga_satuan || 0) * (log.quantity || 0);
-            const { error: insertError } = await supabase.from('orders').insert([{
+            const { error: insertError } = await supabase.from(ordersTable).insert([{
                 tanggal: getWIBISOString(), resi: log.resi, toko: log.toko, ecommerce: log.ecommerce, customer: log.customer,
                 part_number: log.part_number, nama_barang: realItemName, quantity: log.quantity, harga_satuan: log.harga_satuan, harga_total: harga_total, status: 'processing' 
             }]);
             if (insertError) continue; 
-            await supabase.from('scan_resi').update({ status: 'Terjual' }).eq('id', log.id);
+            await supabase.from(scanResiTable).update({ status: 'Terjual' }).eq('id', log.id);
         }
         return { success: true };
     } catch (error) { console.error("Error processing shipment:", error); return { success: false, message: "Terjadi kesalahan sistem." }; }
