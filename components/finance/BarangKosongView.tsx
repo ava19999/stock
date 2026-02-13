@@ -1,6 +1,6 @@
 // FILE: src/components/finance/BarangKosongView.tsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
+import {
   PackageX, Search, RefreshCw, ChevronDown, ChevronUp,
   Plus, Minus, ShoppingCart, X, Truck, Package,
   Clock, CreditCard, User, Layers, History, Loader2,
@@ -8,6 +8,11 @@ import {
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { supabase } from '../../services/supabaseClient';
+import {
+  deletePendingOrderSupplier,
+  fetchPendingOrderSupplier,
+  setPendingOrderSupplierQty
+} from '../../services/supabaseService';
 
 // Types
 interface SupplierItem {
@@ -42,6 +47,7 @@ interface CartItem {
   tempo: string;
   brand?: string;
   application?: string;
+  is_pending_order_supplier?: boolean;
 }
 
 interface PurchaseHistory {
@@ -960,8 +966,8 @@ const SupplierCard: React.FC<{
   onToggle: () => void;
   cart: CartItem[];
   onAddToCart: (item: SupplierItem, supplier: string) => void;
-  onRemoveFromCart: (partNumber: string) => void;
-  onUpdateQty: (partNumber: string, qty: number) => void;
+  onRemoveFromCart: (partNumber: string, supplier: string) => void;
+  onUpdateQty: (partNumber: string, supplier: string, qty: number) => void;
   onViewHistory: (item: SupplierItem) => void;
   supplierOptions: string[];
   isBJW?: boolean;
@@ -1037,7 +1043,9 @@ const SupplierCard: React.FC<{
               </thead>
               <tbody className="divide-y divide-gray-700">
                 {group.items.map((item) => {
-                  const inCart = cart.find(c => c.part_number === item.part_number);
+                  const inCart = isUnknownGroup
+                    ? cart.find(c => c.part_number === item.part_number)
+                    : cart.find(c => c.part_number === item.part_number && c.supplier === group.supplier);
                   
                   // Stock colors for BJW view
                   const stockMJM = item.current_stock_mjm || 0;
@@ -1144,20 +1152,20 @@ const SupplierCard: React.FC<{
                         {inCart ? (
                           <div className="flex items-center justify-center gap-1">
                             <button
-                              onClick={() => onUpdateQty(item.part_number, inCart.qty - 1)}
+                              onClick={() => onUpdateQty(item.part_number, inCart.supplier, inCart.qty - 1)}
                               className="p-1 bg-gray-600 hover:bg-gray-500 rounded transition-colors"
                             >
                               <Minus size={14} />
                             </button>
                             <span className="w-8 text-center font-bold text-white">{inCart.qty}</span>
                             <button
-                              onClick={() => onUpdateQty(item.part_number, inCart.qty + 1)}
+                              onClick={() => onUpdateQty(item.part_number, inCart.supplier, inCart.qty + 1)}
                               className="p-1 bg-gray-600 hover:bg-gray-500 rounded transition-colors"
                             >
                               <Plus size={14} />
                             </button>
                             <button
-                              onClick={() => onRemoveFromCart(item.part_number)}
+                              onClick={() => onRemoveFromCart(item.part_number, inCart.supplier)}
                               className="p-1 bg-red-600/30 hover:bg-red-600 text-red-400 hover:text-white rounded transition-colors ml-1"
                             >
                               <X size={14} />
@@ -1212,8 +1220,8 @@ const SupplierCard: React.FC<{
 // Cart Sidebar Component
 const CartSidebar: React.FC<{
   cart: CartItem[];
-  onUpdateQty: (partNumber: string, qty: number) => void;
-  onRemove: (partNumber: string) => void;
+  onUpdateQty: (partNumber: string, supplier: string, qty: number) => void;
+  onRemove: (partNumber: string, supplier: string) => void;
   onClear: () => void;
   onCheckoutSupplier: (supplier: string) => void;
 }> = ({ cart, onUpdateQty, onRemove, onClear, onCheckoutSupplier }) => {
@@ -1265,45 +1273,51 @@ const CartSidebar: React.FC<{
                 <Truck size={14} /> {supplier}
               </h4>
               <div className="space-y-2">
-                {items.map(item => (
-                  <div key={item.part_number} className="flex items-center justify-between text-xs bg-gray-800/50 rounded-lg p-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-gray-300 truncate font-medium">{item.nama_barang}</p>
-                      <p className="text-gray-500 font-mono text-[10px]">{item.part_number}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-green-400 font-bold">{item.price > 0 ? formatCurrency(item.price) : 'Harga belum ada'}</span>
-                        <span className="text-gray-500">×</span>
-                        <span className="text-blue-400">{item.qty}</span>
-                        <span className="text-gray-500">=</span>
-                        <span className="text-yellow-400 font-bold">{formatCurrency(item.price * item.qty)}</span>
+                {items.map(item => {
+                  const isLockedPending = Boolean(item.is_pending_order_supplier);
+                  return (
+                    <div key={`${item.part_number}-${item.supplier}`} className="flex items-center justify-between text-xs bg-gray-800/50 rounded-lg p-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-gray-300 truncate font-medium">{item.nama_barang}</p>
+                        <p className="text-gray-500 font-mono text-[10px]">{item.part_number}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-green-400 font-bold">{item.price > 0 ? formatCurrency(item.price) : 'Harga belum ada'}</span>
+                          <span className="text-gray-500">×</span>
+                          <span className="text-blue-400">{item.qty}</span>
+                          <span className="text-gray-500">=</span>
+                          <span className="text-yellow-400 font-bold">{formatCurrency(item.price * item.qty)}</span>
+                        </div>
+                        {isLockedPending && (
+                          <p className="text-[10px] text-amber-400 mt-1">Pending tersinkron ke order_supplier</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 ml-2">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => onUpdateQty(item.part_number, item.supplier, item.qty - 1)}
+                            className="p-0.5 bg-gray-700 hover:bg-gray-600 rounded"
+                          >
+                            <Minus size={10} />
+                          </button>
+                          <span className="w-6 text-center font-bold">{item.qty}</span>
+                          <button
+                            onClick={() => onUpdateQty(item.part_number, item.supplier, item.qty + 1)}
+                            className="p-0.5 bg-gray-700 hover:bg-gray-600 rounded"
+                          >
+                            <Plus size={10} />
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => onRemove(item.part_number, item.supplier)}
+                          className="p-1 text-red-400 hover:text-red-300"
+                        >
+                          <X size={12} />
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 ml-2">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => onUpdateQty(item.part_number, item.qty - 1)}
-                          className="p-0.5 bg-gray-700 hover:bg-gray-600 rounded"
-                        >
-                          <Minus size={10} />
-                        </button>
-                        <span className="w-6 text-center font-bold">{item.qty}</span>
-                        <button
-                          onClick={() => onUpdateQty(item.part_number, item.qty + 1)}
-                          className="p-0.5 bg-gray-700 hover:bg-gray-600 rounded"
-                        >
-                          <Plus size={10} />
-                        </button>
-                      </div>
-                      <button
-                        onClick={() => onRemove(item.part_number)}
-                        className="p-1 text-red-400 hover:text-red-300"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  );
+                })}
+	              </div>
               {/* Per-supplier checkout button */}
               <div className="mt-3 pt-3 border-t border-gray-700">
                 <div className="flex justify-between text-xs mb-2">
@@ -1704,37 +1718,102 @@ export const BarangKosongView: React.FC = () => {
   useEffect(() => {
     fetchData();
   }, [selectedStore, activeTab]);
-  
-  // Load cart from localStorage on mount and listen for updates
-  useEffect(() => {
-    const loadCartFromStorage = () => {
-      const storageKey = `barangKosongCart_${selectedStore || 'mjm'}`;
-      const savedCart = localStorage.getItem(storageKey);
-      if (savedCart) {
-        try {
-          const cartItems = JSON.parse(savedCart) as CartItem[];
-          if (cartItems.length > 0) {
-            setCart(cartItems);
-            setShowCart(true);
-            setToast({ msg: `${cartItems.length} item dimuat ke keranjang`, type: 'success' });
-          }
-        } catch (e) {
-          console.error('Error loading cart from storage:', e);
-        }
+
+  const buildCartKey = (partNumber: string, supplier: string) => `${partNumber}__${supplier}`;
+
+  const normalizeCartItems = (items: CartItem[]): CartItem[] => {
+    const map = new Map<string, CartItem>();
+    items.forEach(item => {
+      const partNumber = (item.part_number || '').trim();
+      const supplier = (item.supplier || '').trim();
+      const qty = Number(item.qty || 0);
+      if (!partNumber || !supplier || qty <= 0) return;
+
+      const key = buildCartKey(partNumber, supplier);
+      const existing = map.get(key);
+      if (existing) {
+        map.set(key, {
+          ...existing,
+          qty: existing.is_pending_order_supplier ? existing.qty : existing.qty + qty,
+          price: Number(item.price || existing.price || 0),
+          is_pending_order_supplier: existing.is_pending_order_supplier || item.is_pending_order_supplier === true
+        });
+        return;
       }
-    };
-    
-    loadCartFromStorage();
-    
-    // Listen for cart updates from floating widget
+
+      map.set(key, {
+        part_number: partNumber,
+        nama_barang: item.nama_barang || '-',
+        supplier,
+        qty,
+        price: Number(item.price || 0),
+        tempo: item.tempo || 'CASH',
+        brand: item.brand || '',
+        application: item.application || '',
+        is_pending_order_supplier: item.is_pending_order_supplier === true
+      });
+    });
+    return Array.from(map.values());
+  };
+
+  const syncCartFromStorageAndPending = async (withToast: boolean = false) => {
+    const targetStore = selectedStore || 'mjm';
+    const storageKey = `barangKosongCart_${targetStore}`;
+
+    let localCart: CartItem[] = [];
+    const savedCart = localStorage.getItem(storageKey);
+    if (savedCart) {
+      try {
+        localCart = JSON.parse(savedCart) as CartItem[];
+      } catch (e) {
+        console.error('Error loading cart from storage:', e);
+      }
+    }
+
+    const localNonPending = normalizeCartItems(localCart.filter(item => !item.is_pending_order_supplier));
+    const pendingRows = await fetchPendingOrderSupplier(targetStore);
+    const pendingCart = normalizeCartItems(
+      pendingRows.map(row => ({
+        part_number: row.part_number || '',
+        nama_barang: row.name || row.nama_barang || '-',
+        supplier: row.supplier || '',
+        qty: Number(row.qty || 0),
+        price: Number(row.price || 0),
+        tempo: 'CASH',
+        brand: '',
+        application: '',
+        is_pending_order_supplier: true
+      }))
+    );
+
+    const mergedMap = new Map<string, CartItem>();
+    localNonPending.forEach(item => {
+      mergedMap.set(buildCartKey(item.part_number, item.supplier), item);
+    });
+    pendingCart.forEach(item => {
+      mergedMap.set(buildCartKey(item.part_number, item.supplier), item);
+    });
+
+    const mergedCart = Array.from(mergedMap.values());
+    setCart(mergedCart);
+    setShowCart(mergedCart.length > 0);
+    if (withToast && mergedCart.length > 0) {
+      setToast({ msg: `${mergedCart.length} item dimuat ke keranjang`, type: 'success' });
+    }
+  };
+
+  // Load cart from localStorage + pending order_supplier on mount and on updates
+  useEffect(() => {
+    void syncCartFromStorageAndPending(true);
+
     const handleCartUpdate = (event: CustomEvent) => {
       if (event.detail.store === (selectedStore || 'mjm')) {
-        loadCartFromStorage();
+        void syncCartFromStorageAndPending(false);
       }
     };
-    
+
     window.addEventListener('barangKosongCartUpdated', handleCartUpdate as EventListener);
-    
+
     return () => {
       window.removeEventListener('barangKosongCartUpdated', handleCartUpdate as EventListener);
     };
@@ -1826,11 +1905,19 @@ export const BarangKosongView: React.FC = () => {
   
   // Cart functions
   const addToCart = (item: SupplierItem, supplier: string) => {
+    const existingPending = cart.find(
+      c => c.part_number === item.part_number && c.supplier === supplier && c.is_pending_order_supplier
+    );
+    if (existingPending) {
+      setToast({ msg: 'Item pending mengikuti request. Ubah lewat Order Request.', type: 'error' });
+      return;
+    }
+
     setCart(prev => {
-      const existing = prev.find(c => c.part_number === item.part_number);
+      const existing = prev.find(c => c.part_number === item.part_number && c.supplier === supplier);
       if (existing) {
         return prev.map(c => 
-          c.part_number === item.part_number 
+          c.part_number === item.part_number && c.supplier === supplier
             ? { ...c, qty: c.qty + 1 } 
             : c
         );
@@ -1843,31 +1930,81 @@ export const BarangKosongView: React.FC = () => {
         price: item.last_price,
         tempo: item.tempo,
         brand: item.brand,
-        application: item.application
+        application: item.application,
+        is_pending_order_supplier: false
       }];
     });
     setToast({ msg: `${item.nama_barang} ditambahkan ke keranjang`, type: 'success' });
   };
   
-  const removeFromCart = (partNumber: string) => {
-    setCart(prev => prev.filter(c => c.part_number !== partNumber));
+  const removeFromCart = async (partNumber: string, supplier: string) => {
+    const targetItem = cart.find(c => c.part_number === partNumber && c.supplier === supplier);
+    if (targetItem?.is_pending_order_supplier) {
+      const targetStore = selectedStore || 'mjm';
+      const ok = await setPendingOrderSupplierQty(targetStore, supplier, partNumber, 0);
+      if (!ok) {
+        setToast({ msg: 'Gagal hapus item pending', type: 'error' });
+        return;
+      }
+      await syncCartFromStorageAndPending(false);
+      return;
+    }
+    setCart(prev => prev.filter(c => !(c.part_number === partNumber && c.supplier === supplier)));
   };
   
-  const updateCartQty = (partNumber: string, qty: number) => {
+  const updateCartQty = async (partNumber: string, supplier: string, qty: number) => {
+    const targetItem = cart.find(c => c.part_number === partNumber && c.supplier === supplier);
     if (qty <= 0) {
-      removeFromCart(partNumber);
+      await removeFromCart(partNumber, supplier);
+      return;
+    }
+    if (targetItem?.is_pending_order_supplier) {
+      const targetStore = selectedStore || 'mjm';
+      const ok = await setPendingOrderSupplierQty(targetStore, supplier, partNumber, qty, {
+        name: targetItem.nama_barang,
+        price: targetItem.price
+      });
+      if (!ok) {
+        setToast({ msg: 'Gagal update qty item pending', type: 'error' });
+        return;
+      }
+      await syncCartFromStorageAndPending(false);
       return;
     }
     setCart(prev => prev.map(c => 
-      c.part_number === partNumber ? { ...c, qty } : c
+      c.part_number === partNumber && c.supplier === supplier ? { ...c, qty } : c
     ));
   };
   
-  const clearCart = () => {
+  const clearCart = async () => {
+    const snapshot = [...cart];
     setCart([]);
     // Also clear from localStorage
-    const storageKey = `barangKosongCart_${selectedStore || 'mjm'}`;
+    const targetStore = selectedStore || 'mjm';
+    const storageKey = `barangKosongCart_${targetStore}`;
     localStorage.removeItem(storageKey);
+
+    const groupedBySupplier: Record<string, Set<string>> = {};
+    snapshot.forEach(item => {
+      if (!groupedBySupplier[item.supplier]) groupedBySupplier[item.supplier] = new Set();
+      groupedBySupplier[item.supplier].add(item.part_number);
+    });
+
+    const deleteResults = await Promise.all(
+      Object.entries(groupedBySupplier).map(([supplier, partNumbers]) =>
+        deletePendingOrderSupplier(targetStore, {
+          supplier,
+          partNumbers: Array.from(partNumbers)
+        })
+      )
+    );
+
+    if (deleteResults.some(ok => !ok)) {
+      setToast({ msg: 'Keranjang dikosongkan, tapi sinkron order_supplier gagal sebagian', type: 'error' });
+      await syncCartFromStorageAndPending(false);
+      return;
+    }
+
     setToast({ msg: 'Keranjang dikosongkan', type: 'success' });
   };
   
@@ -1938,12 +2075,23 @@ export const BarangKosongView: React.FC = () => {
         .insert(orderItems);
       
       if (itemsError) throw itemsError;
-      
-      setToast({ msg: `PO untuk ${currentSupplier} berhasil disimpan!`, type: 'success' });
+
+      const targetStore = selectedStore || 'mjm';
+      const partNumbers = Array.from(new Set(supplierItems.map(item => item.part_number)));
+      const pendingCleared = await deletePendingOrderSupplier(targetStore, {
+        supplier: currentSupplier,
+        partNumbers
+      });
+
+      if (pendingCleared) {
+        setToast({ msg: `PO untuk ${currentSupplier} berhasil disimpan!`, type: 'success' });
+        // Remove only the items for this supplier from cart
+        setCart(prev => prev.filter(c => c.supplier !== currentSupplier));
+      } else {
+        setToast({ msg: `PO untuk ${currentSupplier} tersimpan, tetapi pending order_supplier belum terhapus`, type: 'error' });
+        await syncCartFromStorageAndPending(false);
+      }
       setShowPOPreview(false);
-      
-      // Remove only the items for this supplier from cart
-      setCart(prev => prev.filter(c => c.supplier !== currentSupplier));
       setCurrentSupplier('');
       
     } catch (error: any) {

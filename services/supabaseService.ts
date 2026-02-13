@@ -165,7 +165,6 @@ export const fetchAllDistinctValues = async (
   field: 'part_number' | 'name' | 'brand' | 'application'
 ): Promise<string[]> => {
   const table = getTableName(store);
-
   try {
     const { data, error } = await supabase
       .from(table)
@@ -188,6 +187,282 @@ export const fetchAllDistinctValues = async (
   } catch (err) {
     console.error(`Fetch All ${field} Exception:`, err);
     return [];
+  }
+};
+
+// --- ORDER SUPPLIER (KERANJANG SUPPLIER BARU) ---
+export const saveOrderSupplier = async (
+  store: string,
+  supplier: string,
+  items: Array<{ partNumber: string; name: string; qty: number; price?: number }>,
+  notes?: string
+): Promise<boolean> => {
+  if (!store || !supplier || !items || items.length === 0) return false;
+
+  const normalizedItemsMap = new Map<string, { partNumber: string; name: string; qty: number; price: number }>();
+  items.forEach(item => {
+    const partNumber = (item.partNumber || '').trim();
+    const qty = Number(item.qty || 0);
+    if (!partNumber || qty <= 0) return;
+
+    const existing = normalizedItemsMap.get(partNumber);
+    if (existing) {
+      existing.qty += qty;
+      existing.name = item.name || existing.name;
+      existing.price = Number(item.price || existing.price || 0);
+      return;
+    }
+
+    normalizedItemsMap.set(partNumber, {
+      partNumber,
+      name: item.name || '',
+      qty,
+      price: Number(item.price || 0)
+    });
+  });
+
+  const normalizedItems = Array.from(normalizedItemsMap.values());
+  if (normalizedItems.length === 0) return false;
+
+  try {
+    const partNumbers = normalizedItems.map(item => item.partNumber);
+    const { data: existingRows, error: existingError } = await supabase
+      .from('order_supplier')
+      .select('id, part_number, qty')
+      .eq('store', store)
+      .eq('supplier', supplier)
+      .eq('status', 'PENDING')
+      .in('part_number', partNumbers)
+      .order('id', { ascending: true });
+    if (existingError) throw existingError;
+
+    const existingByPart: Record<string, Array<{ id: number; qty: number }>> = {};
+    (existingRows || []).forEach((row: any) => {
+      const partNumber = (row.part_number || '').trim();
+      if (!partNumber) return;
+      if (!existingByPart[partNumber]) existingByPart[partNumber] = [];
+      existingByPart[partNumber].push({
+        id: Number(row.id),
+        qty: Number(row.qty || 0)
+      });
+    });
+
+    const inserts: any[] = [];
+    const updates: Array<{ id: number; qty: number; name: string; price: number }> = [];
+    const duplicateIds: number[] = [];
+
+    normalizedItems.forEach(item => {
+      const matches = existingByPart[item.partNumber] || [];
+      if (matches.length === 0) {
+        inserts.push({
+          store,
+          supplier,
+          part_number: item.partNumber,
+          name: item.name,
+          qty: item.qty,
+          price: item.price,
+          status: 'PENDING',
+          notes: notes || ''
+        });
+        return;
+      }
+
+      const primaryRow = matches[0];
+      const existingQty = matches.reduce((sum, row) => sum + row.qty, 0);
+      updates.push({
+        id: primaryRow.id,
+        qty: existingQty + item.qty,
+        name: item.name,
+        price: item.price
+      });
+
+      if (matches.length > 1) {
+        matches.slice(1).forEach(row => duplicateIds.push(row.id));
+      }
+    });
+
+    if (inserts.length > 0) {
+      const { error: insertError } = await supabase.from('order_supplier').insert(inserts);
+      if (insertError) throw insertError;
+    }
+
+    if (updates.length > 0) {
+      const updateResults = await Promise.all(
+        updates.map(updateItem =>
+          supabase
+            .from('order_supplier')
+            .update({
+              qty: updateItem.qty,
+              name: updateItem.name,
+              price: updateItem.price,
+              notes: notes || ''
+            })
+            .eq('id', updateItem.id)
+        )
+      );
+      const failedUpdate = updateResults.find(result => result.error);
+      if (failedUpdate?.error) throw failedUpdate.error;
+    }
+
+    if (duplicateIds.length > 0) {
+      const { error: duplicateDeleteError } = await supabase
+        .from('order_supplier')
+        .delete()
+        .in('id', duplicateIds);
+      if (duplicateDeleteError) throw duplicateDeleteError;
+    }
+
+    return true;
+  } catch (e: any) {
+    console.error('saveOrderSupplier Error:', e);
+    return false;
+  }
+};
+
+export const fetchOrderSupplier = async (
+  store: string,
+  supplier?: string
+): Promise<any[]> => {
+  let query = supabase.from('order_supplier').select('*').eq('store', store);
+  if (supplier) query = query.eq('supplier', supplier);
+  const { data, error } = await query.order('created_at', { ascending: false });
+  if (error) {
+    console.error('fetchOrderSupplier Error:', error);
+    return [];
+  }
+  return data || [];
+};
+
+export const fetchPendingOrderSupplier = async (
+  store: string,
+  supplier?: string
+): Promise<any[]> => {
+  if (!store) return [];
+  let query = supabase
+    .from('order_supplier')
+    .select('*')
+    .eq('store', store)
+    .eq('status', 'PENDING');
+  if (supplier) query = query.eq('supplier', supplier);
+  const { data, error } = await query.order('created_at', { ascending: false });
+  if (error) {
+    console.error('fetchPendingOrderSupplier Error:', error);
+    return [];
+  }
+  return data || [];
+};
+
+export const setPendingOrderSupplierQty = async (
+  store: string,
+  supplier: string,
+  partNumber: string,
+  qty: number,
+  options?: { name?: string; price?: number; notes?: string }
+): Promise<boolean> => {
+  const normalizedPartNumber = (partNumber || '').trim();
+  if (!store || !supplier || !normalizedPartNumber) return false;
+
+  try {
+    const { data: rows, error: rowsError } = await supabase
+      .from('order_supplier')
+      .select('id, qty')
+      .eq('store', store)
+      .eq('supplier', supplier)
+      .eq('part_number', normalizedPartNumber)
+      .eq('status', 'PENDING')
+      .order('id', { ascending: true });
+    if (rowsError) throw rowsError;
+
+    const existingRows = rows || [];
+    const safeQty = Math.floor(Number(qty || 0));
+
+    if (safeQty <= 0) {
+      if (existingRows.length === 0) return true;
+      const idsToDelete = existingRows.map((row: any) => Number(row.id)).filter(Boolean);
+      if (idsToDelete.length === 0) return true;
+      const { error: deleteError } = await supabase
+        .from('order_supplier')
+        .delete()
+        .in('id', idsToDelete);
+      if (deleteError) throw deleteError;
+      return true;
+    }
+
+    if (existingRows.length === 0) {
+      const { error: insertError } = await supabase.from('order_supplier').insert({
+        store,
+        supplier,
+        part_number: normalizedPartNumber,
+        name: options?.name || normalizedPartNumber,
+        qty: safeQty,
+        price: Number(options?.price || 0),
+        status: 'PENDING',
+        notes: options?.notes || ''
+      });
+      if (insertError) throw insertError;
+      return true;
+    }
+
+    const primaryRowId = Number(existingRows[0].id);
+    const updatePayload: any = { qty: safeQty };
+    if (typeof options?.name === 'string' && options.name.trim() !== '') {
+      updatePayload.name = options.name;
+    }
+    if (typeof options?.price === 'number') {
+      updatePayload.price = Number(options.price || 0);
+    }
+    if (typeof options?.notes === 'string') {
+      updatePayload.notes = options.notes;
+    }
+
+    const { error: updateError } = await supabase
+      .from('order_supplier')
+      .update(updatePayload)
+      .eq('id', primaryRowId);
+    if (updateError) throw updateError;
+
+    const duplicateIds = existingRows.slice(1).map((row: any) => Number(row.id)).filter(Boolean);
+    if (duplicateIds.length > 0) {
+      const { error: duplicateDeleteError } = await supabase
+        .from('order_supplier')
+        .delete()
+        .in('id', duplicateIds);
+      if (duplicateDeleteError) throw duplicateDeleteError;
+    }
+
+    return true;
+  } catch (e: any) {
+    console.error('setPendingOrderSupplierQty Error:', e);
+    return false;
+  }
+};
+
+export const deletePendingOrderSupplier = async (
+  store: string,
+  options?: { supplier?: string; partNumbers?: string[] }
+): Promise<boolean> => {
+  if (!store) return false;
+  try {
+    let query = supabase
+      .from('order_supplier')
+      .delete()
+      .eq('store', store)
+      .eq('status', 'PENDING');
+
+    if (options?.supplier) {
+      query = query.eq('supplier', options.supplier);
+    }
+
+    if (options?.partNumbers && options.partNumbers.length > 0) {
+      query = query.in('part_number', options.partNumbers);
+    }
+
+    const { error } = await query;
+    if (error) throw error;
+    return true;
+  } catch (e: any) {
+    console.error('deletePendingOrderSupplier Error:', e);
+    return false;
   }
 };
 

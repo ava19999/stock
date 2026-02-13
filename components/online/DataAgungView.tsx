@@ -1,6 +1,7 @@
 // FILE: src/components/online/DataAgungView.tsx
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Package, Plus, X, Search, Keyboard, RefreshCw, CloudOff, Cloud, Trash2 } from 'lucide-react';
+import BarangKosongKeranjang from './BarangKosongKeranjang';
 import { InventoryItem, OnlineProduct, ProdukKosong, TableMasuk, BaseWarehouseItem } from '../../types';
 import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
@@ -878,6 +879,7 @@ export const DataAgungView: React.FC<DataAgungViewProps> = ({ items, onRefresh, 
             </div>
           </div>
           <div className="p-4 max-h-[600px] overflow-y-auto">
+            <BarangKosongKeranjang store={selectedStore} />
             {filteredProdukKosong.length === 0 ? (
               <p className="text-gray-500 text-sm text-center py-8">Tidak ada produk kosong</p>
             ) : (
