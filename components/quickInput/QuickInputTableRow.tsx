@@ -12,6 +12,8 @@ interface QuickInputTableRowProps {
     globalIndex: number;
     activeSearchIndex: number | null;
     suggestions: InventoryItem[];
+    supplierList: string[]; // List of suppliers from barang_masuk
+    customerList: string[]; // List of customers from barang_keluar
     inputRefs: React.MutableRefObject<(HTMLInputElement | null)[]>;
     onPartNumberChange: (id: number, val: string) => void;
     onSelectItem: (id: number, item: InventoryItem) => void;
@@ -20,37 +22,62 @@ interface QuickInputTableRowProps {
     highlightedIndex: number;
     onSearchKeyDown: (e: React.KeyboardEvent, id: number) => void;
     onGridKeyDown: (e: React.KeyboardEvent, globalRefIndex: number) => void;
+    mode: 'in' | 'out'; // Add mode prop
 }
 
 export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
-    row, index, globalIndex, activeSearchIndex, suggestions, inputRefs,
-    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown
+    row, index, globalIndex, activeSearchIndex, suggestions, supplierList, customerList, inputRefs,
+    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown, mode
 }) => {
     const isComplete = checkIsRowComplete(row);
     const activeItemRef = useRef<HTMLDivElement>(null);
+    const activeCustomerRef = useRef<HTMLDivElement>(null);
     const [showItemDetails, setShowItemDetails] = useState(false);
+    const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+    const [customerSearchValue, setCustomerSearchValue] = useState('');
+    const [highlightedCustomerIndex, setHighlightedCustomerIndex] = useState(-1);
+
+    // Get the appropriate list based on mode
+    const entityList = mode === 'in' ? supplierList : customerList;
+    const entityLabel = mode === 'in' ? 'Supplier' : 'Customer';
+
+    // Filter customer/supplier list based on search
+    const filteredEntityList = customerSearchValue
+        ? entityList.filter(item => item.toLowerCase().includes(customerSearchValue.toLowerCase()))
+        : entityList;
 
     // Constants - Now 8 input columns
     const COLS = 8;
     const baseRefIndex = globalIndex * COLS;
 
     // Payment terms options
-    const tempoOptions = ['CASH', '3 BLN', '2 BLN', '1 BLN'];
+    const tempoOptions = ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'];
 
     // --- CALCULATION LOGIC ---
     
-    // When Qty Masuk changes -> recalculate Harga Satuan
-    const handleQtyMasukChange = (valStr: string) => {
+    // Get current qty based on mode
+    const currentQty = mode === 'in' ? row.qtyMasuk : row.qtyKeluar;
+    
+    // When Qty changes -> recalculate Harga Satuan
+    const handleQtyChange = (valStr: string) => {
         const cleanVal = valStr.replace(/[^0-9]/g, '');
         const newQty = cleanVal === '' ? 0 : parseInt(cleanVal, 10);
         
         const currentTotal = row.totalHarga || 0;
         const newUnitPrice = newQty > 0 ? (currentTotal / newQty) : 0;
 
-        onUpdateRow(row.id, {
-            qtyMasuk: newQty,
-            hargaSatuan: newUnitPrice
-        });
+        // Update the correct field based on mode
+        if (mode === 'in') {
+            onUpdateRow(row.id, {
+                qtyMasuk: newQty,
+                hargaSatuan: newUnitPrice
+            });
+        } else {
+            onUpdateRow(row.id, {
+                qtyKeluar: newQty,
+                hargaSatuan: newUnitPrice
+            });
+        }
     };
 
     // When Total Harga changes -> recalculate Harga Satuan
@@ -58,15 +85,15 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
         const cleanVal = valStr.replace(/[^0-9]/g, '');
         const newTotal = cleanVal === '' ? 0 : parseInt(cleanVal, 10);
         
-        // Only calculate if qtyMasuk > 0 to avoid division by zero
-        if (row.qtyMasuk > 0) {
-            const newUnitPrice = newTotal / row.qtyMasuk;
+        // Only calculate if qty > 0 to avoid division by zero
+        if (currentQty > 0) {
+            const newUnitPrice = newTotal / currentQty;
             onUpdateRow(row.id, {
                 totalHarga: newTotal,
                 hargaSatuan: newUnitPrice
             });
         } else {
-            // If qtyMasuk is 0, just update totalHarga
+            // If qty is 0, just update totalHarga
             onUpdateRow(row.id, {
                 totalHarga: newTotal,
                 hargaSatuan: 0
@@ -79,6 +106,13 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
             activeItemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         }
     }, [highlightedIndex, activeSearchIndex, index]);
+
+    // Scroll highlighted customer item into view
+    useEffect(() => {
+        if (showCustomerDropdown && activeCustomerRef.current) {
+            activeCustomerRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+    }, [highlightedCustomerIndex, showCustomerDropdown]);
 
     return (
         <>
@@ -115,17 +149,97 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                     </select>
                 </td>
 
-                {/* COL 2: Customer */}
-                <td className="px-2 py-1.5">
-                    <input
-                        ref={el => { inputRefs.current[baseRefIndex + 2] = el; }}
-                        type="text"
-                        className="w-full bg-transparent px-2 py-1 text-xs text-gray-300 focus:outline-none focus:text-blue-400 placeholder-gray-600"
-                        value={row.customer}
-                        onChange={(e) => onUpdateRow(row.id, 'customer', e.target.value)}
-                        onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 2)}
-                        placeholder="Customer"
-                    />
+                {/* COL 2: Customer/Supplier with Dropdown */}
+                <td className="px-2 py-1.5 relative">
+                    <div className="relative">
+                        <input
+                            ref={el => { inputRefs.current[baseRefIndex + 2] = el; }}
+                            type="text"
+                            className="w-full bg-transparent px-2 py-1 text-xs text-gray-300 focus:outline-none focus:text-blue-400 placeholder-gray-600 uppercase"
+                            value={row.customer}
+                            onChange={(e) => {
+                                const val = e.target.value.toUpperCase();
+                                onUpdateRow(row.id, 'customer', val);
+                                setCustomerSearchValue(val);
+                                setShowCustomerDropdown(true);
+                                setHighlightedCustomerIndex(-1);
+                            }}
+                            onFocus={() => {
+                                setShowCustomerDropdown(true);
+                                setCustomerSearchValue(row.customer || '');
+                            }}
+                            onBlur={() => {
+                                // Delay to allow click on dropdown items
+                                setTimeout(() => setShowCustomerDropdown(false), 200);
+                            }}
+                            onKeyDown={(e) => {
+                                if (showCustomerDropdown && filteredEntityList.length > 0) {
+                                    if (e.key === 'ArrowDown') {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setHighlightedCustomerIndex(prev => 
+                                            prev < filteredEntityList.length - 1 ? prev + 1 : 0
+                                        );
+                                        return;
+                                    } else if (e.key === 'ArrowUp') {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setHighlightedCustomerIndex(prev => 
+                                            prev > 0 ? prev - 1 : filteredEntityList.length - 1
+                                        );
+                                        return;
+                                    } else if (e.key === 'Enter' && highlightedCustomerIndex >= 0) {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        const selected = filteredEntityList[highlightedCustomerIndex];
+                                        onUpdateRow(row.id, 'customer', selected);
+                                        setShowCustomerDropdown(false);
+                                        setHighlightedCustomerIndex(-1);
+                                        // Move to next column
+                                        setTimeout(() => {
+                                            inputRefs.current[baseRefIndex + 3]?.focus();
+                                        }, 50);
+                                        return;
+                                    } else if (e.key === 'Escape') {
+                                        e.preventDefault();
+                                        setShowCustomerDropdown(false);
+                                        setHighlightedCustomerIndex(-1);
+                                        return;
+                                    }
+                                }
+                                onGridKeyDown(e, baseRefIndex + 2);
+                            }}
+                            placeholder={entityLabel}
+                        />
+                        {/* Customer/Supplier Dropdown */}
+                        {showCustomerDropdown && filteredEntityList.length > 0 && (
+                            <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 rounded-lg shadow-xl z-20 max-h-40 overflow-y-auto border border-gray-600">
+                                {filteredEntityList.slice(0, 10).map((item, idx) => (
+                                    <div
+                                        key={idx}
+                                        ref={idx === highlightedCustomerIndex ? activeCustomerRef : null}
+                                        className={`px-3 py-2 cursor-pointer border-b border-gray-700 last:border-0 transition-colors text-xs ${
+                                            idx === highlightedCustomerIndex 
+                                            ? 'bg-gray-700 border-l-2 border-blue-400 text-blue-300' 
+                                            : 'hover:bg-gray-700 text-gray-300'
+                                        }`}
+                                        onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            onUpdateRow(row.id, 'customer', item);
+                                            setShowCustomerDropdown(false);
+                                            setHighlightedCustomerIndex(-1);
+                                            // Move to next column
+                                            setTimeout(() => {
+                                                inputRefs.current[baseRefIndex + 3]?.focus();
+                                            }, 50);
+                                        }}
+                                    >
+                                        {item}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </td>
 
                 {/* COL 3: Part Number (with suggestions) */}
@@ -173,15 +287,30 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                     </div>
                 </td>
 
-                {/* COL 4: Qty Masuk */}
+                {/* Stok Saat Ini (Only shown in 'out' mode) */}
+                {mode === 'out' && (
+                    <td className="px-2 py-1.5">
+                        <div className={`px-1 py-1 text-xs font-mono text-right font-bold ${
+                            row.qtySaatIni !== undefined && row.qtySaatIni <= 0 
+                                ? 'text-red-400' 
+                                : row.qtySaatIni !== undefined && row.qtySaatIni < (row.qtyKeluar || 0)
+                                    ? 'text-yellow-400'
+                                    : 'text-cyan-400'
+                        }`}>
+                            {row.qtySaatIni !== undefined ? row.qtySaatIni : '-'}
+                        </div>
+                    </td>
+                )}
+
+                {/* COL 4: Qty (Masuk/Keluar based on mode) */}
                 <td className="px-2 py-1.5">
                     <input
                         ref={el => { inputRefs.current[baseRefIndex + 4] = el; }}
                         type="text"
                         inputMode="numeric"
                         className="w-full bg-transparent px-1 py-1 text-xs font-bold text-right font-mono text-green-400 focus:outline-none focus:text-green-300 placeholder-gray-600"
-                        value={row.qtyMasuk || ''}
-                        onChange={(e) => handleQtyMasukChange(e.target.value)}
+                        value={currentQty || ''}
+                        onChange={(e) => handleQtyChange(e.target.value)}
                         onKeyDown={(e) => onGridKeyDown(e, baseRefIndex + 4)}
                         placeholder="0"
                     />

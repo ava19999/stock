@@ -9,6 +9,8 @@ interface QuickInputTableProps {
     startIndex: number;
     activeSearchIndex: number | null;
     suggestions: InventoryItem[];
+    supplierList: string[]; // List of suppliers from barang_masuk
+    customerList: string[]; // List of customers from barang_keluar
     inputRefs: React.MutableRefObject<(HTMLInputElement | null)[]>;
     onPartNumberChange: (id: number, val: string) => void;
     onSelectItem: (id: number, item: InventoryItem) => void;
@@ -17,11 +19,12 @@ interface QuickInputTableProps {
     highlightedIndex: number;
     onSearchKeyDown: (e: React.KeyboardEvent, id: number) => void;
     onGridKeyDown: (e: React.KeyboardEvent, globalRefIndex: number) => void;
+    mode: 'in' | 'out'; // Add mode prop
 }
 
 export const QuickInputTable: React.FC<QuickInputTableProps> = ({
-    currentRows, startIndex, activeSearchIndex, suggestions, inputRefs,
-    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown
+    currentRows, startIndex, activeSearchIndex, suggestions, supplierList, customerList, inputRefs,
+    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown, mode
 }) => {
     return (
         <div className="flex-1 overflow-auto p-2">
@@ -32,9 +35,10 @@ export const QuickInputTable: React.FC<QuickInputTableProps> = ({
                             <th className="px-2 py-2 w-8 text-center">#</th>
                             <th className="px-2 py-2 w-28">Tanggal</th>
                             <th className="px-2 py-2 w-24">Tempo</th>
-                            <th className="px-2 py-2 w-32">Customer</th>
+                            <th className="px-2 py-2 w-32">{mode === 'in' ? 'Supplier' : 'Customer'}</th>
                             <th className="px-2 py-2 w-48">Part Number</th>
-                            <th className="px-2 py-2 w-16 text-right">Qty Masuk</th>
+                            {mode === 'out' && <th className="px-2 py-2 w-16 text-right">Stok</th>}
+                            <th className="px-2 py-2 w-16 text-right">{mode === 'in' ? 'Qty Masuk' : 'Qty Keluar'}</th>
                             <th className="px-2 py-2 w-32 text-right">Total Harga</th>
                             <th className="px-2 py-2 w-28 text-right">Harga Satuan</th>
                             <th className="px-2 py-2 w-16 text-center">Status</th>
@@ -50,6 +54,8 @@ export const QuickInputTable: React.FC<QuickInputTableProps> = ({
                                 globalIndex={startIndex + index}
                                 activeSearchIndex={activeSearchIndex}
                                 suggestions={suggestions}
+                                supplierList={supplierList}
+                                customerList={customerList}
                                 inputRefs={inputRefs}
                                 onPartNumberChange={onPartNumberChange}
                                 onSelectItem={onSelectItem}
@@ -58,6 +64,7 @@ export const QuickInputTable: React.FC<QuickInputTableProps> = ({
                                 highlightedIndex={highlightedIndex}
                                 onSearchKeyDown={onSearchKeyDown}
                                 onGridKeyDown={onGridKeyDown}
+                                mode={mode}
                             />
                         ))}
                     </tbody>

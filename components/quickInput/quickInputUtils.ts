@@ -1,10 +1,11 @@
-// FILE: src/components/quickInput/quickInputUtils.ts
+// FILE: components/quickInput/quickInputUtils.ts
 import { QuickInputRow } from './types';
 
-// Helper to get today's date in YYYY-MM-DD format
+// Helper to get today's date in YYYY-MM-DD format (WIB)
 const getTodayDate = (): string => {
-    const today = new Date();
-    return today.toISOString().split('T')[0];
+    return new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Jakarta'
+    }).format(new Date());
 };
 
 export const createEmptyRow = (id: number): QuickInputRow => ({
@@ -17,7 +18,8 @@ export const createEmptyRow = (id: number): QuickInputRow => ({
     brand: '',
     aplikasi: '',
     qtySaatIni: 0,
-    qtyMasuk: 0, 
+    qtyMasuk: 0,
+    qtyKeluar: 0,
     totalHarga: 0,
     hargaSatuan: 0,
     hargaJual: 0,
@@ -27,13 +29,16 @@ export const createEmptyRow = (id: number): QuickInputRow => ({
 });
 
 export const checkIsRowComplete = (row: QuickInputRow) => {
-    // Required fields for Input Barang:
+    // Required fields:
     // - Tanggal (Date)
     // - Tempo (Payment terms)
     // - Customer
     // - Part Number & Nama Barang
-    // - Qty Masuk (Must be > 0)
-    // - Total Harga (Must be > 0)
+    // - Qty (Must be > 0) - qtyMasuk for 'in', qtyKeluar for 'out'
+    // - Total Harga (Boleh 0)
+    
+    // Cek qty berdasarkan mode operasi
+    const qty = row.operation === 'in' ? row.qtyMasuk : row.qtyKeluar;
     
     return (
         !!row.tanggal &&
@@ -41,7 +46,6 @@ export const checkIsRowComplete = (row: QuickInputRow) => {
         !!row.customer.trim() &&
         !!row.partNumber && 
         !!row.namaBarang && 
-        row.qtyMasuk > 0 &&
-        row.totalHarga > 0
+        qty > 0
     );
 };

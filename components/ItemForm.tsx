@@ -1,8 +1,8 @@
 // FILE: src/components/ItemForm.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
-import { fetchPriceHistoryBySource, updateInventory, addInventory, saveItemImages } from '../services/supabaseService';
-import { X, Save, Upload, Loader2, Package, Layers, DollarSign, History, AlertCircle, ArrowLeft, Plus, ShoppingBag, User, Calendar, Truck } from 'lucide-react';
+import { fetchPriceHistoryBySource, fetchSellPriceHistory, updateInventory, addInventory, saveItemImages } from '../services/supabaseService';
+import { X, Save, Upload, Loader2, Package, Layers, DollarSign, History, AlertCircle, ArrowLeft, Plus, User, Calendar, Search } from 'lucide-react';
 import { compressImage, formatRupiah } from '../utils';
 import { useStore } from '../context/StoreContext';
 
@@ -28,33 +28,37 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
   // Stock Adjustment State
   const [stockAdjustmentType, setStockAdjustmentType] = useState<'none' | 'in' | 'out'>('none');
   const [adjustmentQty, setAdjustmentQty] = useState<string>('');
-  const [adjustmentEcommerce, setAdjustmentEcommerce] = useState<string>('');
-  const [adjustmentResiTempo, setAdjustmentResiTempo] = useState<string>('');
+  const [adjustmentResiTempo, setAdjustmentResiTempo] = useState<string>('CASH');
   const [adjustmentCustomer, setAdjustmentCustomer] = useState<string>('');
 
   // UI State
   const [loading, setLoading] = useState(false);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showPricePopup, setShowPricePopup] = useState(false);
+  const [showSellPricePopup, setShowSellPricePopup] = useState(false);
   const [priceHistory, setPriceHistory] = useState<any[]>([]);
+  const [sellPriceHistory, setSellPriceHistory] = useState<any[]>([]);
   const [loadingPrice, setLoadingPrice] = useState(false);
+  const [loadingSellPrice, setLoadingSellPrice] = useState(false);
+  const [priceSearchQuery, setPriceSearchQuery] = useState('');
+  const [sellPriceSearchQuery, setSellPriceSearchQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialData) {
+      const images = initialData.images || [];
       setFormData({
         partNumber: initialData.partNumber, name: initialData.name, brand: initialData.brand,
         application: initialData.application, quantity: initialData.quantity, shelf: initialData.shelf,
         price: initialData.price, costPrice: initialData.costPrice, ecommerce: initialData.ecommerce || '',
-        imageUrl: initialData.imageUrl, 
+        imageUrl: images[0] || '', 
         // SAFETY CHECK: Gunakan fallback ke array kosong
-        images: initialData.images || (initialData.imageUrl ? [initialData.imageUrl] : []), 
+        images, 
         initialStock: initialData.initialStock,
         qtyIn: initialData.qtyIn, qtyOut: initialData.qtyOut
       });
-      // Safety check untuk preview juga
-      setImagePreview(initialData.imageUrl || (initialData.images && initialData.images[0]) || null);
+      setActiveImageIndex(0);
     }
   }, [initialData]);
 
@@ -93,7 +97,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
             images: newImages, 
             imageUrl: newImages[0] || '' 
         }));
-        setImagePreview(newImages[0]);
+        setActiveImageIndex(prevIndex => newImages.length > 0 ? Math.min(prevIndex, newImages.length - 1) : 0);
         setError(null);
       } catch (err) {
         console.error(err);
@@ -112,24 +116,56 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
           images: newImages,
           imageUrl: newImages[0] || ''
       }));
-      setImagePreview(newImages[0] || null);
+      setActiveImageIndex(prevIndex => {
+        if (newImages.length === 0) return 0;
+        if (index < prevIndex) return prevIndex - 1;
+        if (index === prevIndex) return Math.max(0, prevIndex - 1);
+        return prevIndex;
+      });
   };
 
   const handleCheckPrices = async () => {
     if (!formData.partNumber) { alert("Isi Part Number terlebih dahulu!"); return; }
     setLoadingPrice(true);
     setShowPricePopup(true);
+    setPriceSearchQuery('');
     try {
-        const history = await fetchPriceHistoryBySource(formData.partNumber);
+        const history = await fetchPriceHistoryBySource(formData.partNumber, selectedStore);
         setPriceHistory(history);
     } catch (error) { console.error(error); }
     setLoadingPrice(false);
+  };
+
+  const handleCheckSellPrices = async () => {
+    if (!formData.partNumber) { alert("Isi Part Number terlebih dahulu!"); return; }
+    setLoadingSellPrice(true);
+    setShowSellPricePopup(true);
+    setSellPriceSearchQuery('');
+    try {
+        const history = await fetchSellPriceHistory(formData.partNumber, selectedStore);
+        setSellPriceHistory(history);
+    } catch (error) { console.error(error); }
+    setLoadingSellPrice(false);
   };
 
   const selectPrice = (unitPrice: number) => {
       setFormData(prev => ({ ...prev, costPrice: unitPrice }));
       setShowPricePopup(false);
   };
+
+  const selectSellPrice = (unitPrice: number) => {
+      setFormData(prev => ({ ...prev, price: unitPrice }));
+      setShowSellPricePopup(false);
+  };
+
+  // Filter price history by search query
+  const filteredPriceHistory = priceHistory.filter(ph => 
+    !priceSearchQuery || ph.source.toLowerCase().includes(priceSearchQuery.toLowerCase())
+  );
+
+  const filteredSellPriceHistory = sellPriceHistory.filter(ph => 
+    !sellPriceSearchQuery || ph.source.toLowerCase().includes(sellPriceSearchQuery.toLowerCase())
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -148,14 +184,24 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         const transactionData = (stockAdjustmentType !== 'none' && qtyAdj > 0) ? {
             type: stockAdjustmentType === 'in' ? 'in' as const : 'out' as const,
             qty: qtyAdj,
-            ecommerce: adjustmentEcommerce,
+            ecommerce: '-', // Via/Sumber removed, use default
             resiTempo: adjustmentResiTempo,
-            customer: adjustmentCustomer 
+            customer: adjustmentCustomer,
+            tempo: adjustmentResiTempo // Tempo for barang_masuk
         } : undefined;
+
+        // Calculate new quantity based on adjustment type
+        let newQuantity = formData.quantity;
+        if (stockAdjustmentType === 'in') {
+            newQuantity = formData.quantity + qtyAdj;
+        } else if (stockAdjustmentType === 'out') {
+            newQuantity = formData.quantity - qtyAdj;
+        }
 
         const updated = await updateInventory({ 
             ...initialData, 
             ...formData, 
+            quantity: newQuantity, // Use updated quantity
             images: formData.images 
         }, transactionData, selectedStore);
         
@@ -163,9 +209,18 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
         else setError("Gagal update database.");
 
       } else {
-        const newId = await addInventory(formData, selectedStore);
-        if (newId) onSuccess();
-        else setError("Gagal tambah barang.");
+        // Langsung tutup window, proses simpan di background
+        onSuccess();
+        
+        // Proses simpan di background (fire and forget)
+        addInventory(formData, selectedStore).then(newId => {
+          if (!newId) {
+            console.error("Gagal tambah barang.");
+          }
+        }).catch(err => {
+          console.error("Error tambah barang:", err);
+        });
+        return; // Exit early, window sudah ditutup
       }
     } catch (error) {
       console.error(error);
@@ -180,6 +235,10 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
       stockAdjustmentType === 'out' ? (Number(formData.quantity) - (Number(adjustmentQty) || 0)) :
       formData.quantity
   ) : formData.quantity;
+
+  const hasImages = formData.images.length > 0;
+  const previewImage = hasImages ? (formData.images[activeImageIndex] || formData.images[0]) : null;
+  const canAddMoreImages = formData.images.length < 10;
 
   let modalBorderClass = "border-gray-700";
   let modalHeaderClass = "bg-gray-900/80 border-gray-700";
@@ -220,13 +279,13 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
             
             <div className="w-full lg:w-1/3 flex flex-col gap-4">
               <div 
-                className={`aspect-video lg:aspect-square w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center transition-all relative overflow-hidden group shadow-sm bg-gray-700 ${formData.images.length > 0 ? 'border-blue-500' : 'border-gray-600 hover:border-gray-500'}`}
+                className={`aspect-video lg:aspect-square w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center transition-all relative overflow-hidden group shadow-sm bg-gray-700 ${hasImages ? 'border-blue-500' : 'border-gray-600 hover:border-gray-500'}`}
               >
-                {formData.images.length > 0 ? (
+                {hasImages ? (
                   <>
-                    <img src={formData.images[0]} alt="Preview" className="w-full h-full object-cover" />
+                    {previewImage && <img src={previewImage} alt="Preview" className="w-full h-full object-cover" />}
                     <div 
-                        className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                         onClick={() => fileInputRef.current?.click()}
                     >
                       <Plus size={32} className="text-white"/>
@@ -245,33 +304,142 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                 <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" multiple className="hidden" />
               </div>
 
-              {formData.images.length > 0 && (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading || !canAddMoreImages}
+                  className="flex-1 py-2 bg-gray-700 border border-gray-600 text-gray-200 rounded-lg text-xs font-bold flex items-center justify-center gap-2 hover:bg-gray-600 disabled:opacity-60"
+                >
+                  <Plus size={14} /> Tambah Foto
+                </button>
+                {hasImages && (
+                  <button
+                    type="button"
+                    onClick={() => removePhoto(activeImageIndex)}
+                    disabled={loading}
+                    className="flex-1 py-2 bg-red-900/40 border border-red-800 text-red-200 rounded-lg text-xs font-bold flex items-center justify-center gap-2 hover:bg-red-900/60 disabled:opacity-60"
+                  >
+                    <X size={14} /> Hapus Foto
+                  </button>
+                )}
+              </div>
+
+              {hasImages && (
                   <div className="grid grid-cols-5 gap-2">
                       {formData.images.map((img, idx) => (
-                          <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-gray-600 group/thumb">
-                              <img src={img} className="w-full h-full object-cover" />
-                              <button 
-                                  type="button"
-                                  onClick={() => removePhoto(idx)}
-                                  className="absolute inset-0 bg-red-900/80 flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity text-white"
-                              >
-                                  <X size={16} />
-                              </button>
+                          <div
+                            key={idx}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setActiveImageIndex(idx)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setActiveImageIndex(idx);
+                              }
+                            }}
+                            className={`relative aspect-square rounded-lg overflow-hidden border ${idx === activeImageIndex ? 'border-blue-500 ring-2 ring-blue-500/60' : 'border-gray-600'} focus:outline-none cursor-pointer`}
+                          >
+                            <img src={img} className="w-full h-full object-cover" />
+                            <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-[9px] text-gray-200 font-bold">
+                              {idx + 1}
+                            </span>
+                            <button 
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); removePhoto(idx); }}
+                                className="absolute top-1 right-1 bg-red-600/90 hover:bg-red-600 text-white rounded-full p-1 shadow"
+                                aria-label="Hapus foto"
+                            >
+                                <X size={12} />
+                            </button>
                           </div>
                       ))}
-                      {formData.images.length < 10 && (
-                           <div className="aspect-square rounded-lg border border-dashed border-gray-600 flex items-center justify-center relative hover:bg-gray-700 cursor-pointer text-gray-500 hover:text-white transition-colors">
+                      {canAddMoreImages && (
+                           <button
+                             type="button"
+                             onClick={() => fileInputRef.current?.click()}
+                             className="aspect-square rounded-lg border border-dashed border-gray-600 flex items-center justify-center hover:bg-gray-700 cursor-pointer text-gray-500 hover:text-white transition-colors"
+                           >
                                <Plus size={20} />
-                               <input type="file" multiple onChange={handleImageChange} className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*" />
-                           </div>
+                           </button>
                       )}
+                  </div>
+              )}
+
+              {/* Stock Table - Only in Edit Mode */}
+              {isEditMode && (
+                  <div className="bg-gray-900/50 rounded-xl border border-gray-700 overflow-hidden">
+                      <div className="bg-gray-800 px-3 py-2 border-b border-gray-700">
+                          <h4 className="text-xs font-bold text-gray-300 uppercase flex items-center gap-1.5">
+                              <Layers size={12} className="text-blue-400"/>
+                              Stok Saat Ini
+                          </h4>
+                      </div>
+                      <div className="divide-y divide-gray-700">
+                          <div className="flex items-center justify-between px-3 py-2">
+                              <span className="text-xs text-gray-400">Stok Awal</span>
+                              <input 
+                                  type="number" 
+                                  min="0"
+                                  value={formData.initialStock || 0}
+                                  onChange={(e) => {
+                                      const newInitialStock = parseInt(e.target.value) || 0;
+                                      const newQuantity = newInitialStock + (formData.qtyIn || 0) - (formData.qtyOut || 0);
+                                      setFormData(prev => ({ ...prev, initialStock: newInitialStock, quantity: newQuantity }));
+                                  }}
+                                  className="w-20 text-right text-sm font-mono font-bold text-gray-300 bg-gray-800 border border-gray-600 rounded px-2 py-1 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                              />
+                          </div>
+                          <div className="flex items-center justify-between px-3 py-2">
+                              <span className="text-xs text-gray-400">Total Masuk</span>
+                              <div className="flex items-center gap-1">
+                                  <span className="text-green-400 font-bold">+</span>
+                                  <input 
+                                      type="number" 
+                                      min="0"
+                                      value={formData.qtyIn || 0}
+                                      onChange={(e) => {
+                                          const newQtyIn = parseInt(e.target.value) || 0;
+                                          const newQuantity = (formData.initialStock || 0) + newQtyIn - (formData.qtyOut || 0);
+                                          setFormData(prev => ({ ...prev, qtyIn: newQtyIn, quantity: newQuantity }));
+                                      }}
+                                      className="w-20 text-right text-sm font-mono font-bold text-green-400 bg-gray-800 border border-gray-600 rounded px-2 py-1 focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none"
+                                  />
+                              </div>
+                          </div>
+                          <div className="flex items-center justify-between px-3 py-2">
+                              <span className="text-xs text-gray-400">Total Keluar</span>
+                              <div className="flex items-center gap-1">
+                                  <span className="text-red-400 font-bold">-</span>
+                                  <input 
+                                      type="number" 
+                                      min="0"
+                                      value={formData.qtyOut || 0}
+                                      onChange={(e) => {
+                                          const newQtyOut = parseInt(e.target.value) || 0;
+                                          const newQuantity = (formData.initialStock || 0) + (formData.qtyIn || 0) - newQtyOut;
+                                          setFormData(prev => ({ ...prev, qtyOut: newQtyOut, quantity: newQuantity }));
+                                      }}
+                                      className="w-20 text-right text-sm font-mono font-bold text-red-400 bg-gray-800 border border-gray-600 rounded px-2 py-1 focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none"
+                                  />
+                              </div>
+                          </div>
+                          <div className="flex items-center justify-between px-3 py-2.5 bg-blue-900/20">
+                              <span className="text-xs font-bold text-blue-300">STOK SEKARANG</span>
+                              <span className={`text-lg font-mono font-extrabold ${
+                                  formData.quantity === 0 ? 'text-red-400' : 
+                                  formData.quantity < 4 ? 'text-yellow-400' : 'text-blue-400'
+                              }`}>{formData.quantity}</span>
+                          </div>
+                      </div>
                   </div>
               )}
               
               {!isEditMode && (
                   <div className="bg-blue-900/20 p-4 rounded-xl border border-blue-900/40">
                     <label className="text-[10px] font-bold text-blue-300 uppercase mb-1 block flex items-center gap-1"><Layers size={12}/> Stok Awal</label>
-                    <input type="number" name="quantity" required min="0" className="w-full bg-gray-900 border border-blue-800 rounded-lg p-2.5 text-xl font-bold text-center text-blue-400 focus:ring-2 focus:ring-blue-800 outline-none" value={formData.quantity} onChange={handleChange} />
+                    <input type="number" name="quantity" min="0" className="w-full bg-gray-900 border border-blue-800 rounded-lg p-2.5 text-xl font-bold text-center text-blue-400 focus:ring-2 focus:ring-blue-800 outline-none" value={formData.quantity} onChange={handleChange} placeholder="0" />
                   </div>
               )}
             </div>
@@ -331,18 +499,20 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                                 </div>
 
                                 {stockAdjustmentType === 'in' ? (
-                                    <div className="grid grid-cols-3 gap-3 pt-1">
-                                        <div>
-                                            <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><ShoppingBag size={10}/> Via / Sumber</label>
-                                            <input type="text" placeholder="Tokopedia" value={adjustmentEcommerce} onChange={(e) => setAdjustmentEcommerce(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
-                                        </div>
+                                    <div className="grid grid-cols-2 gap-3 pt-1">
                                         <div>
                                             <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><User size={10}/> Customer</label>
                                             <input type="text" placeholder="Nama..." value={adjustmentCustomer} onChange={(e) => setAdjustmentCustomer(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
                                         </div>
                                         <div>
                                             <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><Calendar size={10}/> Tempo</label>
-                                            <input type="text" placeholder="Lunas / 30 Hari" value={adjustmentResiTempo} onChange={(e) => setAdjustmentResiTempo(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
+                                            <select value={adjustmentResiTempo} onChange={(e) => setAdjustmentResiTempo(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none">
+                                                <option value="CASH">CASH</option>
+                                                <option value="1 BLN">1 BLN</option>
+                                                <option value="2 BLN">2 BLN</option>
+                                                <option value="3 BLN">3 BLN</option>
+                                                <option value="NADIR">NADIR</option>
+                                            </select>
                                         </div>
                                     </div>
                                 ) : (
@@ -351,15 +521,15 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                                             <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><User size={10}/> Penerima / Customer</label>
                                             <input type="text" placeholder="Nama Bengkel / Pembeli..." value={adjustmentCustomer} onChange={(e) => setAdjustmentCustomer(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
                                         </div>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div>
-                                                <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><ShoppingBag size={10}/> Via / Sumber</label>
-                                                <input type="text" placeholder="Shopee" value={adjustmentEcommerce} onChange={(e) => setAdjustmentEcommerce(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
-                                            </div>
-                                            <div>
-                                                <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><Truck size={10}/> Resi</label>
-                                                <input type="text" placeholder="JP..." value={adjustmentResiTempo} onChange={(e) => setAdjustmentResiTempo(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none placeholder-gray-600" />
-                                            </div>
+                                        <div>
+                                            <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1 flex items-center gap-1"><Calendar size={10}/> Tempo</label>
+                                            <select value={adjustmentResiTempo} onChange={(e) => setAdjustmentResiTempo(e.target.value)} className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none">
+                                                <option value="CASH">CASH</option>
+                                                <option value="1 BLN">1 BLN</option>
+                                                <option value="2 BLN">2 BLN</option>
+                                                <option value="3 BLN">3 BLN</option>
+                                                <option value="NADIR">NADIR</option>
+                                            </select>
                                         </div>
                                     </div>
                                 )}
@@ -379,36 +549,114 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
                             name="costPrice"
                             value={formData.costPrice} 
                             onChange={handleChange} 
-                            className="flex-1 px-3 py-2 bg-orange-900/20 text-orange-300 font-mono font-bold text-sm rounded-lg border border-orange-900/50 focus:ring-2 focus:ring-orange-800 outline-none placeholder-orange-800" 
+                            placeholder="0"
+                            className="flex-1 px-3 py-2 bg-orange-900/20 text-orange-300 font-mono font-bold text-sm rounded-lg border border-orange-900/50 focus:ring-2 focus:ring-orange-800 focus:bg-orange-900/30 hover:bg-orange-900/30 outline-none placeholder-orange-800 cursor-text transition-colors" 
                         />
                         <button type="button" onClick={handleCheckPrices} className="px-3 py-2 bg-gray-800 border border-gray-600 text-gray-400 rounded-lg hover:bg-gray-600 hover:text-white"><History size={18}/></button>
                       </div>
                       
                       {showPricePopup && (
-                        <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 shadow-xl border border-gray-600 rounded-xl z-20 max-h-40 overflow-y-auto">
-                           {priceHistory.length > 0 ? (
-                               priceHistory.map((ph, idx) => (
-                               <div key={idx} onClick={() => selectPrice(ph.price)} className="p-2.5 border-b border-gray-700 text-xs flex justify-between hover:bg-gray-700 cursor-pointer items-center">
+                        <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 shadow-xl border border-gray-600 rounded-xl z-20 max-h-64 overflow-hidden flex flex-col">
+                           {/* Search Input */}
+                           <div className="p-2 border-b border-gray-700 sticky top-0 bg-gray-800 z-10">
+                             <div className="relative">
+                               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                               <input 
+                                 type="text" 
+                                 placeholder="Cari customer..." 
+                                 value={priceSearchQuery}
+                                 onChange={(e) => setPriceSearchQuery(e.target.value)}
+                                 className="w-full pl-8 pr-3 py-1.5 bg-gray-900 border border-gray-700 rounded-lg text-xs text-gray-200 placeholder-gray-500 focus:border-orange-500 outline-none"
+                               />
+                             </div>
+                           </div>
+                           
+                           <div className="overflow-y-auto flex-1">
+                             {loadingPrice ? (
+                               <div className="p-4 text-center"><Loader2 size={20} className="animate-spin mx-auto text-orange-400" /></div>
+                             ) : filteredPriceHistory.length > 0 ? (
+                               filteredPriceHistory.map((ph, idx) => (
+                                 <div key={idx} onClick={() => selectPrice(ph.price)} className="p-2.5 border-b border-gray-700 text-xs flex justify-between hover:bg-gray-700 cursor-pointer items-center">
                                    <div>
-                                       <div className="font-bold text-blue-300 mb-0.5">{ph.source}</div>
-                                       <div className="text-[10px] text-gray-500">{ph.date}</div>
+                                     <div className="font-bold text-orange-300 mb-0.5">{ph.source}</div>
+                                     <div className="text-[10px] text-gray-500">{ph.date}</div>
                                    </div>
                                    <div className="font-mono font-bold text-gray-200">{formatRupiah(ph.price)}</div>
-                               </div>
+                                 </div>
                                ))
-                           ) : (
-                               <div className="p-3 text-center text-xs text-gray-500">Belum ada riwayat</div>
-                           )}
+                             ) : (
+                               <div className="p-3 text-center text-xs text-gray-500">
+                                 {priceSearchQuery ? 'Tidak ditemukan' : 'Belum ada riwayat'}
+                               </div>
+                             )}
+                           </div>
+                           
                            <div className="p-2 sticky bottom-0 bg-gray-800/95 border-t border-gray-700">
-                               <button onClick={() => setShowPricePopup(false)} className="w-full py-1.5 text-[10px] text-gray-400 hover:text-gray-200 font-bold uppercase">Tutup</button>
+                               <button type="button" onClick={() => setShowPricePopup(false)} className="w-full py-1.5 text-[10px] text-gray-400 hover:text-gray-200 font-bold uppercase">Tutup</button>
                            </div>
                         </div>
                       )}
                   </div>
 
-                  <div>
+                  <div className="relative">
                     <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">Harga Jual</label>
-                    <input type="number" name="price" value={formData.price} onChange={handleChange} className="w-full mt-1 px-3 py-2 bg-blue-900/20 text-blue-300 font-mono font-bold text-sm rounded-lg border border-blue-900/50 focus:ring-2 focus:ring-blue-800 outline-none" />
+                    <div className="flex gap-2 mt-1">
+                      <input type="number" name="price" value={formData.price} onChange={handleChange} placeholder="0" className="flex-1 px-3 py-2 bg-blue-900/20 text-blue-300 font-mono font-bold text-sm rounded-lg border border-blue-900/50 focus:ring-2 focus:ring-blue-800 focus:bg-blue-900/30 hover:bg-blue-900/30 outline-none cursor-text transition-colors" />
+                      <button type="button" onClick={handleCheckSellPrices} className="px-3 py-2 bg-gray-800 border border-gray-600 text-gray-400 rounded-lg hover:bg-gray-600 hover:text-white"><History size={18}/></button>
+                    </div>
+                    
+                    {showSellPricePopup && (
+                      <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 shadow-xl border border-gray-600 rounded-xl z-20 max-h-64 overflow-hidden flex flex-col">
+                         {/* Search Input */}
+                         <div className="p-2 border-b border-gray-700 sticky top-0 bg-gray-800 z-10">
+                           <div className="relative">
+                             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                             <input 
+                               type="text" 
+                               placeholder="Cari customer..." 
+                               value={sellPriceSearchQuery}
+                               onChange={(e) => setSellPriceSearchQuery(e.target.value)}
+                               className="w-full pl-8 pr-3 py-1.5 bg-gray-900 border border-gray-700 rounded-lg text-xs text-gray-200 placeholder-gray-500 focus:border-blue-500 outline-none"
+                             />
+                           </div>
+                         </div>
+                         
+                         <div className="overflow-y-auto flex-1">
+                           {loadingSellPrice ? (
+                             <div className="p-4 text-center"><Loader2 size={20} className="animate-spin mx-auto text-blue-400" /></div>
+                           ) : filteredSellPriceHistory.length > 0 ? (
+                             filteredSellPriceHistory.map((ph, idx) => (
+                               <div 
+                                 key={idx} 
+                                 onClick={() => selectSellPrice(ph.price)} 
+                                 className={`p-2.5 border-b text-xs flex justify-between hover:bg-gray-700 cursor-pointer items-center ${
+                                   ph.isOfficial 
+                                     ? 'bg-green-900/30 border-green-800 hover:bg-green-900/50' 
+                                     : 'border-gray-700'
+                                 }`}
+                               >
+                                 <div>
+                                   <div className={`font-bold mb-0.5 flex items-center gap-1.5 ${ph.isOfficial ? 'text-green-400' : 'text-blue-300'}`}>
+                                     {ph.isOfficial && <span className="px-1.5 py-0.5 bg-green-600 text-white text-[8px] rounded font-bold">RESMI</span>}
+                                     {ph.source}
+                                   </div>
+                                   <div className="text-[10px] text-gray-500">{ph.date}</div>
+                                 </div>
+                                 <div className={`font-mono font-bold ${ph.isOfficial ? 'text-green-300' : 'text-gray-200'}`}>{formatRupiah(ph.price)}</div>
+                               </div>
+                             ))
+                           ) : (
+                             <div className="p-3 text-center text-xs text-gray-500">
+                               {sellPriceSearchQuery ? 'Tidak ditemukan' : 'Belum ada riwayat'}
+                             </div>
+                           )}
+                         </div>
+                         
+                         <div className="p-2 sticky bottom-0 bg-gray-800/95 border-t border-gray-700">
+                             <button type="button" onClick={() => setShowSellPricePopup(false)} className="w-full py-1.5 text-[10px] text-gray-400 hover:text-gray-200 font-bold uppercase">Tutup</button>
+                         </div>
+                      </div>
+                    )}
                   </div>
                </div>
             </div>

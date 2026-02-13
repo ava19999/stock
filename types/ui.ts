@@ -1,2 +1,22 @@
 // FILE: src/types/ui.ts
-export type ActiveView = 'shop' | 'inventory' | 'quick_input' | 'orders';
+export type ActiveView = 
+  | 'shop' 
+  | 'inventory' 
+  | 'quick_input' 
+  | 'orders' 
+  | 'finance' 
+  | 'petty_cash' 
+  | 'barang_kosong' 
+  | 'closing' 
+  | 'piutang_customer'
+  | 'tagihan_toko'
+  | 'rekap_bulanan'
+  | 'data_agung'
+  | 'foto_produk'
+  | 'scan_resi_stage1'
+  | 'scan_resi_stage2'
+  | 'scan_resi_stage3'
+  | 'scan_resi_reseller'
+  | 'scan_resi_history'
+  | 'kilat_management'
+  | 'kirim_barang';
