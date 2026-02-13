@@ -8,11 +8,12 @@ import {
   processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus,
   fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice
 } from '../services/supabaseService';
-import { OfflineOrderRow, SoldItemRow, ReturRow } from '../types';
+import { OfflineOrderRow, SoldItemRow, ReturRow, CartItem } from '../types';
+import { ReceiptModal } from './shop/ReceiptModal';
 import { 
   ClipboardList, CheckCircle, RotateCcw, Search, RefreshCw, Box, Check, X, 
   ChevronDown, ChevronUp, Layers, User, Pencil, Save, XCircle, Trash2, ChevronLeft, ChevronRight,
-  PackageX, RotateCw, ArrowLeftRight, Package, Hash, ShoppingBag, Copy
+  PackageX, RotateCw, ArrowLeftRight, Package, Hash, ShoppingBag, Copy, Printer
 } from 'lucide-react';
 
 // Toast Component Sederhana
@@ -348,6 +349,10 @@ export const OrderManagement: React.FC = () => {
   const [editSoldPrice, setEditSoldPrice] = useState<number>(0);
   const [savingSoldPrice, setSavingSoldPrice] = useState(false);
 
+  // Receipt Modal for Offline Sold Orders
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [receiptData, setReceiptData] = useState<{ customerName: string; tempo: string; note: string; cart: CartItem[]; transactionDate?: string } | null>(null);
+
   // Create inventory lookup map by part number for quick stock access
   const inventoryStockMap = useMemo(() => {
     const map: Record<string, number> = {};
@@ -598,20 +603,28 @@ export const OrderManagement: React.FC = () => {
     });
   }, [soldData, searchTerm, customerFilter, partNumberFilter, ecommerceFilter, stockSortOrder, dateSortOrder, selectedStore, inventoryMjmMap, inventoryBjwMap]);
 
-  // Extract unique customers and part numbers from soldData for autocomplete - filtered and limited for performance
+  // Extract unique customers and part numbers for autocomplete - follow active tab data
   const filteredCustomerOptions = useMemo(() => {
     if (!customerFilter || customerFilter.length < 1) return [];
     const search = customerFilter.toLowerCase();
-    const customers = [...new Set(soldData.map(item => item.customer).filter(Boolean))];
+    const customers = activeTab === 'OFFLINE'
+      ? [...new Set(groupedOfflineOrders.map(group => group.customer).filter(Boolean))]
+      : activeTab === 'RETUR'
+        ? [...new Set(returData.map(item => item.customer).filter(Boolean))]
+        : [...new Set(soldData.map(item => item.customer).filter(Boolean))];
     return customers.filter(c => c.toLowerCase().includes(search)).slice(0, 50);
-  }, [soldData, customerFilter]);
+  }, [activeTab, groupedOfflineOrders, soldData, returData, customerFilter]);
 
   const filteredPartNumberOptions = useMemo(() => {
     if (!partNumberFilter || partNumberFilter.length < 1) return [];
     const search = partNumberFilter.toLowerCase();
-    const partNumbers = [...new Set(soldData.map(item => item.part_number).filter(Boolean))];
+    const partNumbers = activeTab === 'OFFLINE'
+      ? [...new Set(offlineData.map(item => item.part_number).filter(Boolean))]
+      : activeTab === 'RETUR'
+        ? [...new Set(returData.map(item => item.part_number).filter(Boolean))]
+        : [...new Set(soldData.map(item => item.part_number).filter(Boolean))];
     return partNumbers.filter(p => p.toLowerCase().includes(search)).slice(0, 50);
-  }, [soldData, partNumberFilter]);
+  }, [activeTab, offlineData, soldData, returData, partNumberFilter]);
 
   // Pagination for grouped sold data
   const paginatedSoldGroups = useMemo(() => {
@@ -739,6 +752,41 @@ export const OrderManagement: React.FC = () => {
     } else {
       showToast(result.msg, 'error');
     }
+  };
+
+  const openReceiptForGroup = (group: { customer: string; tempo: string; ecommerce: string; date: string; items: SoldItemRow[] }) => {
+    const cart: CartItem[] = group.items.map((item) => {
+      const unitPrice = item.qty_keluar > 0 ? item.harga_total / item.qty_keluar : 0;
+      return {
+        id: item.id,
+        partNumber: item.part_number || '',
+        name: item.name || '',
+        quantity: item.qty_keluar || 0,
+        price: unitPrice,
+        cartQuantity: item.qty_keluar || 0,
+        customPrice: unitPrice,
+        brand: item.brand || '',
+        application: item.application || '',
+        shelf: '',
+        ecommerce: item.ecommerce || group.ecommerce || 'OFFLINE',
+        imageUrl: '',
+        lastUpdated: Date.now(),
+        initialStock: 0,
+        qtyIn: 0,
+        qtyOut: 0,
+        costPrice: 0,
+        kingFanoPrice: 0,
+      };
+    });
+
+    setReceiptData({
+      customerName: group.customer || 'Customer',
+      tempo: group.tempo || 'CASH',
+      note: '',
+      cart,
+      transactionDate: group.date || group.items[0]?.created_at,
+    });
+    setIsReceiptModalOpen(true);
   };
 
   // Show Item Detail Modal with Stock Comparison
@@ -960,10 +1008,49 @@ export const OrderManagement: React.FC = () => {
     );
   };
 
-  const filteredGroupedOffline = groupedOfflineOrders.filter(group => 
-    group.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    group.items.some(i => i.nama_barang.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredGroupedOffline = useMemo(() => {
+    const lowerSearch = searchTerm.trim().toLowerCase();
+    const lowerCustomerFilter = customerFilter.trim().toLowerCase();
+    const lowerPartNumberFilter = partNumberFilter.trim().toLowerCase();
+    const sourceFilter = ecommerceFilter.trim().toUpperCase();
+
+    return groupedOfflineOrders.filter(group => {
+      // Ecommerce filter for OFFLINE tab: only OFFLINE is valid source.
+      if (sourceFilter !== 'ALL' && sourceFilter !== 'OFFLINE') return false;
+
+      // Customer filter
+      if (lowerCustomerFilter && !group.customer.toLowerCase().includes(lowerCustomerFilter)) {
+        return false;
+      }
+
+      // Part number filter
+      if (
+        lowerPartNumberFilter &&
+        !group.items.some(item => (item.part_number || '').toLowerCase().includes(lowerPartNumberFilter))
+      ) {
+        return false;
+      }
+
+      // General search (customer, item name, part number, tempo, date)
+      if (lowerSearch) {
+        const matchGroup =
+          group.customer.toLowerCase().includes(lowerSearch) ||
+          group.tempo.toLowerCase().includes(lowerSearch) ||
+          new Date(group.date).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }).toLowerCase().includes(lowerSearch);
+
+        const matchItems = group.items.some(item =>
+          (item.nama_barang || '').toLowerCase().includes(lowerSearch) ||
+          (item.part_number || '').toLowerCase().includes(lowerSearch)
+        );
+
+        if (!matchGroup && !matchItems) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [groupedOfflineOrders, searchTerm, customerFilter, partNumberFilter, ecommerceFilter]);
 
   return (
     <div className="bg-gray-800 m-4 rounded-2xl border border-gray-700 shadow-xl flex flex-col text-gray-100" style={{ height: 'calc(100vh - 120px)' }}>
@@ -1423,6 +1510,7 @@ export const OrderManagement: React.FC = () => {
               // Default to expanded (true) if not explicitly set to false
               const isExpanded = expandedGroups[groupKey] !== false;
               const ecommerceColors = getEcommerceColor(group.ecommerce);
+              const isOfflineGroup = (group.ecommerce || '').toUpperCase() === 'OFFLINE';
 
               // Get marketplace icon based on ecommerce
               const getMarketplaceIcon = (ecom: string) => {
@@ -1557,6 +1645,15 @@ export const OrderManagement: React.FC = () => {
                       
                       {/* Bulk Action Buttons */}
                       <div className="flex items-center gap-2">
+                        {isOfflineGroup && (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); openReceiptForGroup(group); }} 
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-900/40 to-emerald-800/30 text-emerald-300 hover:from-emerald-800/60 hover:to-emerald-700/40 transition-all duration-200 border border-emerald-700/50 text-xs font-bold shadow-lg shadow-emerald-900/10"
+                            title="Buat Nota Offline"
+                          >
+                            <Printer size={14}/> Nota
+                          </button>
+                        )}
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleReturAllGroupItems(group.items); }} 
                           className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-orange-900/40 to-orange-800/30 text-orange-400 hover:from-orange-800/60 hover:to-orange-700/40 transition-all duration-200 border border-orange-700/50 text-xs font-bold shadow-lg shadow-orange-900/10"
@@ -2124,6 +2221,16 @@ export const OrderManagement: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ReceiptModal
+        isOpen={isReceiptModalOpen}
+        onClose={() => setIsReceiptModalOpen(false)}
+        cart={receiptData?.cart || []}
+        customerName={receiptData?.customerName || ''}
+        tempo={receiptData?.tempo || ''}
+        note={receiptData?.note || ''}
+        transactionDate={receiptData?.transactionDate}
+      />
     </div>
   );
 };
