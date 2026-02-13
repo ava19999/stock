@@ -584,35 +584,64 @@ interface CostPriceData { part_number: string; harga_satuan: number; }
 // Fetch harga modal terakhir dari barang_masuk
 const fetchLatestCostPricesForItems = async (items: any[], store?: string | null): Promise<Record<string, CostPriceData>> => {
   if (!items || items.length === 0) return {};
-  const partNumbersToCheck = items.map(i => {
-       const pn = i.part_number || i.partNumber;
-       return typeof pn === 'string' ? pn.trim() : pn;
-  }).filter(Boolean);
+  const partNumbersToCheck = Array.from(
+    new Set(
+      items
+        .map(i => {
+          const pn = i.part_number || i.partNumber;
+          return typeof pn === 'string' ? pn.trim() : pn;
+        })
+        .filter(Boolean)
+    )
+  );
   if (partNumbersToCheck.length === 0) return {};
 
-  const logTable = getLogTableName('barang_masuk', store);
-  
+  // Keep `store` parameter for backward compatibility.
+  void store;
+
+  const logTables = ['barang_masuk_mjm', 'barang_masuk_bjw'];
+  const CHUNK_SIZE = 200;
+
   try {
-    // Ambil semua barang masuk untuk part numbers ini, order by created_at desc
-    const { data, error } = await supabase
-      .from(logTable)
-      .select('part_number, harga_satuan, created_at')
-      .in('part_number', partNumbersToCheck)
-      .not('harga_satuan', 'is', null)
-      .gt('harga_satuan', 0)
-      .order('created_at', { ascending: false });
-    
-    if (error) return {};
-    
-    // Ambil harga satuan terakhir untuk setiap part number
-    const costPriceMap: Record<string, CostPriceData> = {};
-    (data || []).forEach((row: any) => {
-      const pk = (row.part_number || '').trim();
-      if (pk && !costPriceMap[pk]) {
-        // Hanya ambil yang pertama (terbaru) karena sudah diorder desc
-        costPriceMap[pk] = { part_number: pk, harga_satuan: Number(row.harga_satuan || 0) };
+    const latestByPart: Record<string, { harga_satuan: number; ts: number }> = {};
+
+    for (const logTable of logTables) {
+      for (let i = 0; i < partNumbersToCheck.length; i += CHUNK_SIZE) {
+        const partNumberChunk = partNumbersToCheck.slice(i, i + CHUNK_SIZE);
+        const { data, error } = await supabase
+          .from(logTable)
+          .select('part_number, harga_satuan, created_at')
+          .in('part_number', partNumberChunk)
+          .not('harga_satuan', 'is', null)
+          .gt('harga_satuan', 0)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('fetchLatestCostPricesForItems Error:', error);
+          continue;
+        }
+
+        (data || []).forEach((row: any) => {
+          const pk = (row.part_number || '').trim();
+          if (!pk) return;
+          const ts = new Date(row.created_at || 0).getTime();
+          const safeTs = Number.isFinite(ts) ? ts : 0;
+          const hargaSatuan = Number(row.harga_satuan || 0);
+          if (!(hargaSatuan > 0)) return;
+
+          const previous = latestByPart[pk];
+          if (!previous || safeTs > previous.ts) {
+            latestByPart[pk] = { harga_satuan: hargaSatuan, ts: safeTs };
+          }
+        });
       }
+    }
+
+    const costPriceMap: Record<string, CostPriceData> = {};
+    Object.entries(latestByPart).forEach(([pk, value]) => {
+      costPriceMap[pk] = { part_number: pk, harga_satuan: Number(value.harga_satuan || 0) };
     });
+
     return costPriceMap;
   } catch (e) { return {}; }
 };

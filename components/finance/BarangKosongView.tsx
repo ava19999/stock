@@ -1374,6 +1374,10 @@ export const BarangKosongView: React.FC = () => {
   const [savingOrder, setSavingOrder] = useState(false);
   const [currentPONumber, setCurrentPONumber] = useState('');
   const [currentSupplier, setCurrentSupplier] = useState<string>('');
+  const emitBarangKosongCartUpdated = React.useCallback(() => {
+    const targetStore = selectedStore || 'mjm';
+    window.dispatchEvent(new CustomEvent('barangKosongCartUpdated', { detail: { store: targetStore } }));
+  }, [selectedStore]);
   
   // Tempo values for filtering
   const TEMPO_VALUES = ['3 BLN', '2 BLN', '1 BLN'];
@@ -1947,6 +1951,7 @@ export const BarangKosongView: React.FC = () => {
         return;
       }
       await syncCartFromStorageAndPending(false);
+      emitBarangKosongCartUpdated();
       return;
     }
     setCart(prev => prev.filter(c => !(c.part_number === partNumber && c.supplier === supplier)));
@@ -1969,6 +1974,7 @@ export const BarangKosongView: React.FC = () => {
         return;
       }
       await syncCartFromStorageAndPending(false);
+      emitBarangKosongCartUpdated();
       return;
     }
     setCart(prev => prev.map(c => 
@@ -2002,10 +2008,12 @@ export const BarangKosongView: React.FC = () => {
     if (deleteResults.some(ok => !ok)) {
       setToast({ msg: 'Keranjang dikosongkan, tapi sinkron order_supplier gagal sebagian', type: 'error' });
       await syncCartFromStorageAndPending(false);
+      emitBarangKosongCartUpdated();
       return;
     }
 
     setToast({ msg: 'Keranjang dikosongkan', type: 'success' });
+    emitBarangKosongCartUpdated();
   };
   
   // Generate PO Number
@@ -2075,22 +2083,10 @@ export const BarangKosongView: React.FC = () => {
         .insert(orderItems);
       
       if (itemsError) throw itemsError;
-
-      const targetStore = selectedStore || 'mjm';
-      const partNumbers = Array.from(new Set(supplierItems.map(item => item.part_number)));
-      const pendingCleared = await deletePendingOrderSupplier(targetStore, {
-        supplier: currentSupplier,
-        partNumbers
-      });
-
-      if (pendingCleared) {
-        setToast({ msg: `PO untuk ${currentSupplier} berhasil disimpan!`, type: 'success' });
-        // Remove only the items for this supplier from cart
-        setCart(prev => prev.filter(c => c.supplier !== currentSupplier));
-      } else {
-        setToast({ msg: `PO untuk ${currentSupplier} tersimpan, tetapi pending order_supplier belum terhapus`, type: 'error' });
-        await syncCartFromStorageAndPending(false);
-      }
+      // Pending order_supplier TETAP dipertahankan setelah Buat PO.
+      // Data hanya hilang jika dihapus/diubah dari keranjang atau dari tabel Sudah Request.
+      setToast({ msg: `PO untuk ${currentSupplier} berhasil disimpan. Data request tetap di keranjang.`, type: 'success' });
+      await syncCartFromStorageAndPending(false);
       setShowPOPreview(false);
       setCurrentSupplier('');
       

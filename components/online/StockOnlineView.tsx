@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../../context/StoreContext';
 import { supabase } from '../../services/supabaseClient';
-import { Loader2, Package, Search, FileDown, ShoppingCart, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, Package, Search, FileDown, ShoppingCart, ChevronDown, ChevronUp, Pencil, Trash2, CheckCircle2, Save, XCircle } from 'lucide-react';
 import { fetchUniqueSuppliersFromBarangKosong } from '../../services/supplierService';
 import { fetchLatestSuppliersForParts } from '../../services/lastSupplierService';
 import { fetchPendingOrderSupplier } from '../../services/supabaseService';
@@ -26,6 +26,8 @@ interface StockMoment {
   brand: string;
   date: string;
   stock: number;
+  stockMjm: number;
+  stockBjw: number;
   qtyOut: number;
   supplier?: SupplierInfo;
   requestStock?: number; // kolom baru
@@ -43,15 +45,20 @@ interface BarangKosongCartItem {
 }
 
 interface RequestedStockRow {
-  id: number;
+  id: string;
+  source: 'order_supplier' | 'kirim_barang';
   partNumber: string;
   name: string;
   brand: string;
   stock: number | null;
   qty: number;
+  costPrice: number;
   supplier: string;
   requestDate: string;
   requestDateRaw: string;
+  requestStore: 'mjm' | 'bjw';
+  status: string;
+  notes: string;
 }
 
 const LAST_N_DATES = 7;
@@ -127,6 +134,55 @@ const normalizeSupplierName = (value: string): string => {
   return (value || '').trim().toUpperCase().replace(/\s+/g, ' ');
 };
 
+const normalizePartNumber = (value: string): string => {
+  return (value || '').trim().toUpperCase().replace(/\s+/g, ' ');
+};
+
+const formatIDR = (value: number): string => {
+  const safe = Math.max(0, Math.floor(Number(value || 0)));
+  return `Rp ${safe.toLocaleString('id-ID')}`;
+};
+
+const makeSupplierPriceKey = (partNumber: string, supplier: string): string => {
+  return `${(partNumber || '').trim().toUpperCase()}__${normalizeSupplierName(supplier)}`;
+};
+
+const getSupplierLookupCandidates = (supplier: string): string[] => {
+  const normalized = normalizeSupplierName(supplier);
+  if (!normalized) return [];
+  const parts = normalized
+    .split('/')
+    .map(part => normalizeSupplierName(part))
+    .filter(Boolean);
+  return Array.from(new Set([normalized, ...parts]));
+};
+
+const extractCostPriceFromCatatan = (catatan: string | null | undefined): number => {
+  const text = (catatan || '').trim();
+  if (!text) return 0;
+  const match = text.match(/harga\s*modal\s*:\s*([0-9.,]+)/i);
+  if (!match || !match[1]) return 0;
+  const normalized = match[1].replace(/\./g, '').replace(',', '.');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+};
+
+const upsertCostPriceInCatatan = (catatan: string | null | undefined, supplier: string, costPrice: number): string => {
+  const safePrice = Math.max(0, Math.floor(Number(costPrice || 0)));
+  let text = (catatan || '').trim();
+
+  if (!text) {
+    text = 'Request dari Stock Online';
+  }
+  if (!/supplier\s*:/i.test(text) && supplier) {
+    text += ` | Supplier: ${supplier}`;
+  }
+  if (/harga\s*modal\s*:/i.test(text)) {
+    return text.replace(/harga\s*modal\s*:\s*[0-9.,]+/i, `Harga Modal: ${safePrice}`);
+  }
+  return `${text} | Harga Modal: ${safePrice}`;
+};
+
 const isKirimBarangSupplier = (supplierName: string): boolean => {
   const normalized = normalizeSupplierName(supplierName);
   if (!normalized) return false;
@@ -136,17 +192,44 @@ const isKirimBarangSupplier = (supplierName: string): boolean => {
   return false;
 };
 
+const resolveKirimBarangRoute = (
+  selectedStore: string | null | undefined,
+  supplierName: string
+): { from_store: 'mjm'; to_store: 'mjm' | 'bjw' } | null => {
+  if (!isKirimBarangSupplier(supplierName)) return null;
+
+  const requesterStore: 'mjm' | 'bjw' = selectedStore === 'bjw' ? 'bjw' : 'mjm';
+  const sourceStore: 'mjm' = 'mjm';
+
+  // Kalau requester sama dengan source store, jangan lewat modul kirim barang.
+  if (requesterStore === sourceStore) return null;
+
+  return {
+    from_store: sourceStore,
+    to_store: requesterStore
+  };
+};
+
 const extractSupplierFromCatatan = (catatan: string | null | undefined): string => {
   const text = (catatan || '').trim();
   if (!text) return 'MJM / IMPORTIR MJM';
-  const match = text.match(/Supplier:\s*(.+)$/i);
+  const match = text.match(/supplier\s*:\s*([^|]+)/i);
   if (match && match[1]) return match[1].trim();
   return 'MJM / IMPORTIR MJM';
 };
 
+const getBaseTableByStore = (store: 'mjm' | 'bjw') => {
+  return store === 'bjw' ? 'base_bjw' : 'base_mjm';
+};
+
+const canEditOrDeleteKirimBarang = (status: string): boolean => {
+  const normalized = (status || '').toLowerCase();
+  return normalized === 'pending' || normalized === 'approved';
+};
+
 
 const StockOnlineView: React.FC = () => {
-  const { selectedStore } = useStore();
+  const { selectedStore, userName } = useStore();
   const [loading, setLoading] = useState(true);
   const [moments, setMoments] = useState<StockMoment[]>([]);
   const [search, setSearch] = useState('');
@@ -155,17 +238,24 @@ const StockOnlineView: React.FC = () => {
   const [orderLoading, setOrderLoading] = useState<string | null>(null);
   const [supplierOptions, setSupplierOptions] = useState<string[]>([]);
   const [latestSupplierMap, setLatestSupplierMap] = useState<Record<string, {supplier: string, date: string}>>({});
+  const [supplierPriceLookup, setSupplierPriceLookup] = useState<Record<string, number>>({});
   const [collapsedByDate, setCollapsedByDate] = useState<Record<string, boolean>>({});
   const [requestedOrderSupplierRowsRaw, setRequestedOrderSupplierRowsRaw] = useState<any[]>([]);
   const [requestedKirimBarangRowsRaw, setRequestedKirimBarangRowsRaw] = useState<any[]>([]);
+  const [requestedRowEditState, setRequestedRowEditState] = useState<Record<string, { editing: boolean; qty: number; costPrice: number }>>({});
+  const [requestedRowActionLoading, setRequestedRowActionLoading] = useState<string | null>(null);
+  const emitBarangKosongCartSync = React.useCallback(() => {
+    const targetStore = selectedStore || 'mjm';
+    window.dispatchEvent(new CustomEvent('barangKosongCartUpdated', { detail: { store: targetStore } }));
+  }, [selectedStore]);
   const loadRequestedRows = React.useCallback(async () => {
     const targetStore = selectedStore || 'mjm';
     const [orderSupplierRows, kirimBarangResult] = await Promise.all([
       fetchPendingOrderSupplier(targetStore),
       supabase
         .from('kirim_barang')
-        .select('id, part_number, nama_barang, brand, quantity, status, from_store, created_at, catatan')
-        .eq('from_store', targetStore)
+        .select('id, part_number, nama_barang, brand, quantity, status, from_store, to_store, created_at, catatan')
+        .eq('to_store', targetStore)
         .in('status', ['pending', 'approved', 'sent'])
         .ilike('catatan', '%Request dari Stock Online%')
         .order('created_at', { ascending: false })
@@ -221,15 +311,61 @@ const StockOnlineView: React.FC = () => {
         setLoading(false);
         return;
       }
+
+      const partNumbers = Array.from(
+        new Set(
+          (data || [])
+            .map(row => (row.part_number || '').trim())
+            .filter(Boolean)
+        )
+      );
+
+      const stockMjmMap: Record<string, number> = {};
+      const stockBjwMap: Record<string, number> = {};
+
+      const chunkSize = 200;
+      for (let i = 0; i < partNumbers.length; i += chunkSize) {
+        const chunk = partNumbers.slice(i, i + chunkSize);
+        const [mjmResult, bjwResult] = await Promise.all([
+          supabase.from('base_mjm').select('part_number, quantity').in('part_number', chunk),
+          supabase.from('base_bjw').select('part_number, quantity').in('part_number', chunk)
+        ]);
+
+        if (mjmResult.error) {
+          console.error('loadData base_mjm error:', mjmResult.error);
+        } else {
+          (mjmResult.data || []).forEach((row: any) => {
+            stockMjmMap[normalizePartNumber(row.part_number || '')] = Number(row.quantity || 0);
+          });
+        }
+
+        if (bjwResult.error) {
+          console.error('loadData base_bjw error:', bjwResult.error);
+        } else {
+          (bjwResult.data || []).forEach((row: any) => {
+            stockBjwMap[normalizePartNumber(row.part_number || '')] = Number(row.quantity || 0);
+          });
+        }
+      }
+
       // Group by tanggal
       const momentsArr: StockMoment[] = (data || []).map(row => {
         const latest = latestSupplierMap[row.part_number];
+        const partNumber = row.part_number || '';
+        const normalizedPartNumber = normalizePartNumber(partNumber);
+        const stockMjm = Number(stockMjmMap[normalizedPartNumber] ?? 0);
+        const stockBjw = Number(stockBjwMap[normalizedPartNumber] ?? 0);
+        const selectedStoreStock = selectedStore === 'bjw'
+          ? Number(stockBjwMap[normalizedPartNumber] ?? row.stock ?? 0)
+          : Number(stockMjmMap[normalizedPartNumber] ?? row.stock ?? 0);
         return {
-          partNumber: row.part_number,
+          partNumber,
           name: row.name,
           brand: row.brand,
           date: row.tanggal,
-          stock: row.stock,
+          stock: selectedStoreStock,
+          stockMjm,
+          stockBjw,
           qtyOut: row.qty_keluar,
           supplier: {
             supplier: latest?.supplier || row.supplier || 'IMPORTIR MJM',
@@ -248,21 +384,133 @@ const StockOnlineView: React.FC = () => {
     loadData();
   }, [selectedStore]); // Dependensi selectedStore agar view berubah sesuai toko
 
+  const supplierPricePartNumbers = React.useMemo(() => {
+    const set = new Set<string>();
+    moments.forEach(item => {
+      const partNumber = (item.partNumber || '').trim();
+      if (partNumber) set.add(partNumber);
+    });
+    requestedOrderSupplierRowsRaw.forEach((row: any) => {
+      const partNumber = (row.part_number || '').trim();
+      if (partNumber) set.add(partNumber);
+    });
+    requestedKirimBarangRowsRaw.forEach((row: any) => {
+      const partNumber = (row.part_number || '').trim();
+      if (partNumber) set.add(partNumber);
+    });
+    return Array.from(set);
+  }, [moments, requestedKirimBarangRowsRaw, requestedOrderSupplierRowsRaw]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadSupplierPrices = async () => {
+      const sourceTables = ['barang_masuk_mjm', 'barang_masuk_bjw'];
+
+      if (supplierPricePartNumbers.length === 0) {
+        if (isMounted) setSupplierPriceLookup({});
+        return;
+      }
+
+      const chunkSize = 200;
+      const nextLookupWithTs: Record<string, { price: number; ts: number }> = {};
+
+      for (const sourceTable of sourceTables) {
+        for (let i = 0; i < supplierPricePartNumbers.length; i += chunkSize) {
+          const chunk = supplierPricePartNumbers.slice(i, i + chunkSize);
+          const { data, error } = await supabase
+            .from(sourceTable)
+            .select('part_number, customer, harga_satuan, created_at')
+            .in('part_number', chunk)
+            .not('customer', 'is', null)
+            .not('customer', 'eq', '')
+            .not('customer', 'eq', '-')
+            .order('created_at', { ascending: false });
+
+          if (error) {
+            console.error('loadSupplierPrices Error:', error);
+            continue;
+          }
+
+          (data || []).forEach((row: any) => {
+            const partNumber = (row.part_number || '').trim();
+            const supplier = (row.customer || '').trim();
+            if (!partNumber || !supplier) return;
+            const key = makeSupplierPriceKey(partNumber, supplier);
+            const price = Math.max(0, Math.floor(Number(row.harga_satuan || 0)));
+            const ts = new Date(row.created_at || 0).getTime();
+            const safeTs = Number.isFinite(ts) ? ts : 0;
+            const prev = nextLookupWithTs[key];
+            if (!prev || safeTs > prev.ts) {
+              nextLookupWithTs[key] = { price, ts: safeTs };
+            }
+          });
+        }
+      }
+
+      const nextLookup: Record<string, number> = {};
+      Object.entries(nextLookupWithTs).forEach(([key, value]) => {
+        nextLookup[key] = value.price;
+      });
+
+      if (isMounted) {
+        setSupplierPriceLookup(nextLookup);
+      }
+    };
+
+    loadSupplierPrices();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedStore, supplierPricePartNumbers]);
+
+  const resolveSupplierCostPrice = React.useCallback((
+    partNumber: string,
+    supplier: string,
+    fallbackPrice?: number
+  ): number => {
+    const candidates = getSupplierLookupCandidates(supplier);
+    for (const candidate of candidates) {
+      const key = makeSupplierPriceKey(partNumber, candidate);
+      const price = supplierPriceLookup[key];
+      if (price != null) return Math.max(0, Math.floor(Number(price || 0)));
+    }
+    return Math.max(0, Math.floor(Number(fallbackPrice || 0)));
+  }, [supplierPriceLookup]);
+
 
   const requestedRowsForStockOnline = React.useMemo(
     () =>
       [
-        ...requestedOrderSupplierRowsRaw.filter(row =>
-          String(row.notes || '').toUpperCase().includes('REQUEST DARI STOCK ONLINE')
-        ),
+        ...requestedOrderSupplierRowsRaw
+          .filter(row =>
+            String(row.notes || '').toUpperCase().includes('REQUEST DARI STOCK ONLINE')
+          )
+          .map(row => ({
+            source: 'order_supplier' as const,
+            id: String(row.id || ''),
+            part_number: row.part_number,
+            name: row.name,
+            brand: row.brand,
+            qty: row.qty,
+            cost_price: Number(row.price || 0),
+            supplier: row.supplier,
+            created_at: row.created_at,
+            status: String(row.status || 'PENDING').toLowerCase(),
+            request_store: row.store === 'bjw' ? 'bjw' : 'mjm',
+            notes: row.notes || ''
+          })),
         ...requestedKirimBarangRowsRaw.map(row => ({
+          source: 'kirim_barang' as const,
           id: row.id,
           part_number: row.part_number,
           name: row.nama_barang,
           brand: row.brand,
           qty: row.quantity,
+          cost_price: extractCostPriceFromCatatan(row.catatan),
           supplier: extractSupplierFromCatatan(row.catatan),
           created_at: row.created_at,
+          status: String(row.status || 'pending').toLowerCase(),
+          request_store: row.to_store === 'bjw' ? 'bjw' : 'mjm',
           notes: row.catatan || ''
         }))
       ],
@@ -285,20 +533,32 @@ const StockOnlineView: React.FC = () => {
           const partNumber = (row.part_number || '').trim();
           const latestMoment = latestMomentByPart[partNumber];
           const requestDateRaw = row.created_at || '';
+          const fallbackPriceFromLatestMoment = Number(latestMoment?.supplier?.lastPrice || 0);
+          const resolvedCostPrice = resolveSupplierCostPrice(
+            partNumber,
+            row.supplier || latestMoment?.supplier?.supplier || '',
+            Number(row.cost_price || fallbackPriceFromLatestMoment)
+          );
           return {
-            id: Number(row.id || 0),
+            source: row.source,
+            id: String(row.id || ''),
             partNumber,
             name: latestMoment?.name || row.name || '-',
             brand: latestMoment?.brand || '-',
             stock: typeof latestMoment?.stock === 'number' ? latestMoment.stock : null,
             qty: Number(row.qty || 0),
+            costPrice: resolvedCostPrice,
             supplier: row.supplier || '-',
             requestDate: requestDateRaw ? requestDateRaw.slice(0, 10) : '-',
-            requestDateRaw
+            requestDateRaw,
+            requestStore: row.request_store === 'bjw' ? 'bjw' : 'mjm',
+            status: String(row.status || '').toLowerCase(),
+            notes: String(row.notes || '')
           };
         })
+        .filter(row => row.id !== '' && row.partNumber !== '')
         .sort((a, b) => new Date(b.requestDateRaw).getTime() - new Date(a.requestDateRaw).getTime()),
-    [latestMomentByPart, requestedRowsForStockOnline]
+    [latestMomentByPart, requestedRowsForStockOnline, resolveSupplierCostPrice]
   );
 
   const requestedPartNumbers = React.useMemo(() => {
@@ -308,6 +568,238 @@ const StockOnlineView: React.FC = () => {
     });
     return partSet;
   }, [requestedStockRows]);
+
+  const getRequestedRowKey = React.useCallback((row: RequestedStockRow) => {
+    return `${row.source}:${row.id}`;
+  }, []);
+
+  useEffect(() => {
+    setRequestedRowEditState(prev => {
+      const activeKeys = new Set(requestedStockRows.map(getRequestedRowKey));
+      const next: Record<string, { editing: boolean; qty: number; costPrice: number }> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        if (activeKeys.has(key)) next[key] = value;
+      });
+      return next;
+    });
+  }, [getRequestedRowKey, requestedStockRows]);
+
+  const applyStockToRequestStore = React.useCallback(async (row: RequestedStockRow): Promise<{ success: boolean; msg?: string }> => {
+    const partNumber = (row.partNumber || '').trim();
+    const qty = Math.floor(Number(row.qty || 0));
+    if (!partNumber) return { success: false, msg: 'Part number kosong.' };
+    if (qty <= 0) return { success: false, msg: 'Qty harus lebih dari 0.' };
+
+    const targetTable = getBaseTableByStore(row.requestStore);
+    const { data: existingItem, error: fetchError } = await supabase
+      .from(targetTable)
+      .select('part_number, quantity')
+      .ilike('part_number', partNumber)
+      .limit(1)
+      .maybeSingle();
+
+    if (fetchError) {
+      console.error('applyStockToRequestStore fetch error:', fetchError);
+      return { success: false, msg: fetchError.message };
+    }
+
+    if (existingItem) {
+      const newQty = Number(existingItem.quantity || 0) + qty;
+      const { error: updateError } = await supabase
+        .from(targetTable)
+        .update({ quantity: newQty })
+        .eq('part_number', existingItem.part_number);
+
+      if (updateError) {
+        console.error('applyStockToRequestStore update error:', updateError);
+        return { success: false, msg: updateError.message };
+      }
+
+      return { success: true };
+    }
+
+    const { error: insertError } = await supabase
+      .from(targetTable)
+      .insert({
+        part_number: partNumber,
+        name: row.name || partNumber,
+        brand: row.brand || '',
+        application: '',
+        quantity: qty,
+        shelf: '-'
+      });
+
+    if (insertError) {
+      console.error('applyStockToRequestStore insert error:', insertError);
+      return { success: false, msg: insertError.message };
+    }
+
+    return { success: true };
+  }, []);
+
+  const handleDeleteRequestedRow = React.useCallback(async (row: RequestedStockRow) => {
+    const rowKey = getRequestedRowKey(row);
+    const actionKey = `${rowKey}:delete`;
+    const canMutate = row.source === 'order_supplier' || canEditOrDeleteKirimBarang(row.status);
+    if (!canMutate) {
+      alert('Item dengan status ini tidak bisa dihapus dari tabel Sudah Request.');
+      return;
+    }
+
+    const confirmed = confirm(`Hapus request ${row.partNumber} dari daftar Sudah Request?`);
+    if (!confirmed) return;
+
+    setRequestedRowActionLoading(actionKey);
+    try {
+      if (row.source === 'order_supplier') {
+        const orderId = Number(row.id);
+        if (!Number.isFinite(orderId)) throw new Error('ID order_supplier tidak valid.');
+        const { error } = await supabase
+          .from('order_supplier')
+          .delete()
+          .eq('id', orderId)
+          .eq('status', 'PENDING');
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('kirim_barang')
+          .delete()
+          .eq('id', row.id)
+          .in('status', ['pending', 'approved']);
+        if (error) throw error;
+      }
+      await loadRequestedRows();
+      emitBarangKosongCartSync();
+    } catch (error: any) {
+      console.error('handleDeleteRequestedRow Error:', error);
+      alert(`Gagal hapus item: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setRequestedRowActionLoading(null);
+    }
+  }, [emitBarangKosongCartSync, getRequestedRowKey, loadRequestedRows]);
+
+  const handleStartEditRequestedRow = React.useCallback((row: RequestedStockRow) => {
+    const rowKey = getRequestedRowKey(row);
+    setRequestedRowEditState(prev => ({
+      ...prev,
+      [rowKey]: {
+        editing: true,
+        qty: Math.max(1, Math.floor(Number(row.qty || 0))),
+        costPrice: Math.max(0, Math.floor(Number(row.costPrice || 0)))
+      }
+    }));
+  }, [getRequestedRowKey]);
+
+  const handleCancelEditRequestedRow = React.useCallback((row: RequestedStockRow) => {
+    const rowKey = getRequestedRowKey(row);
+    setRequestedRowEditState(prev => ({
+      ...prev,
+      [rowKey]: {
+        editing: false,
+        qty: Math.max(1, Math.floor(Number(row.qty || 0))),
+        costPrice: Math.max(0, Math.floor(Number(row.costPrice || 0)))
+      }
+    }));
+  }, [getRequestedRowKey]);
+
+  const handleSaveRequestedRowQty = React.useCallback(async (row: RequestedStockRow) => {
+    const rowKey = getRequestedRowKey(row);
+    const actionKey = `${rowKey}:save`;
+    const editState = requestedRowEditState[rowKey];
+    const nextQty = Math.max(0, Math.floor(Number(editState?.qty || 0)));
+    const nextCostPrice = Math.max(0, Math.floor(Number(editState?.costPrice || 0)));
+    const canMutate = row.source === 'order_supplier' || canEditOrDeleteKirimBarang(row.status);
+
+    if (!canMutate) {
+      alert('Item dengan status ini tidak bisa diedit qty/harga modal.');
+      return;
+    }
+
+    if (nextQty <= 0) {
+      alert('Qty harus lebih dari 0. Gunakan tombol hapus jika ingin menghapus item.');
+      return;
+    }
+
+    setRequestedRowActionLoading(actionKey);
+    try {
+      if (row.source === 'order_supplier') {
+        const orderId = Number(row.id);
+        if (!Number.isFinite(orderId)) throw new Error('ID order_supplier tidak valid.');
+        const { error } = await supabase
+          .from('order_supplier')
+          .update({ qty: nextQty, price: nextCostPrice })
+          .eq('id', orderId)
+          .eq('status', 'PENDING');
+        if (error) throw error;
+      } else {
+        const updatedCatatan = upsertCostPriceInCatatan(row.notes, row.supplier, nextCostPrice);
+        const { error } = await supabase
+          .from('kirim_barang')
+          .update({ quantity: nextQty, catatan: updatedCatatan })
+          .eq('id', row.id)
+          .in('status', ['pending', 'approved']);
+        if (error) throw error;
+      }
+
+      setRequestedRowEditState(prev => ({
+        ...prev,
+        [rowKey]: { editing: false, qty: nextQty, costPrice: nextCostPrice }
+      }));
+      await loadRequestedRows();
+      emitBarangKosongCartSync();
+    } catch (error: any) {
+      console.error('handleSaveRequestedRowQty Error:', error);
+      alert(`Gagal update qty: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setRequestedRowActionLoading(null);
+    }
+  }, [emitBarangKosongCartSync, getRequestedRowKey, loadRequestedRows, requestedRowEditState]);
+
+  const handleCompleteRequestedRow = React.useCallback(async (row: RequestedStockRow) => {
+    const rowKey = getRequestedRowKey(row);
+    const actionKey = `${rowKey}:done`;
+    const editState = requestedRowEditState[rowKey];
+    if (editState?.editing) {
+      alert('Simpan dulu perubahan qty sebelum menekan Selesai.');
+      return;
+    }
+
+    const confirmed = confirm(
+      `Tandai selesai request ${row.partNumber} (qty ${row.qty})?\nStok akan ditambahkan ke base ${row.requestStore.toUpperCase()}.`
+    );
+    if (!confirmed) return;
+
+    setRequestedRowActionLoading(actionKey);
+    try {
+      if (row.source === 'order_supplier') {
+        const orderId = Number(row.id);
+        if (!Number.isFinite(orderId)) throw new Error('ID order_supplier tidak valid.');
+
+        const stockResult = await applyStockToRequestStore(row);
+        if (!stockResult.success) throw new Error(stockResult.msg || 'Gagal menambah stok.');
+
+        const { error: doneError } = await supabase
+          .from('order_supplier')
+          .update({ status: 'DONE' })
+          .eq('id', orderId)
+          .eq('status', 'PENDING');
+        if (doneError) throw doneError;
+      } else {
+        const { receiveKirimBarang } = await import('../../services/kirimBarangService');
+        const result = await receiveKirimBarang(row.id, userName || 'system');
+        if (!result.success) throw new Error(result.error || 'Gagal menyelesaikan kirim barang.');
+      }
+
+      await loadRequestedRows();
+      emitBarangKosongCartSync();
+      alert('Request selesai. Stok base toko peminta sudah ditambahkan.');
+    } catch (error: any) {
+      console.error('handleCompleteRequestedRow Error:', error);
+      alert(`Gagal menyelesaikan request: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setRequestedRowActionLoading(null);
+    }
+  }, [applyStockToRequestStore, emitBarangKosongCartSync, getRequestedRowKey, loadRequestedRows, requestedRowEditState, userName]);
 
   const latestDates = React.useMemo(() => getLastNDates(LAST_N_DATES), []);
 
@@ -344,6 +836,8 @@ const StockOnlineView: React.FC = () => {
 
   const sortedDates = latestDates;
   const hasRequestedRows = requestedStockRows.length > 0;
+  const primaryStockLabel = 'Stok MJM';
+  const compareStockLabel = 'Stok BJW';
 
   return (
     <div className="p-6 text-gray-100 min-h-screen bg-gradient-to-br from-gray-900 via-gray-950 to-green-950">
@@ -410,11 +904,16 @@ const StockOnlineView: React.FC = () => {
                             requestStock: typeof m.requestStock === 'number' ? m.requestStock : 0,
                             supplier: m.supplier?.supplier || supplierOptions[0] || '',
                           };
+                          const resolvedCostPrice = resolveSupplierCostPrice(
+                            m.partNumber,
+                            rowEdit.supplier,
+                            Number(m.supplier?.lastPrice || 0)
+                          );
                           return {
                             ...m,
                             requestStock: rowEdit.requestStock,
                             supplier: rowEdit.supplier,
-                            lastPrice: m.supplier && typeof m.supplier === 'object' ? m.supplier.lastPrice : 0
+                            lastPrice: resolvedCostPrice
                           };
                         }).filter(item => item.requestStock > 0);
 
@@ -438,19 +937,20 @@ const StockOnlineView: React.FC = () => {
                           const supplierGroup = supplierGroups[supplierKey];
                           const supplierName = supplierGroup.supplier;
                           const groupItems = supplierGroup.items;
+                          const kirimBarangRoute = resolveKirimBarangRoute(selectedStore, supplierName);
 
-                          if (isKirimBarangSupplier(supplierName)) {
+                          if (kirimBarangRoute) {
                             const { createKirimBarangRequest } = await import('../../services/kirimBarangService');
                             for (const item of groupItems) {
                               await createKirimBarangRequest({
-                                from_store: selectedStore === 'mjm' ? 'mjm' : 'bjw',
-                                to_store: selectedStore === 'mjm' ? 'bjw' : 'mjm',
+                                from_store: kirimBarangRoute.from_store,
+                                to_store: kirimBarangRoute.to_store,
                                 part_number: item.partNumber,
                                 nama_barang: item.name,
                                 brand: item.brand,
                                 application: '',
                                 quantity: item.requestStock || 1,
-                                catatan: `Request dari Stock Online ${date} | Supplier: ${supplierName}`,
+                                catatan: `Request dari Stock Online ${date} | Supplier: ${supplierName} | Harga Modal: ${Math.max(0, Math.floor(Number(item.lastPrice || 0)))}`,
                                 requested_by: 'system'
                               });
                               successCount++;
@@ -510,9 +1010,11 @@ const StockOnlineView: React.FC = () => {
                       <th className="px-3 py-2 border border-green-800 text-left font-bold tracking-wide">Part Number</th>
                       <th className="px-3 py-2 border border-green-800 text-left font-bold tracking-wide">Nama Barang</th>
                       <th className="px-3 py-2 border border-green-800 text-left font-bold tracking-wide">Brand</th>
-                      <th className="px-3 py-2 border border-green-800 text-center font-bold tracking-wide">Stok</th>
+                      <th className="px-3 py-2 border border-green-800 text-center font-bold tracking-wide">{primaryStockLabel}</th>
+                      <th className="px-3 py-2 border border-green-800 text-center font-bold tracking-wide">{compareStockLabel}</th>
                       <th className="px-3 py-2 border border-green-800 text-center font-bold tracking-wide">Qty Keluar</th>
                       <th className="px-3 py-2 border border-green-800 text-center font-bold tracking-wide">Supplier Terakhir</th>
+                      <th className="px-3 py-2 border border-green-800 text-center font-bold tracking-wide">Harga Modal</th>
                       <th className="px-3 py-2 border border-green-800 text-center font-bold tracking-wide">Request Stok</th>
                     </tr>
                   </thead>
@@ -524,6 +1026,13 @@ const StockOnlineView: React.FC = () => {
                         supplier: m.supplier?.supplier || supplierOptions[0] || '',
                         editingSupplier: false,
                       };
+                      const rowCostPrice = resolveSupplierCostPrice(
+                        m.partNumber,
+                        rowEdit.supplier,
+                        Number(m.supplier?.lastPrice || 0)
+                      );
+                      const primaryStock = Number(m.stockMjm ?? m.stock ?? 0);
+                      const compareStock = Number(m.stockBjw ?? 0);
                       return (
                         <tr
                           key={rowKey}
@@ -534,7 +1043,8 @@ const StockOnlineView: React.FC = () => {
 	                          </td>
                           <td className="px-3 py-2 border border-green-900/20">{m.name}</td>
                           <td className="px-3 py-2 border border-green-900/20">{m.brand}</td>
-                          <td className={`px-3 py-2 text-center font-extrabold border border-green-900/20 ${m.stock === 0 ? 'text-red-400' : m.stock <= 2 ? 'text-yellow-300' : 'text-green-300'}`}>{m.stock}</td>
+                          <td className={`px-3 py-2 text-center font-extrabold border border-green-900/20 ${primaryStock === 0 ? 'text-red-400' : primaryStock <= 2 ? 'text-yellow-300' : 'text-green-300'}`}>{primaryStock}</td>
+                          <td className={`px-3 py-2 text-center font-bold border border-green-900/20 ${compareStock === 0 ? 'text-red-400' : compareStock <= 2 ? 'text-yellow-300' : 'text-blue-300'}`}>{compareStock}</td>
                           <td className="px-3 py-2 text-center text-green-300 border border-green-900/20 font-bold">{m.qtyOut}</td>
                           <td className="px-3 py-2 text-center border border-green-900/20">
                             {rowEdit.editingSupplier ? (
@@ -662,6 +1172,9 @@ const StockOnlineView: React.FC = () => {
                               </div>
                             )}
                           </td>
+                          <td className="px-3 py-2 text-right border border-green-900/20 text-emerald-300 font-semibold whitespace-nowrap">
+                            {formatIDR(rowCostPrice)}
+                          </td>
                           <td className="px-3 py-2 text-center border border-green-900/20">
                             <input
                               ref={el => { requestStockRefs.current[rowKey] = el; }}
@@ -737,27 +1250,129 @@ const StockOnlineView: React.FC = () => {
                       <th className="px-2 py-2 border border-blue-800 text-left font-bold tracking-wide">Brand</th>
                       <th className="px-2 py-2 border border-blue-800 text-center font-bold tracking-wide">Stok Saat Ini</th>
                       <th className="px-2 py-2 border border-blue-800 text-center font-bold tracking-wide">Qty Request</th>
+                      <th className="px-2 py-2 border border-blue-800 text-center font-bold tracking-wide">Harga Modal</th>
                       <th className="px-2 py-2 border border-blue-800 text-left font-bold tracking-wide">Supplier</th>
                       <th className="px-2 py-2 border border-blue-800 text-center font-bold tracking-wide">Tanggal Request</th>
+                      <th className="px-2 py-2 border border-blue-800 text-center font-bold tracking-wide">Aksi</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {requestedStockRows.map((row, idx) => (
-                      <tr
-                        key={`${row.id}-${row.partNumber}-${row.supplier}-${idx}`}
-                        className={`transition-colors ${idx % 2 === 0 ? 'bg-gray-900/70' : 'bg-gray-800/60'} hover:bg-blue-900/20 border border-blue-900/30`}
-                      >
-                        <td className="px-2 py-2 font-mono text-blue-300 border border-blue-900/20 font-bold whitespace-nowrap">{row.partNumber}</td>
-                        <td className="px-2 py-2 border border-blue-900/20">{row.name}</td>
-                        <td className="px-2 py-2 border border-blue-900/20">{row.brand}</td>
-                        <td className="px-2 py-2 text-center border border-blue-900/20 font-bold">
-                          {typeof row.stock === 'number' ? row.stock : '-'}
-                        </td>
-                        <td className="px-2 py-2 text-center border border-blue-900/20 text-green-300 font-bold">{row.qty}</td>
-                        <td className="px-2 py-2 border border-blue-900/20 text-cyan-300">{row.supplier}</td>
-                        <td className="px-2 py-2 text-center border border-blue-900/20 text-gray-300">{row.requestDate}</td>
-                      </tr>
-                    ))}
+                    {requestedStockRows.map((row, idx) => {
+                      const rowKey = getRequestedRowKey(row);
+                      const editState = requestedRowEditState[rowKey] || {
+                        editing: false,
+                        qty: Math.max(1, Math.floor(Number(row.qty || 0))),
+                        costPrice: Math.max(0, Math.floor(Number(row.costPrice || 0)))
+                      };
+                      const isEditing = editState.editing;
+                      const canMutate = row.source === 'order_supplier' || canEditOrDeleteKirimBarang(row.status);
+                      const isSaving = requestedRowActionLoading === `${rowKey}:save`;
+                      const isDeleting = requestedRowActionLoading === `${rowKey}:delete`;
+                      const isCompleting = requestedRowActionLoading === `${rowKey}:done`;
+
+                      return (
+                        <tr
+                          key={`${rowKey}-${row.partNumber}-${idx}`}
+                          className={`transition-colors ${idx % 2 === 0 ? 'bg-gray-900/70' : 'bg-gray-800/60'} hover:bg-blue-900/20 border border-blue-900/30`}
+                        >
+                          <td className="px-2 py-2 font-mono text-blue-300 border border-blue-900/20 font-bold whitespace-nowrap">{row.partNumber}</td>
+                          <td className="px-2 py-2 border border-blue-900/20">{row.name}</td>
+                          <td className="px-2 py-2 border border-blue-900/20">{row.brand}</td>
+                          <td className="px-2 py-2 text-center border border-blue-900/20 font-bold">
+                            {typeof row.stock === 'number' ? row.stock : '-'}
+                          </td>
+                          <td className="px-2 py-2 text-center border border-blue-900/20 text-green-300 font-bold">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min={1}
+                                value={editState.qty}
+                                className="w-16 bg-gray-800 text-green-300 text-xs rounded px-2 py-1 border border-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 text-center"
+                                onChange={e => {
+                                  const nextQty = Math.max(1, parseInt(e.target.value, 10) || 1);
+                                  setRequestedRowEditState(prev => ({
+                                    ...prev,
+                                    [rowKey]: { ...editState, qty: nextQty }
+                                  }));
+                                }}
+                              />
+                            ) : (
+                              row.qty
+                            )}
+                          </td>
+                          <td className="px-2 py-2 text-center border border-blue-900/20 text-emerald-300 font-semibold">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min={0}
+                                value={editState.costPrice}
+                                className="w-24 bg-gray-800 text-emerald-300 text-xs rounded px-2 py-1 border border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-right"
+                                onChange={e => {
+                                  const nextPrice = Math.max(0, parseInt(e.target.value, 10) || 0);
+                                  setRequestedRowEditState(prev => ({
+                                    ...prev,
+                                    [rowKey]: { ...editState, costPrice: nextPrice }
+                                  }));
+                                }}
+                              />
+                            ) : (
+                              formatIDR(row.costPrice)
+                            )}
+                          </td>
+                          <td className="px-2 py-2 border border-blue-900/20 text-cyan-300">{row.supplier}</td>
+                          <td className="px-2 py-2 text-center border border-blue-900/20 text-gray-300">{row.requestDate}</td>
+                          <td className="px-2 py-2 border border-blue-900/20">
+                            <div className="flex items-center justify-center gap-1">
+                              {isEditing ? (
+                                <>
+                                  <button
+                                    className="p-1 rounded bg-green-700/80 hover:bg-green-700 text-green-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title="Simpan qty dan harga modal"
+                                    onClick={() => handleSaveRequestedRowQty(row)}
+                                    disabled={isSaving || isDeleting || isCompleting}
+                                  >
+                                    {isSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                                  </button>
+                                  <button
+                                    className="p-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title="Batal edit"
+                                    onClick={() => handleCancelEditRequestedRow(row)}
+                                    disabled={isSaving || isDeleting || isCompleting}
+                                  >
+                                    <XCircle size={13} />
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  className="p-1 rounded bg-blue-700/80 hover:bg-blue-700 text-blue-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                                  title={canMutate ? 'Edit qty & harga modal' : 'Qty/harga modal tidak bisa diedit pada status ini'}
+                                  onClick={() => handleStartEditRequestedRow(row)}
+                                  disabled={!canMutate || isSaving || isDeleting || isCompleting}
+                                >
+                                  <Pencil size={13} />
+                                </button>
+                              )}
+                              <button
+                                className="p-1 rounded bg-red-700/80 hover:bg-red-700 text-red-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                                title={canMutate ? 'Hapus item request' : 'Item ini tidak bisa dihapus pada status ini'}
+                                onClick={() => handleDeleteRequestedRow(row)}
+                                disabled={!canMutate || isSaving || isDeleting || isCompleting}
+                              >
+                                {isDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                              </button>
+                              <button
+                                className="p-1 rounded bg-emerald-700/80 hover:bg-emerald-700 text-emerald-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                                title={`Selesai: tambah stok ke base ${row.requestStore.toUpperCase()}`}
+                                onClick={() => handleCompleteRequestedRow(row)}
+                                disabled={isSaving || isDeleting || isCompleting}
+                              >
+                                {isCompleting ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
