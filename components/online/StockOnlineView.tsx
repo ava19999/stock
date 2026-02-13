@@ -3,12 +3,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../../context/StoreContext';
-import { InventoryItem, SoldItemRow } from '../../types';
 import { supabase } from '../../services/supabaseClient';
-import { Loader2, Package, Search, FileDown, ShoppingCart } from 'lucide-react';
+import { Loader2, Package, Search, FileDown, ShoppingCart, ChevronDown, ChevronUp } from 'lucide-react';
 import { fetchUniqueSuppliersFromBarangKosong } from '../../services/supplierService';
 import { fetchLatestSuppliersForParts } from '../../services/lastSupplierService';
-import { fetchSupplierOrders } from '../../services/supabaseService';
+import { fetchPendingOrderSupplier } from '../../services/supabaseService';
 
 
 interface SupplierInfo {
@@ -43,13 +42,34 @@ interface BarangKosongCartItem {
   application: string;
 }
 
-const getLastNDates = (n: number): string[] => {
+interface RequestedStockRow {
+  id: number;
+  partNumber: string;
+  name: string;
+  brand: string;
+  stock: number | null;
+  qty: number;
+  supplier: string;
+  requestDate: string;
+  requestDateRaw: string;
+}
+
+const LAST_N_DATES = 7;
+
+const toLocalISODate = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getLastNDates = (count: number): string[] => {
   const dates: string[] = [];
   const now = new Date();
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < count; i++) {
     const d = new Date(now);
     d.setDate(now.getDate() - i);
-    dates.push(d.toISOString().slice(0, 10));
+    dates.push(toLocalISODate(d));
   }
   return dates;
 };
@@ -116,6 +136,14 @@ const isKirimBarangSupplier = (supplierName: string): boolean => {
   return false;
 };
 
+const extractSupplierFromCatatan = (catatan: string | null | undefined): string => {
+  const text = (catatan || '').trim();
+  if (!text) return 'MJM / IMPORTIR MJM';
+  const match = text.match(/Supplier:\s*(.+)$/i);
+  if (match && match[1]) return match[1].trim();
+  return 'MJM / IMPORTIR MJM';
+};
+
 
 const StockOnlineView: React.FC = () => {
   const { selectedStore } = useStore();
@@ -127,21 +155,47 @@ const StockOnlineView: React.FC = () => {
   const [orderLoading, setOrderLoading] = useState<string | null>(null);
   const [supplierOptions, setSupplierOptions] = useState<string[]>([]);
   const [latestSupplierMap, setLatestSupplierMap] = useState<Record<string, {supplier: string, date: string}>>({});
-  const [orderedPartsByDate, setOrderedPartsByDate] = useState<Record<string, Set<string>>>({});
-    // Ambil daftar part yang sudah diorder (keranjang supplier) per tanggal
-    useEffect(() => {
-      fetchSupplierOrders(selectedStore).then(orders => {
-        const byDate: Record<string, Set<string>> = {};
-        orders.forEach(order => {
-          const date = order.created_at?.slice(0, 10) || '';
-          if (!byDate[date]) byDate[date] = new Set();
-          order.items.forEach((item: any) => {
-            byDate[date].add(item.partNumber);
-          });
-        });
-        setOrderedPartsByDate(byDate);
-      });
-    }, [selectedStore, orderLoading]);
+  const [collapsedByDate, setCollapsedByDate] = useState<Record<string, boolean>>({});
+  const [requestedOrderSupplierRowsRaw, setRequestedOrderSupplierRowsRaw] = useState<any[]>([]);
+  const [requestedKirimBarangRowsRaw, setRequestedKirimBarangRowsRaw] = useState<any[]>([]);
+  const loadRequestedRows = React.useCallback(async () => {
+    const targetStore = selectedStore || 'mjm';
+    const [orderSupplierRows, kirimBarangResult] = await Promise.all([
+      fetchPendingOrderSupplier(targetStore),
+      supabase
+        .from('kirim_barang')
+        .select('id, part_number, nama_barang, brand, quantity, status, from_store, created_at, catatan')
+        .eq('from_store', targetStore)
+        .in('status', ['pending', 'approved', 'sent'])
+        .ilike('catatan', '%Request dari Stock Online%')
+        .order('created_at', { ascending: false })
+    ]);
+
+    setRequestedOrderSupplierRowsRaw(orderSupplierRows || []);
+    if (kirimBarangResult.error) {
+      console.error('loadRequestedRows kirim_barang error:', kirimBarangResult.error);
+      setRequestedKirimBarangRowsRaw([]);
+    } else {
+      setRequestedKirimBarangRowsRaw(kirimBarangResult.data || []);
+    }
+  }, [selectedStore]);
+
+  useEffect(() => {
+    loadRequestedRows();
+  }, [loadRequestedRows, orderLoading]);
+
+  useEffect(() => {
+    const handleCartUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent<{ store?: string }>;
+      const targetStore = selectedStore || 'mjm';
+      if (customEvent.detail?.store && customEvent.detail.store !== targetStore) return;
+      loadRequestedRows();
+    };
+    window.addEventListener('barangKosongCartUpdated', handleCartUpdate as EventListener);
+    return () => {
+      window.removeEventListener('barangKosongCartUpdated', handleCartUpdate as EventListener);
+    };
+  }, [loadRequestedRows, selectedStore]);
   // Refs untuk navigasi antar input
   const supplierRefs = React.useRef<Record<string, HTMLInputElement | null>>({});
   const requestStockRefs = React.useRef<Record<string, HTMLInputElement | null>>({});
@@ -195,11 +249,89 @@ const StockOnlineView: React.FC = () => {
   }, [selectedStore]); // Dependensi selectedStore agar view berubah sesuai toko
 
 
-  // Filter by search
+  const requestedRowsForStockOnline = React.useMemo(
+    () =>
+      [
+        ...requestedOrderSupplierRowsRaw.filter(row =>
+          String(row.notes || '').toUpperCase().includes('REQUEST DARI STOCK ONLINE')
+        ),
+        ...requestedKirimBarangRowsRaw.map(row => ({
+          id: row.id,
+          part_number: row.part_number,
+          name: row.nama_barang,
+          brand: row.brand,
+          qty: row.quantity,
+          supplier: extractSupplierFromCatatan(row.catatan),
+          created_at: row.created_at,
+          notes: row.catatan || ''
+        }))
+      ],
+    [requestedKirimBarangRowsRaw, requestedOrderSupplierRowsRaw]
+  );
+
+  const latestMomentByPart = React.useMemo(() => {
+    const map: Record<string, StockMoment> = {};
+    const sortedMoments = [...moments].sort((a, b) => b.date.localeCompare(a.date));
+    sortedMoments.forEach(moment => {
+      if (!map[moment.partNumber]) map[moment.partNumber] = moment;
+    });
+    return map;
+  }, [moments]);
+
+  const requestedStockRows: RequestedStockRow[] = React.useMemo(
+    () =>
+      requestedRowsForStockOnline
+        .map(row => {
+          const partNumber = (row.part_number || '').trim();
+          const latestMoment = latestMomentByPart[partNumber];
+          const requestDateRaw = row.created_at || '';
+          return {
+            id: Number(row.id || 0),
+            partNumber,
+            name: latestMoment?.name || row.name || '-',
+            brand: latestMoment?.brand || '-',
+            stock: typeof latestMoment?.stock === 'number' ? latestMoment.stock : null,
+            qty: Number(row.qty || 0),
+            supplier: row.supplier || '-',
+            requestDate: requestDateRaw ? requestDateRaw.slice(0, 10) : '-',
+            requestDateRaw
+          };
+        })
+        .sort((a, b) => new Date(b.requestDateRaw).getTime() - new Date(a.requestDateRaw).getTime()),
+    [latestMomentByPart, requestedRowsForStockOnline]
+  );
+
+  const requestedPartNumbers = React.useMemo(() => {
+    const partSet = new Set<string>();
+    requestedStockRows.forEach(row => {
+      if (row.partNumber) partSet.add(row.partNumber);
+    });
+    return partSet;
+  }, [requestedStockRows]);
+
+  const latestDates = React.useMemo(() => getLastNDates(LAST_N_DATES), []);
+
+  const latestDateSet = React.useMemo(() => new Set(latestDates), [latestDates]);
+
+  useEffect(() => {
+    setCollapsedByDate(prev => {
+      const next: Record<string, boolean> = {};
+      latestDates.forEach(date => {
+        next[date] = prev[date] ?? false;
+      });
+      return next;
+    });
+  }, [latestDates]);
+
+  // Filter by search + hide items already requested (moved to side table) + keep only latest N dates
   const searchLower = search.trim().toLowerCase();
   const momentsByDate: Record<string, StockMoment[]> = {};
+  latestDates.forEach(date => {
+    momentsByDate[date] = [];
+  });
   moments.forEach(m => {
-    if (!momentsByDate[m.date]) momentsByDate[m.date] = [];
+    if (!latestDateSet.has(m.date)) return;
+    if (requestedPartNumbers.has(m.partNumber)) return;
     if (
       !searchLower ||
       m.partNumber.toLowerCase().includes(searchLower) ||
@@ -210,13 +342,14 @@ const StockOnlineView: React.FC = () => {
     }
   });
 
-  const sortedDates = Object.keys(momentsByDate).sort().reverse();
+  const sortedDates = latestDates;
+  const hasRequestedRows = requestedStockRows.length > 0;
 
   return (
     <div className="p-6 text-gray-100 min-h-screen bg-gradient-to-br from-gray-900 via-gray-950 to-green-950">
       <h2 className="text-2xl font-extrabold mb-6 flex items-center gap-3 tracking-tight">
         <Package size={28} className="text-green-400 drop-shadow" />
-        <span>Stock Online <span className="text-green-300">3 Hari Terakhir</span> <span className="text-xs font-normal text-gray-400">(Stok 2, 1, 0)</span></span>
+        <span>Stock Online <span className="text-green-300">7 Hari Terakhir</span> <span className="text-xs font-normal text-gray-400">(Stok 2, 1, 0)</span></span>
       </h2>
       <div className="mb-6 flex items-center gap-3">
         <Search size={18} className="text-gray-400" />
@@ -233,11 +366,10 @@ const StockOnlineView: React.FC = () => {
           <Loader2 className="animate-spin text-green-400 mr-3" size={24} />
           <span className="text-base font-semibold tracking-wide">Memuat stock online...</span>
         </div>
-      ) : sortedDates.length === 0 ? (
-        <div className="text-gray-400 mt-10 text-center text-base font-medium">Tidak ada barang dengan stok 2, 1, atau 0 dalam 3 hari terakhir.</div>
       ) : (
-        <div className="space-y-10">
-          {sortedDates.map(date => (
+        <div className="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-4 items-start">
+          <div className="space-y-10">
+            {sortedDates.map(date => (
             <section key={date} className="bg-gradient-to-br from-gray-900 via-gray-950 to-green-950 rounded-2xl border border-green-900/40 shadow-2xl p-4">
               <div className="mb-3 flex items-center gap-3 justify-between flex-wrap">
                 <div className="flex items-center gap-3">
@@ -245,13 +377,29 @@ const StockOnlineView: React.FC = () => {
                   <span className="text-xs bg-green-900/60 text-green-200 px-2 py-0.5 rounded-full font-semibold shadow">{momentsByDate[date].length} barang</span>
                 </div>
                 <div className="flex items-center gap-2 mt-2 md:mt-0">
+                  <button
+                    className="flex items-center gap-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-xs text-white rounded shadow transition-all"
+                    title={collapsedByDate[date] ? 'Buka tabel tanggal ini' : 'Minimize tabel tanggal ini'}
+                    onClick={() => {
+                      setCollapsedByDate(prev => ({
+                        ...prev,
+                        [date]: !prev[date]
+                      }));
+                    }}
+                  >
+                    {collapsedByDate[date] ? (
+                      <><ChevronDown size={14} /> Buka</>
+                    ) : (
+                      <><ChevronUp size={14} /> Minimize</>
+                    )}
+                  </button>
                   <button className="flex items-center gap-1 px-2 py-1 bg-green-700 hover:bg-green-800 text-xs text-white rounded shadow transition-all" title="Export Excel">
                     <FileDown size={14} /> Export
                   </button>
                   <button
                     className="flex items-center gap-1 px-2 py-1 bg-blue-700 hover:bg-blue-800 text-xs text-white rounded shadow transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                     title="Order Request"
-                    disabled={orderLoading === date}
+                    disabled={orderLoading === date || momentsByDate[date].length === 0}
                     onClick={async () => {
                       setOrderLoading(date);
                       try {
@@ -302,7 +450,7 @@ const StockOnlineView: React.FC = () => {
                                 brand: item.brand,
                                 application: '',
                                 quantity: item.requestStock || 1,
-                                catatan: `Request dari Stock Online ${date}`,
+                                catatan: `Request dari Stock Online ${date} | Supplier: ${supplierName}`,
                                 requested_by: 'system'
                               });
                               successCount++;
@@ -350,6 +498,11 @@ const StockOnlineView: React.FC = () => {
                   </button>
                 </div>
               </div>
+              {collapsedByDate[date] ? (
+                <div className="border border-green-900/30 rounded-lg bg-gray-900/40 px-3 py-4 text-center text-xs text-gray-400">
+                  Tabel tanggal {date} sedang di-minimize.
+                </div>
+              ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full bg-transparent text-gray-100 text-xs font-normal border border-green-900/40 rounded-xl shadow-xl" style={{borderCollapse:'collapse', fontSize:'12px'}}>
                   <thead className="bg-green-900/80 text-green-100 sticky top-0 z-10 shadow">
@@ -376,12 +529,9 @@ const StockOnlineView: React.FC = () => {
                           key={rowKey}
                           className={`transition-colors ${idx % 2 === 0 ? 'bg-gray-900/70' : 'bg-gray-800/60'} hover:bg-green-900/20 border border-green-900/30`}
                         >
-                          <td className="px-3 py-2 font-mono text-blue-300 border border-green-900/20 font-bold whitespace-nowrap">
-                            {m.partNumber}
-                            {orderedPartsByDate[date]?.has(m.partNumber) && (
-                              <span className="ml-1 text-green-400" title="Sudah diorder"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 13.5L3.5 9.5L4.91 8.09L7.5 10.67L15.09 3.09L16.5 4.5L7.5 13.5Z" fill="currentColor"/></svg></span>
-                            )}
-                          </td>
+	                          <td className="px-3 py-2 font-mono text-blue-300 border border-green-900/20 font-bold whitespace-nowrap">
+	                            {m.partNumber}
+	                          </td>
                           <td className="px-3 py-2 border border-green-900/20">{m.name}</td>
                           <td className="px-3 py-2 border border-green-900/20">{m.brand}</td>
                           <td className={`px-3 py-2 text-center font-extrabold border border-green-900/20 ${m.stock === 0 ? 'text-red-400' : m.stock <= 2 ? 'text-yellow-300' : 'text-green-300'}`}>{m.stock}</td>
@@ -559,15 +709,64 @@ const StockOnlineView: React.FC = () => {
                         </tr>
                       );
                     })}
+	                  </tbody>
+	                </table>
+	              </div>
+              )}
+		            </section>
+		            ))}
+	        </div>
+          <section className="bg-gradient-to-br from-gray-900 via-gray-950 to-blue-950 rounded-2xl border border-blue-900/40 shadow-2xl p-4 xl:sticky xl:top-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-blue-300">Sudah Request</h3>
+              <span className="text-xs bg-blue-900/60 text-blue-200 px-2 py-0.5 rounded-full font-semibold">
+                {requestedStockRows.length} barang
+              </span>
+            </div>
+            {requestedStockRows.length === 0 ? (
+              <div className="text-xs text-gray-400 text-center py-6 border border-blue-900/30 rounded-lg bg-gray-900/40">
+                Belum ada item yang di-order request.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full bg-transparent text-gray-100 text-xs font-normal border border-blue-900/40 rounded-xl shadow-xl" style={{ borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead className="bg-blue-900/80 text-blue-100 sticky top-0 z-10 shadow">
+                    <tr>
+                      <th className="px-2 py-2 border border-blue-800 text-left font-bold tracking-wide">Part Number</th>
+                      <th className="px-2 py-2 border border-blue-800 text-left font-bold tracking-wide">Nama Barang</th>
+                      <th className="px-2 py-2 border border-blue-800 text-left font-bold tracking-wide">Brand</th>
+                      <th className="px-2 py-2 border border-blue-800 text-center font-bold tracking-wide">Stok Saat Ini</th>
+                      <th className="px-2 py-2 border border-blue-800 text-center font-bold tracking-wide">Qty Request</th>
+                      <th className="px-2 py-2 border border-blue-800 text-left font-bold tracking-wide">Supplier</th>
+                      <th className="px-2 py-2 border border-blue-800 text-center font-bold tracking-wide">Tanggal Request</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {requestedStockRows.map((row, idx) => (
+                      <tr
+                        key={`${row.id}-${row.partNumber}-${row.supplier}-${idx}`}
+                        className={`transition-colors ${idx % 2 === 0 ? 'bg-gray-900/70' : 'bg-gray-800/60'} hover:bg-blue-900/20 border border-blue-900/30`}
+                      >
+                        <td className="px-2 py-2 font-mono text-blue-300 border border-blue-900/20 font-bold whitespace-nowrap">{row.partNumber}</td>
+                        <td className="px-2 py-2 border border-blue-900/20">{row.name}</td>
+                        <td className="px-2 py-2 border border-blue-900/20">{row.brand}</td>
+                        <td className="px-2 py-2 text-center border border-blue-900/20 font-bold">
+                          {typeof row.stock === 'number' ? row.stock : '-'}
+                        </td>
+                        <td className="px-2 py-2 text-center border border-blue-900/20 text-green-300 font-bold">{row.qty}</td>
+                        <td className="px-2 py-2 border border-blue-900/20 text-cyan-300">{row.supplier}</td>
+                        <td className="px-2 py-2 text-center border border-blue-900/20 text-gray-300">{row.requestDate}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
-            </section>
-          ))}
+            )}
+          </section>
         </div>
-      )}
-    </div>
-  );
+	      )}
+	    </div>
+	  );
 };
 
 export default StockOnlineView;
