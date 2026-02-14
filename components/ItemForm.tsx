@@ -1,7 +1,7 @@
 // FILE: src/components/ItemForm.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
-import { fetchPriceHistoryBySource, fetchSellPriceHistory, updateInventory, addInventory, saveItemImages } from '../services/supabaseService';
+import { fetchPriceHistoryBySource, fetchSellPriceHistory, updateInventory, addInventory } from '../services/supabaseService';
 import { X, Save, Upload, Loader2, Package, Layers, DollarSign, History, AlertCircle, ArrowLeft, Plus, User, Calendar, Search } from 'lucide-react';
 import { compressImage, formatRupiah } from '../utils';
 import { useStore } from '../context/StoreContext';
@@ -167,8 +167,9 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     !sellPriceSearchQuery || ph.source.toLowerCase().includes(sellPriceSearchQuery.toLowerCase())
   );
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
+    e?.preventDefault?.();
+    if (loading) return;
     setLoading(true);
     setError(null);
 

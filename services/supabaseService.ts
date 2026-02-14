@@ -514,6 +514,26 @@ export const fetchInventoryByPartNumber = async (
 };
 
 // --- HELPER: MAPPING FOTO ---
+const normalizePartNumber = (value: any): string => {
+  return typeof value === 'string' ? value.trim() : '';
+};
+
+const sanitizeImageList = (images: any): string[] => {
+  if (!Array.isArray(images)) return [];
+  return images
+    .filter((url) => typeof url === 'string' && url.trim() !== '')
+    .map((url) => url.trim())
+    .slice(0, 10);
+};
+
+const getPrimaryImage = (item: any): string => {
+  const images = sanitizeImageList(item?.images);
+  if (images.length > 0) return images[0];
+  if (typeof item?.imageUrl === 'string' && item.imageUrl.trim() !== '') return item.imageUrl.trim();
+  if (typeof item?.image_url === 'string' && item.image_url.trim() !== '') return item.image_url.trim();
+  return '';
+};
+
 const mapPhotoRowToImages = (photoRow: any): string[] => {
   if (!photoRow) return [];
   const images: string[] = [];
@@ -521,13 +541,14 @@ const mapPhotoRowToImages = (photoRow: any): string[] => {
     const url = photoRow[`foto_${i}`];
     if (url && typeof url === 'string' && url.trim() !== '') images.push(url);
   }
-  return images;
+  return sanitizeImageList(images);
 };
 
 const mapImagesToPhotoRow = (partNumber: string, images: string[]) => {
-  const row: any = { part_number: partNumber };
+  const row: any = { part_number: normalizePartNumber(partNumber) || partNumber };
+  const safeImages = sanitizeImageList(images);
   for (let i = 1; i <= 10; i++) row[`foto_${i}`] = null;
-  images.forEach((url, index) => {
+  safeImages.forEach((url, index) => {
     if (index < 10) row[`foto_${index + 1}`] = url;
   });
   return row;
@@ -538,7 +559,10 @@ const mapItemFromDB = (item: any, photoData?: any): InventoryItem => {
   const pk = item.part_number || item.partNumber || '';
   
   const imagesFromTable = photoData ? mapPhotoRowToImages(photoData) : [];
-  const finalImages = imagesFromTable;
+  const fallbackImage = typeof item.image_url === 'string' && item.image_url.trim() !== ''
+    ? item.image_url.trim()
+    : '';
+  const finalImages = imagesFromTable.length > 0 ? imagesFromTable : (fallbackImage ? [fallbackImage] : []);
 
   return {
     ...item,
@@ -711,26 +735,148 @@ const fetchLatestPricesForItems = async (items: any[], store?: string | null): P
 
 const fetchPhotosForItems = async (items: any[]) => {
   if (!items || items.length === 0) return {};
-  const partNumbers = items.map(i => i.part_number || i.partNumber).filter(Boolean);
+  const partNumbers = Array.from(new Set(
+    items
+      .map(i => normalizePartNumber(i.part_number || i.partNumber))
+      .filter(Boolean)
+  ));
   if (partNumbers.length === 0) return {};
   try {
-    const { data } = await supabase.from('foto').select('*').in('part_number', partNumbers);
+    const { data, error } = await supabase.from('foto').select('*').in('part_number', partNumbers);
+    if (error) {
+      console.error('fetchPhotosForItems Error:', error);
+      return {};
+    }
     const photoMap: Record<string, any> = {};
-    (data || []).forEach((row: any) => { if (row.part_number) photoMap[row.part_number] = row; });
+    (data || []).forEach((row: any) => {
+      if (!row.part_number) return;
+      const rawKey = row.part_number;
+      const normalizedKey = normalizePartNumber(row.part_number);
+      photoMap[rawKey] = row;
+      if (normalizedKey) photoMap[normalizedKey] = row;
+    });
     return photoMap;
-  } catch (e) { return {}; }
+  } catch (e) {
+    console.error('fetchPhotosForItems Exception:', e);
+    return {};
+  }
 };
 
-const savePhotosToTable = async (partNumber: string, images: string[]) => {
-  if (!partNumber) return;
+const getPhotoRowByPartNumber = (photoMap: Record<string, any>, partNumber: string): any => {
+  if (!partNumber) return undefined;
+  return photoMap[partNumber] || photoMap[normalizePartNumber(partNumber)];
+};
+
+const isMissingOnConflictConstraintError = (error: any): boolean => {
+  const message = (error?.message || '').toLowerCase();
+  return error?.code === '42P10' || message.includes('no unique or exclusion constraint');
+};
+
+const upsertFotoRowByPartNumber = async (partNumber: string, payload: Record<string, any>): Promise<{ success: boolean; error?: any }> => {
+  const normalizedPartNumber = normalizePartNumber(partNumber);
+  if (!normalizedPartNumber) {
+    return { success: false, error: new Error('part_number kosong') };
+  }
+
+  const finalPayload = { ...payload, part_number: normalizedPartNumber };
+
+  const { error: upsertError } = await supabase
+    .from('foto')
+    .upsert(finalPayload, { onConflict: 'part_number' });
+
+  if (!upsertError) return { success: true };
+  if (!isMissingOnConflictConstraintError(upsertError)) return { success: false, error: upsertError };
+
+  // Fallback when DB has no UNIQUE/EXCLUSION constraint on part_number:
+  // try update first, if no row then insert.
+  const { data: updatedRows, error: updateError } = await supabase
+    .from('foto')
+    .update(finalPayload)
+    .eq('part_number', normalizedPartNumber)
+    .select('id')
+    .limit(1);
+
+  if (updateError) return { success: false, error: updateError };
+  if ((updatedRows || []).length > 0) return { success: true };
+
+  const { error: insertError } = await supabase
+    .from('foto')
+    .insert(finalPayload);
+
+  if (!insertError) return { success: true };
+
+  // Handle race condition (row inserted by another request between update and insert).
+  const isDuplicateKey = insertError.code === '23505' || /duplicate key/i.test(insertError.message || '');
+  if (isDuplicateKey) {
+    const { error: retryUpdateError } = await supabase
+      .from('foto')
+      .update(finalPayload)
+      .eq('part_number', normalizedPartNumber);
+    if (!retryUpdateError) return { success: true };
+    return { success: false, error: retryUpdateError };
+  }
+
+  return { success: false, error: insertError };
+};
+
+const savePhotosToTable = async (partNumber: string, images: string[]): Promise<boolean> => {
+  const normalizedPartNumber = normalizePartNumber(partNumber);
+  if (!normalizedPartNumber) return false;
+  const safeImages = sanitizeImageList(images);
   try {
-    if (!images || images.length === 0) {
-      await supabase.from('foto').delete().eq('part_number', partNumber);
-      return;
+    if (safeImages.length === 0) {
+      const { error: deleteError } = await supabase
+        .from('foto')
+        .delete()
+        .eq('part_number', normalizedPartNumber);
+      if (deleteError) {
+        console.error('Error deleting photos:', deleteError);
+        return false;
+      }
+      return true;
     }
-    const photoPayload = mapImagesToPhotoRow(partNumber, images);
-    await supabase.from('foto').upsert(photoPayload, { onConflict: 'part_number' });
-  } catch (e) { console.error('Error saving photos:', e); }
+    const photoPayload = mapImagesToPhotoRow(normalizedPartNumber, safeImages);
+    const upsertResult = await upsertFotoRowByPartNumber(normalizedPartNumber, photoPayload);
+    const upsertError = upsertResult.success ? null : upsertResult.error;
+
+    // Fallback for older schemas that only have foto_1.
+    if (upsertError && /foto_\d+/i.test(upsertError.message || '')) {
+      const fallbackPayload = { part_number: normalizedPartNumber, foto_1: safeImages[0] || null };
+      const fallbackResult = await upsertFotoRowByPartNumber(normalizedPartNumber, fallbackPayload);
+      const fallbackError = fallbackResult.success ? null : fallbackResult.error;
+      if (fallbackError) {
+        console.error('Error saving photos (fallback):', fallbackError);
+        return false;
+      }
+      return true;
+    }
+
+    if (upsertError) {
+      console.error('Error saving photos:', upsertError);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('Error saving photos:', e);
+    return false;
+  }
+};
+
+const syncBaseImageUrl = async (table: string, partNumber: string, imageUrl: string): Promise<void> => {
+  const normalizedPartNumber = normalizePartNumber(partNumber);
+  if (!table || !normalizedPartNumber) return;
+  const { error } = await supabase
+    .from(table)
+    .update({ image_url: imageUrl || '' })
+    .eq('part_number', normalizedPartNumber);
+
+  if (!error) return;
+  const errorMessage = (error.message || '').toLowerCase();
+  if (errorMessage.includes('image_url')) {
+    console.warn(`[syncBaseImageUrl] Kolom image_url tidak ditemukan di ${table}.`);
+    return;
+  }
+  console.error('[syncBaseImageUrl] Error:', error);
 };
 
 // ============================================================================
@@ -913,17 +1059,37 @@ export const insertFotoBatch = async (
   }
 
   try {
+    // Keep original fast-path behavior (bulk upsert).
     const { data, error } = await supabase
       .from('foto')
       .upsert(rows, { onConflict: 'part_number' })
       .select();
 
-    if (error) {
+    if (!error) {
+      return { success: true, inserted: data?.length || 0 };
+    }
+
+    // Fallback only for databases that miss UNIQUE constraint on part_number.
+    if (!isMissingOnConflictConstraintError(error)) {
       console.error('insertFotoBatch Error:', error);
       return { success: false, error: error.message };
     }
 
-    return { success: true, inserted: data?.length || 0 };
+    let inserted = 0;
+    for (const row of rows) {
+      const normalizedPartNumber = normalizePartNumber(row.part_number);
+      if (!normalizedPartNumber) continue;
+      const { success, error } = await upsertFotoRowByPartNumber(normalizedPartNumber, {
+        ...row,
+        part_number: normalizedPartNumber
+      });
+      if (!success) {
+        console.error('insertFotoBatch Error:', error);
+        return { success: false, error: error?.message || 'Gagal simpan foto batch' };
+      }
+      inserted += 1;
+    }
+    return { success: true, inserted };
   } catch (err: any) {
     console.error('insertFotoBatch Exception:', err);
     return { success: false, error: err.message };
@@ -1119,19 +1285,11 @@ export const updateFotoLinkSku = async (
 
       // Insert/upsert to foto table
       const fotoPayload = { part_number: sku, ...fotoFields };
-      let { error: fotoError } = await supabase
-        .from('foto')
-        .upsert(fotoPayload, { onConflict: 'part_number' });
+      const upsertResult = await upsertFotoRowByPartNumber(sku, fotoPayload);
+      const fotoError = upsertResult.success ? null : upsertResult.error;
 
       if (fotoError) {
-        console.warn(`Upsert to foto failed for ${sku}, trying delete+insert:`, fotoError.message);
-        await supabase.from('foto').delete().eq('part_number', sku);
-        const { error: insertError } = await supabase.from('foto').insert(fotoPayload);
-        if (insertError) {
-          console.warn(`Insert to foto also failed for ${sku}:`, insertError.message);
-        } else {
-          console.log('Successfully inserted foto for:', sku);
-        }
+        console.warn(`Upsert to foto failed for ${sku}:`, fotoError.message || fotoError);
       } else {
         console.log('Successfully upserted foto for:', sku);
       }
@@ -1226,7 +1384,7 @@ export const searchInventoryWithAlias = async (
     const priceMap = await fetchLatestPricesForItems(allItems, store);
 
     return allItems.map(item => {
-      const mapped = mapItemFromDB(item, photoMap[item.part_number]);
+      const mapped = mapItemFromDB(item, getPhotoRowByPartNumber(photoMap, item.part_number));
       const lookupKey = (item.part_number || '').trim();
       if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga;
       return mapped;
@@ -1250,7 +1408,7 @@ export const fetchInventory = async (store?: string | null): Promise<InventoryIt
   const costPriceMap = await fetchLatestCostPricesForItems(items, store);
 
   return items.map(item => {
-    const mapped = mapItemFromDB(item, photoMap[item.part_number]);
+    const mapped = mapItemFromDB(item, getPhotoRowByPartNumber(photoMap, item.part_number));
     const lookupKey = (item.part_number || '').trim();
     if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga;
     if (costPriceMap[lookupKey]) mapped.costPrice = costPriceMap[lookupKey].harga_satuan;
@@ -1285,7 +1443,7 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
 
   return { 
     data: items.map(item => {
-      const mapped = mapItemFromDB(item, photoMap[item.part_number]);
+      const mapped = mapItemFromDB(item, getPhotoRowByPartNumber(photoMap, item.part_number));
       const lookupKey = (item.part_number || '').trim();
       if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga;
       if (costPriceMap[lookupKey]) mapped.costPrice = costPriceMap[lookupKey].harga_satuan;
@@ -1366,7 +1524,7 @@ export const fetchInventoryAllFiltered = async (store: string | null, filters?: 
   const costPriceMap = await fetchLatestCostPricesForItems(items, store);
 
   return items.map(item => {
-    const mapped = mapItemFromDB(item, photoMap[item.part_number]);
+    const mapped = mapItemFromDB(item, getPhotoRowByPartNumber(photoMap, item.part_number));
     const lookupKey = (item.part_number || '').trim();
     if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga;
     if (costPriceMap[lookupKey]) mapped.costPrice = costPriceMap[lookupKey].harga_satuan;
@@ -1386,7 +1544,14 @@ export const addInventory = async (data: InventoryFormData, store?: string | nul
     console.error(`Gagal Tambah: ${error.message}`);
     return null;
   }
-  if (data.partNumber) await savePhotosToTable(data.partNumber, data.images);
+  if (data.partNumber) {
+    const primaryImage = getPrimaryImage(data);
+    const imagesToSave = sanitizeImageList(data.images);
+    await Promise.all([
+      savePhotosToTable(data.partNumber, imagesToSave.length > 0 ? imagesToSave : (primaryImage ? [primaryImage] : [])),
+      syncBaseImageUrl(table, data.partNumber, primaryImage)
+    ]);
+  }
   return data.partNumber;
 };
 
@@ -1404,7 +1569,12 @@ export const updateInventory = async (arg1: any, arg2?: any, arg3?: any): Promis
   const { error } = await supabase.from(table).update(mapItemToDB(item)).eq('part_number', pk);
   if (error) { alert(`Gagal Update Stok: ${error.message}`); return null; }
 
-  await savePhotosToTable(pk, item.images || []);
+  const primaryImage = getPrimaryImage(item);
+  const imagesToSave = sanitizeImageList(item.images);
+  await Promise.all([
+    savePhotosToTable(pk, imagesToSave.length > 0 ? imagesToSave : (primaryImage ? [primaryImage] : [])),
+    syncBaseImageUrl(table, pk, primaryImage)
+  ]);
 
   // 2. Update Harga Jual di list_harga_jual (pusat)
   if (item.price !== undefined && item.price >= 0) {
@@ -1493,7 +1663,7 @@ export const getItemByPartNumber = async (partNumber: string, store?: string | n
   const photoMap = await fetchPhotosForItems([data]);
   const priceMap = await fetchLatestPricesForItems([data], store);
   
-  const mapped = mapItemFromDB(data, photoMap[data.part_number]);
+  const mapped = mapItemFromDB(data, getPhotoRowByPartNumber(photoMap, data.part_number));
   const lookupKey = (data.part_number || '').trim();
   if (priceMap[lookupKey]) {
       mapped.price = priceMap[lookupKey].harga;
@@ -1631,7 +1801,7 @@ export const fetchShopItems = async (
     const priceMap = await fetchLatestPricesForItems(items, store);
 
     const mappedItems = items.map(item => {
-      const baseItem = mapItemFromDB(item, photoMap[item.part_number]);
+      const baseItem = mapItemFromDB(item, getPhotoRowByPartNumber(photoMap, item.part_number));
       const lookupKey = (item.part_number || '').trim();
       const latestPrice = priceMap[lookupKey];
       return {
