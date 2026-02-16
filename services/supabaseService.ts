@@ -538,6 +538,8 @@ interface CompleteOrderSupplierRequestPayload {
   costPrice?: number;
   supplier?: string;
   completedBy?: string;
+  tempo?: string;
+  ecommerce?: string;
 }
 
 const getOrderSupplierTargetTables = (store: 'mjm' | 'bjw') => {
@@ -557,6 +559,8 @@ export const completeOrderSupplierRequest = async (
   const safeName = (payload.name || '').trim();
   const safeBrand = (payload.brand || '').trim();
   const completedAt = getWIBDate().toISOString();
+  const logTempo = (payload.tempo || '').trim() || 'CASH';
+  const logEcommerce = (payload.ecommerce || '').trim() || '-';
 
   if (!Number.isFinite(payload.orderId) || payload.orderId <= 0) {
     return { success: false, msg: 'ID order_supplier tidak valid.' };
@@ -640,8 +644,8 @@ export const completeOrderSupplierRequest = async (
       harga_satuan: safeCostPrice,
       harga_total: safeCostPrice * safeQty,
       customer: (payload.supplier || '').trim() || 'ORDER SUPPLIER',
-      tempo: 'ORDER SUPPLIER',
-      ecommerce: payload.completedBy ? `STOCK ONLINE (${payload.completedBy})` : 'STOCK ONLINE',
+      tempo: logTempo,
+      ecommerce: logEcommerce,
       created_at: completedAt
     }]);
 

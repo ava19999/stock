@@ -138,6 +138,10 @@ const normalizePartNumber = (value: string): string => {
   return (value || '').trim().toUpperCase().replace(/\s+/g, ' ');
 };
 
+const buildRequestedStockKey = (store: 'mjm' | 'bjw', partNumber: string): string => {
+  return `${store}::${normalizePartNumber(partNumber)}`;
+};
+
 const formatIDR = (value: number): string => {
   const safe = Math.max(0, Math.floor(Number(value || 0)));
   return `Rp ${safe.toLocaleString('id-ID')}`;
@@ -243,6 +247,7 @@ const StockOnlineView: React.FC = () => {
   const [collapsedByDate, setCollapsedByDate] = useState<Record<string, boolean>>({});
   const [requestedOrderSupplierRowsRaw, setRequestedOrderSupplierRowsRaw] = useState<any[]>([]);
   const [requestedKirimBarangRowsRaw, setRequestedKirimBarangRowsRaw] = useState<any[]>([]);
+  const [requestedCurrentStockMap, setRequestedCurrentStockMap] = useState<Record<string, number>>({});
   const [requestedRowEditState, setRequestedRowEditState] = useState<Record<string, { editing: boolean; qty: number; costPrice: number }>>({});
   const [requestedRowActionLoading, setRequestedRowActionLoading] = useState<string | null>(null);
   const emitBarangKosongCartSync = React.useCallback(() => {
@@ -258,7 +263,6 @@ const StockOnlineView: React.FC = () => {
         .select('id, part_number, nama_barang, brand, quantity, status, from_store, to_store, created_at, catatan')
         .eq('to_store', targetStore)
         .in('status', ['pending', 'approved', 'sent'])
-        .ilike('catatan', '%Request dari Stock Online%')
         .order('created_at', { ascending: false })
     ]);
 
@@ -484,7 +488,8 @@ const StockOnlineView: React.FC = () => {
       [
         ...requestedOrderSupplierRowsRaw
           .filter(row =>
-            String(row.notes || '').toUpperCase().includes('REQUEST DARI STOCK ONLINE')
+            String(row.notes || '').toUpperCase().includes('REQUEST DARI STOCK ONLINE') &&
+            !String(row.notes || '').toUpperCase().includes('[KIRIM_BARANG_ID:')
           )
           .map(row => ({
             source: 'order_supplier' as const,
@@ -518,11 +523,90 @@ const StockOnlineView: React.FC = () => {
     [requestedKirimBarangRowsRaw, requestedOrderSupplierRowsRaw]
   );
 
+  const requestedPartNumbersByStore = React.useMemo(() => {
+    const partNumbers = {
+      mjm: new Set<string>(),
+      bjw: new Set<string>()
+    };
+
+    requestedRowsForStockOnline.forEach(row => {
+      const partNumber = (row.part_number || '').trim();
+      if (!partNumber) return;
+      const store: 'mjm' | 'bjw' = row.request_store === 'bjw' ? 'bjw' : 'mjm';
+      partNumbers[store].add(partNumber);
+    });
+
+    return {
+      mjm: Array.from(partNumbers.mjm),
+      bjw: Array.from(partNumbers.bjw)
+    };
+  }, [requestedRowsForStockOnline]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadRequestedCurrentStock = async () => {
+      const nextStockMap: Record<string, number> = {};
+      const chunkSize = 200;
+
+      const fetchStoreStock = async (store: 'mjm' | 'bjw', partNumbers: string[]) => {
+        if (partNumbers.length === 0) return;
+        const table = store === 'bjw' ? 'base_bjw' : 'base_mjm';
+
+        for (let i = 0; i < partNumbers.length; i += chunkSize) {
+          const chunk = partNumbers.slice(i, i + chunkSize);
+          const { data, error } = await supabase
+            .from(table)
+            .select('part_number, quantity')
+            .in('part_number', chunk);
+
+          if (error) {
+            console.error(`loadRequestedCurrentStock ${table} error:`, error);
+            continue;
+          }
+
+          (data || []).forEach((row: any) => {
+            const key = buildRequestedStockKey(store, row.part_number || '');
+            nextStockMap[key] = Number(row.quantity || 0);
+          });
+        }
+      };
+
+      await Promise.all([
+        fetchStoreStock('mjm', requestedPartNumbersByStore.mjm),
+        fetchStoreStock('bjw', requestedPartNumbersByStore.bjw)
+      ]);
+
+      // Part number yang tidak ada di base dianggap 0 agar tampilan tidak '-'.
+      requestedRowsForStockOnline.forEach(row => {
+        const partNumber = (row.part_number || '').trim();
+        if (!partNumber) return;
+        const store: 'mjm' | 'bjw' = row.request_store === 'bjw' ? 'bjw' : 'mjm';
+        const key = buildRequestedStockKey(store, partNumber);
+        if (!Object.prototype.hasOwnProperty.call(nextStockMap, key)) {
+          nextStockMap[key] = 0;
+        }
+      });
+
+      if (isMounted) {
+        setRequestedCurrentStockMap(nextStockMap);
+      }
+    };
+
+    loadRequestedCurrentStock();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [requestedPartNumbersByStore, requestedRowsForStockOnline]);
+
   const latestMomentByPart = React.useMemo(() => {
     const map: Record<string, StockMoment> = {};
     const sortedMoments = [...moments].sort((a, b) => b.date.localeCompare(a.date));
     sortedMoments.forEach(moment => {
-      if (!map[moment.partNumber]) map[moment.partNumber] = moment;
+      const normalizedPartNumber = normalizePartNumber(moment.partNumber || '');
+      if (!normalizedPartNumber) return;
+      if (!map[normalizedPartNumber]) map[normalizedPartNumber] = moment;
     });
     return map;
   }, [moments]);
@@ -532,7 +616,12 @@ const StockOnlineView: React.FC = () => {
       requestedRowsForStockOnline
         .map(row => {
           const partNumber = (row.part_number || '').trim();
-          const latestMoment = latestMomentByPart[partNumber];
+          const normalizedPartNumber = normalizePartNumber(partNumber);
+          const latestMoment = latestMomentByPart[normalizedPartNumber];
+          const requestStore: 'mjm' | 'bjw' = row.request_store === 'bjw' ? 'bjw' : 'mjm';
+          const stockKey = buildRequestedStockKey(requestStore, partNumber);
+          const hasStockInBase = Object.prototype.hasOwnProperty.call(requestedCurrentStockMap, stockKey);
+          const stockFromBase = hasStockInBase ? Number(requestedCurrentStockMap[stockKey] || 0) : null;
           const requestDateRaw = row.created_at || '';
           const fallbackPriceFromLatestMoment = Number(latestMoment?.supplier?.lastPrice || 0);
           const resolvedCostPrice = resolveSupplierCostPrice(
@@ -545,21 +634,21 @@ const StockOnlineView: React.FC = () => {
             id: String(row.id || ''),
             partNumber,
             name: latestMoment?.name || row.name || '-',
-            brand: latestMoment?.brand || '-',
-            stock: typeof latestMoment?.stock === 'number' ? latestMoment.stock : null,
+            brand: latestMoment?.brand || row.brand || '-',
+            stock: stockFromBase ?? (typeof latestMoment?.stock === 'number' ? latestMoment.stock : 0),
             qty: Number(row.qty || 0),
             costPrice: resolvedCostPrice,
             supplier: row.supplier || '-',
             requestDate: requestDateRaw ? requestDateRaw.slice(0, 10) : '-',
             requestDateRaw,
-            requestStore: row.request_store === 'bjw' ? 'bjw' : 'mjm',
+            requestStore,
             status: String(row.status || '').toLowerCase(),
             notes: String(row.notes || '')
           };
         })
         .filter(row => row.id !== '' && row.partNumber !== '')
         .sort((a, b) => new Date(b.requestDateRaw).getTime() - new Date(a.requestDateRaw).getTime()),
-    [latestMomentByPart, requestedRowsForStockOnline, resolveSupplierCostPrice]
+    [latestMomentByPart, requestedCurrentStockMap, requestedRowsForStockOnline, resolveSupplierCostPrice]
   );
 
   const requestedPartNumbers = React.useMemo(() => {
