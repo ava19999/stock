@@ -7,7 +7,7 @@ import { supabase } from '../../services/supabaseClient';
 import { Loader2, Package, Search, FileDown, ShoppingCart, ChevronDown, ChevronUp, Pencil, Trash2, CheckCircle2, Save, XCircle } from 'lucide-react';
 import { fetchUniqueSuppliersFromBarangKosong } from '../../services/supplierService';
 import { fetchLatestSuppliersForParts } from '../../services/lastSupplierService';
-import { fetchPendingOrderSupplier } from '../../services/supabaseService';
+import { completeOrderSupplierRequest, fetchPendingOrderSupplier } from '../../services/supabaseService';
 
 
 interface SupplierInfo {
@@ -218,13 +218,14 @@ const extractSupplierFromCatatan = (catatan: string | null | undefined): string 
   return 'MJM / IMPORTIR MJM';
 };
 
-const getBaseTableByStore = (store: 'mjm' | 'bjw') => {
-  return store === 'bjw' ? 'base_bjw' : 'base_mjm';
-};
-
 const canEditOrDeleteKirimBarang = (status: string): boolean => {
   const normalized = (status || '').toLowerCase();
   return normalized === 'pending' || normalized === 'approved';
+};
+
+const canMutateOrderSupplier = (status: string): boolean => {
+  const normalized = (status || '').toLowerCase();
+  return normalized === 'pending' || normalized === 'ordered';
 };
 
 
@@ -251,7 +252,7 @@ const StockOnlineView: React.FC = () => {
   const loadRequestedRows = React.useCallback(async () => {
     const targetStore = selectedStore || 'mjm';
     const [orderSupplierRows, kirimBarangResult] = await Promise.all([
-      fetchPendingOrderSupplier(targetStore),
+      fetchPendingOrderSupplier(targetStore, undefined, { statuses: ['PENDING', 'ORDERED'] }),
       supabase
         .from('kirim_barang')
         .select('id, part_number, nama_barang, brand, quantity, status, from_store, to_store, created_at, catatan')
@@ -584,63 +585,12 @@ const StockOnlineView: React.FC = () => {
     });
   }, [getRequestedRowKey, requestedStockRows]);
 
-  const applyStockToRequestStore = React.useCallback(async (row: RequestedStockRow): Promise<{ success: boolean; msg?: string }> => {
-    const partNumber = (row.partNumber || '').trim();
-    const qty = Math.floor(Number(row.qty || 0));
-    if (!partNumber) return { success: false, msg: 'Part number kosong.' };
-    if (qty <= 0) return { success: false, msg: 'Qty harus lebih dari 0.' };
-
-    const targetTable = getBaseTableByStore(row.requestStore);
-    const { data: existingItem, error: fetchError } = await supabase
-      .from(targetTable)
-      .select('part_number, quantity')
-      .ilike('part_number', partNumber)
-      .limit(1)
-      .maybeSingle();
-
-    if (fetchError) {
-      console.error('applyStockToRequestStore fetch error:', fetchError);
-      return { success: false, msg: fetchError.message };
-    }
-
-    if (existingItem) {
-      const newQty = Number(existingItem.quantity || 0) + qty;
-      const { error: updateError } = await supabase
-        .from(targetTable)
-        .update({ quantity: newQty })
-        .eq('part_number', existingItem.part_number);
-
-      if (updateError) {
-        console.error('applyStockToRequestStore update error:', updateError);
-        return { success: false, msg: updateError.message };
-      }
-
-      return { success: true };
-    }
-
-    const { error: insertError } = await supabase
-      .from(targetTable)
-      .insert({
-        part_number: partNumber,
-        name: row.name || partNumber,
-        brand: row.brand || '',
-        application: '',
-        quantity: qty,
-        shelf: '-'
-      });
-
-    if (insertError) {
-      console.error('applyStockToRequestStore insert error:', insertError);
-      return { success: false, msg: insertError.message };
-    }
-
-    return { success: true };
-  }, []);
-
   const handleDeleteRequestedRow = React.useCallback(async (row: RequestedStockRow) => {
     const rowKey = getRequestedRowKey(row);
     const actionKey = `${rowKey}:delete`;
-    const canMutate = row.source === 'order_supplier' || canEditOrDeleteKirimBarang(row.status);
+    const canMutate = row.source === 'order_supplier'
+      ? canMutateOrderSupplier(row.status)
+      : canEditOrDeleteKirimBarang(row.status);
     if (!canMutate) {
       alert('Item dengan status ini tidak bisa dihapus dari tabel Sudah Request.');
       return;
@@ -658,7 +608,7 @@ const StockOnlineView: React.FC = () => {
           .from('order_supplier')
           .delete()
           .eq('id', orderId)
-          .eq('status', 'PENDING');
+          .in('status', ['PENDING', 'ORDERED']);
         if (error) throw error;
       } else {
         const { error } = await supabase
@@ -708,7 +658,9 @@ const StockOnlineView: React.FC = () => {
     const editState = requestedRowEditState[rowKey];
     const nextQty = Math.max(0, Math.floor(Number(editState?.qty || 0)));
     const nextCostPrice = Math.max(0, Math.floor(Number(editState?.costPrice || 0)));
-    const canMutate = row.source === 'order_supplier' || canEditOrDeleteKirimBarang(row.status);
+    const canMutate = row.source === 'order_supplier'
+      ? canMutateOrderSupplier(row.status)
+      : canEditOrDeleteKirimBarang(row.status);
 
     if (!canMutate) {
       alert('Item dengan status ini tidak bisa diedit qty/harga modal.');
@@ -729,7 +681,7 @@ const StockOnlineView: React.FC = () => {
           .from('order_supplier')
           .update({ qty: nextQty, price: nextCostPrice })
           .eq('id', orderId)
-          .eq('status', 'PENDING');
+          .in('status', ['PENDING', 'ORDERED']);
         if (error) throw error;
       } else {
         const updatedCatatan = upsertCostPriceInCatatan(row.notes, row.supplier, nextCostPrice);
@@ -771,19 +723,26 @@ const StockOnlineView: React.FC = () => {
 
     setRequestedRowActionLoading(actionKey);
     try {
+      let successMsg = 'Request selesai. Stok base toko peminta sudah ditambahkan.';
       if (row.source === 'order_supplier') {
         const orderId = Number(row.id);
         if (!Number.isFinite(orderId)) throw new Error('ID order_supplier tidak valid.');
 
-        const stockResult = await applyStockToRequestStore(row);
-        if (!stockResult.success) throw new Error(stockResult.msg || 'Gagal menambah stok.');
-
-        const { error: doneError } = await supabase
-          .from('order_supplier')
-          .update({ status: 'DONE' })
-          .eq('id', orderId)
-          .eq('status', 'PENDING');
-        if (doneError) throw doneError;
+        const completeResult = await completeOrderSupplierRequest({
+          orderId,
+          store: row.requestStore,
+          partNumber: row.partNumber,
+          name: row.name,
+          brand: row.brand,
+          qty: row.qty,
+          costPrice: row.costPrice,
+          supplier: row.supplier,
+          completedBy: userName || 'system'
+        });
+        if (!completeResult.success) {
+          throw new Error(completeResult.msg || 'Gagal menyelesaikan request supplier.');
+        }
+        successMsg = completeResult.msg || successMsg;
       } else {
         const { receiveKirimBarang } = await import('../../services/kirimBarangService');
         const result = await receiveKirimBarang(row.id, userName || 'system');
@@ -792,14 +751,14 @@ const StockOnlineView: React.FC = () => {
 
       await loadRequestedRows();
       emitBarangKosongCartSync();
-      alert('Request selesai. Stok base toko peminta sudah ditambahkan.');
+      alert(successMsg);
     } catch (error: any) {
       console.error('handleCompleteRequestedRow Error:', error);
       alert(`Gagal menyelesaikan request: ${error?.message || 'Unknown error'}`);
     } finally {
       setRequestedRowActionLoading(null);
     }
-  }, [applyStockToRequestStore, emitBarangKosongCartSync, getRequestedRowKey, loadRequestedRows, requestedRowEditState, userName]);
+  }, [emitBarangKosongCartSync, getRequestedRowKey, loadRequestedRows, requestedRowEditState, userName]);
 
   const latestDates = React.useMemo(() => getLastNDates(LAST_N_DATES), []);
 
@@ -1265,7 +1224,9 @@ const StockOnlineView: React.FC = () => {
                         costPrice: Math.max(0, Math.floor(Number(row.costPrice || 0)))
                       };
                       const isEditing = editState.editing;
-                      const canMutate = row.source === 'order_supplier' || canEditOrDeleteKirimBarang(row.status);
+                      const canMutate = row.source === 'order_supplier'
+                        ? canMutateOrderSupplier(row.status)
+                        : canEditOrDeleteKirimBarang(row.status);
                       const isSaving = requestedRowActionLoading === `${rowKey}:save`;
                       const isDeleting = requestedRowActionLoading === `${rowKey}:delete`;
                       const isCompleting = requestedRowActionLoading === `${rowKey}:done`;

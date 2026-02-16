@@ -11,6 +11,7 @@ import { supabase } from '../../services/supabaseClient';
 import {
   deletePendingOrderSupplier,
   fetchPendingOrderSupplier,
+  markOrderSupplierAsOrdered,
   setPendingOrderSupplierQty
 } from '../../services/supabaseService';
 
@@ -2083,9 +2084,36 @@ export const BarangKosongView: React.FC = () => {
         .insert(orderItems);
       
       if (itemsError) throw itemsError;
-      // Pending order_supplier TETAP dipertahankan setelah Buat PO.
-      // Data hanya hilang jika dihapus/diubah dari keranjang atau dari tabel Sudah Request.
-      setToast({ msg: `PO untuk ${currentSupplier} berhasil disimpan. Data request tetap di keranjang.`, type: 'success' });
+
+      const pendingPartNumbers = supplierItems
+        .filter(item => item.is_pending_order_supplier)
+        .map(item => (item.part_number || '').trim())
+        .filter(Boolean);
+
+      let statusSyncWarning = '';
+      if (pendingPartNumbers.length > 0) {
+        const statusResult = await markOrderSupplierAsOrdered(
+          selectedStore || 'mjm',
+          currentSupplier,
+          pendingPartNumbers
+        );
+        if (!statusResult.success) {
+          statusSyncWarning = statusResult.msg || 'Gagal ubah status request ke ORDERED';
+        }
+      }
+
+      if (statusSyncWarning) {
+        setToast({
+          msg: `PO untuk ${currentSupplier} tersimpan, tapi sinkron status request gagal: ${statusSyncWarning}`,
+          type: 'error'
+        });
+      } else {
+        setToast({
+          msg: `PO untuk ${currentSupplier} berhasil disimpan. Status request menjadi ORDERED.`,
+          type: 'success'
+        });
+      }
+
       await syncCartFromStorageAndPending(false);
       setShowPOPreview(false);
       setCurrentSupplier('');

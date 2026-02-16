@@ -335,14 +335,29 @@ export const fetchOrderSupplier = async (
 
 export const fetchPendingOrderSupplier = async (
   store: string,
-  supplier?: string
+  supplier?: string,
+  options?: { statuses?: string[] }
 ): Promise<any[]> => {
   if (!store) return [];
+  const normalizedStatuses = Array.from(
+    new Set(
+      (options?.statuses && options.statuses.length > 0 ? options.statuses : ['PENDING'])
+        .map(status => (status || '').trim().toUpperCase())
+        .filter(Boolean)
+    )
+  );
+
   let query = supabase
     .from('order_supplier')
     .select('*')
-    .eq('store', store)
-    .eq('status', 'PENDING');
+    .eq('store', store);
+
+  if (normalizedStatuses.length === 1) {
+    query = query.eq('status', normalizedStatuses[0]);
+  } else {
+    query = query.in('status', normalizedStatuses);
+  }
+
   if (supplier) query = query.eq('supplier', supplier);
   const { data, error } = await query.order('created_at', { ascending: false });
   if (error) {
@@ -463,6 +478,217 @@ export const deletePendingOrderSupplier = async (
   } catch (e: any) {
     console.error('deletePendingOrderSupplier Error:', e);
     return false;
+  }
+};
+
+export const markOrderSupplierAsOrdered = async (
+  store: string,
+  supplier: string,
+  partNumbers?: string[]
+): Promise<{ success: boolean; updatedCount: number; msg: string }> => {
+  if (!store || !supplier) {
+    return { success: false, updatedCount: 0, msg: 'Store/supplier tidak valid' };
+  }
+
+  const normalizedPartNumbers = Array.from(
+    new Set(
+      (partNumbers || [])
+        .map(partNumber => (partNumber || '').trim())
+        .filter(Boolean)
+    )
+  );
+
+  try {
+    let query = supabase
+      .from('order_supplier')
+      .update({ status: 'ORDERED' })
+      .eq('store', store)
+      .eq('supplier', supplier)
+      .eq('status', 'PENDING');
+
+    if (normalizedPartNumbers.length > 0) {
+      query = query.in('part_number', normalizedPartNumbers);
+    }
+
+    const { data, error } = await query.select('id');
+    if (error) throw error;
+
+    return {
+      success: true,
+      updatedCount: data?.length || 0,
+      msg: `Status order_supplier diupdate ke ORDERED (${data?.length || 0} baris).`
+    };
+  } catch (e: any) {
+    console.error('markOrderSupplierAsOrdered Error:', e);
+    return {
+      success: false,
+      updatedCount: 0,
+      msg: e?.message || 'Gagal update status order_supplier'
+    };
+  }
+};
+
+interface CompleteOrderSupplierRequestPayload {
+  orderId: number;
+  store: 'mjm' | 'bjw';
+  partNumber: string;
+  name?: string;
+  brand?: string;
+  qty: number;
+  costPrice?: number;
+  supplier?: string;
+  completedBy?: string;
+}
+
+const getOrderSupplierTargetTables = (store: 'mjm' | 'bjw') => {
+  if (store === 'bjw') {
+    return { baseTable: 'base_bjw', barangMasukTable: 'barang_masuk_bjw' };
+  }
+  return { baseTable: 'base_mjm', barangMasukTable: 'barang_masuk_mjm' };
+};
+
+export const completeOrderSupplierRequest = async (
+  payload: CompleteOrderSupplierRequestPayload
+): Promise<{ success: boolean; msg: string }> => {
+  const safePartNumber = (payload.partNumber || '').trim();
+  const safeQty = Math.max(0, Math.floor(Number(payload.qty || 0)));
+  const safeCostPrice = Math.max(0, Math.floor(Number(payload.costPrice || 0)));
+  const safeStore: 'mjm' | 'bjw' = payload.store === 'bjw' ? 'bjw' : 'mjm';
+  const safeName = (payload.name || '').trim();
+  const safeBrand = (payload.brand || '').trim();
+  const completedAt = getWIBDate().toISOString();
+
+  if (!Number.isFinite(payload.orderId) || payload.orderId <= 0) {
+    return { success: false, msg: 'ID order_supplier tidak valid.' };
+  }
+  if (!safePartNumber) {
+    return { success: false, msg: 'Part number kosong.' };
+  }
+  if (safeQty <= 0) {
+    return { success: false, msg: 'Qty harus lebih dari 0.' };
+  }
+
+  const { baseTable, barangMasukTable } = getOrderSupplierTargetTables(safeStore);
+
+  try {
+    const { data: activeRequest, error: activeRequestError } = await supabase
+      .from('order_supplier')
+      .select('id')
+      .eq('id', payload.orderId)
+      .eq('store', safeStore)
+      .in('status', ['PENDING', 'ORDERED'])
+      .maybeSingle();
+    if (activeRequestError) {
+      throw new Error(`Gagal cek status request: ${activeRequestError.message}`);
+    }
+    if (!activeRequest) {
+      return { success: false, msg: 'Request tidak ditemukan atau sudah diproses.' };
+    }
+
+    const { data: existingItem, error: fetchError } = await supabase
+      .from(baseTable)
+      .select('part_number, name, brand, application, shelf, quantity')
+      .ilike('part_number', safePartNumber)
+      .limit(1)
+      .maybeSingle();
+    if (fetchError) throw new Error(`Gagal baca stok: ${fetchError.message}`);
+
+    const hadExistingItem = Boolean(existingItem);
+    const previousQty = Number(existingItem?.quantity || 0);
+    let finalQty = safeQty;
+    let finalPartNumber = safePartNumber;
+    let finalName = safeName || safePartNumber;
+    let finalBrand = safeBrand;
+    let finalApplication = '';
+    let finalShelf = '-';
+
+    if (existingItem) {
+      finalQty = previousQty + safeQty;
+      finalPartNumber = existingItem.part_number || safePartNumber;
+      finalName = existingItem.name || finalName;
+      finalBrand = existingItem.brand || finalBrand;
+      finalApplication = existingItem.application || '';
+      finalShelf = existingItem.shelf || '-';
+
+      const { error: updateError } = await supabase
+        .from(baseTable)
+        .update({ quantity: finalQty })
+        .eq('part_number', finalPartNumber);
+      if (updateError) throw new Error(`Gagal menambah stok: ${updateError.message}`);
+    } else {
+      const { error: insertError } = await supabase
+        .from(baseTable)
+        .insert({
+          part_number: safePartNumber,
+          name: finalName,
+          brand: finalBrand,
+          application: '',
+          quantity: safeQty,
+          shelf: '-'
+        });
+      if (insertError) throw new Error(`Gagal menambah stok baru: ${insertError.message}`);
+    }
+
+    const { error: logError } = await supabase.from(barangMasukTable).insert([{
+      part_number: finalPartNumber,
+      nama_barang: finalName,
+      brand: finalBrand,
+      application: finalApplication,
+      rak: finalShelf,
+      qty_masuk: safeQty,
+      stok_akhir: finalQty,
+      harga_satuan: safeCostPrice,
+      harga_total: safeCostPrice * safeQty,
+      customer: (payload.supplier || '').trim() || 'ORDER SUPPLIER',
+      tempo: 'ORDER SUPPLIER',
+      ecommerce: payload.completedBy ? `STOCK ONLINE (${payload.completedBy})` : 'STOCK ONLINE',
+      created_at: completedAt
+    }]);
+
+    if (logError) {
+      // Best effort rollback stok jika log barang_masuk gagal.
+      if (hadExistingItem) {
+        await supabase
+          .from(baseTable)
+          .update({ quantity: previousQty })
+          .eq('part_number', finalPartNumber);
+      } else {
+        await supabase
+          .from(baseTable)
+          .delete()
+          .eq('part_number', finalPartNumber);
+      }
+      throw new Error(`Gagal simpan log barang_masuk: ${logError.message}`);
+    }
+
+    const { data: markedRows, error: markError } = await supabase
+      .from('order_supplier')
+      .update({ status: 'RECEIVED' })
+      .eq('id', payload.orderId)
+      .in('status', ['PENDING', 'ORDERED'])
+      .select('id');
+    if (markError) throw new Error(`Gagal update status request: ${markError.message}`);
+    if (!markedRows || markedRows.length === 0) {
+      return { success: false, msg: 'Request tidak ditemukan atau status sudah diproses.' };
+    }
+
+    const { error: deleteError } = await supabase
+      .from('order_supplier')
+      .delete()
+      .eq('id', payload.orderId)
+      .eq('status', 'RECEIVED');
+    if (deleteError) {
+      console.error('completeOrderSupplierRequest delete error:', deleteError);
+      return {
+        success: true,
+        msg: `Request selesai, stok sudah bertambah, tetapi baris order_supplier gagal dihapus: ${deleteError.message}`
+      };
+    }
+
+    return { success: true, msg: 'Request selesai. Stok bertambah dan data request dihapus.' };
+  } catch (e: any) {
+    console.error('completeOrderSupplierRequest Error:', e);
+    return { success: false, msg: e?.message || 'Gagal menyelesaikan request supplier' };
   }
 };
 
