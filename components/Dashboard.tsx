@@ -2,13 +2,21 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { InventoryItem, Order, StockHistory } from '../types';
 // Pastikan import ini sesuai
-import { fetchInventoryPaginated, fetchInventoryStats, fetchInventoryAllFiltered, fetchSearchSuggestions } from '../services/supabaseService';
+import {
+  fetchInventoryPaginated,
+  fetchInventoryStats,
+  fetchInventoryAllFiltered,
+  fetchSearchSuggestions,
+  InventoryBatchInsertResult
+} from '../services/supabaseService';
 import { ItemForm } from './ItemForm';
+import { InventoryBatchAddModal } from './InventoryBatchAddModal';
 import { DashboardStats } from './DashboardStats';
 import { DashboardFilterBar } from './DashboardFilterBar';
 import { InventoryList } from './InventoryList';
 import { GlobalHistoryModal } from './GlobalHistoryModal';
 import { ItemHistoryModal } from './ItemHistoryModal';
+import { AssetProfitModal } from './AssetProfitModal';
 import { useStore } from '../context/StoreContext';
 
 interface DashboardProps {
@@ -52,12 +60,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   
   // Data States
   const [stats, setStats] = useState({ totalItems: 0, totalStock: 0, totalAsset: 0, todayIn: 0, todayOut: 0 });
-  const [showHistoryDetail, setShowHistoryDetail] = useState<'in' | 'out' | null>(null);
+  const [showHistoryDetail, setShowHistoryDetail] = useState<'in' | 'out' | 'asset' | null>(null);
   const [selectedItemHistory, setSelectedItemHistory] = useState<InventoryItem | null>(null);
   
   // Form States
   const [showItemForm, setShowItemForm] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | undefined>(undefined);
+  const [showBatchForm, setShowBatchForm] = useState(false);
+  
+  // Cache Key Helper
+  const getDashCacheKey = (key: string) => `dash_cache_${selectedStore || 'unknown'}_${key}`;
 
   // --- EFFECTS ---
   useEffect(() => {
@@ -77,7 +89,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // --- DATA LOADING (BAGIAN YANG DIPERBAIKI) ---
   const loadData = useCallback(async () => {
-    setLoading(true);
+    let hasCachedData = false;
     // Kita bungkus filter jadi satu objek
     const filters = {
       partNumber: debouncedPartNumber,
@@ -86,7 +98,30 @@ export const Dashboard: React.FC<DashboardProps> = ({
       app: debouncedApp,
       type: filterType
     };
+
+    // Cek apakah ini tampilan default (Halaman 1, tanpa filter)
+    const isDefaultView = page === 1 && !debouncedPartNumber && !debouncedName && !debouncedBrand && !debouncedApp && filterType === 'all' && priceSort === 'none';
+
+    // 1. LOAD CACHE (Hanya untuk default view agar cepat)
+    if (isDefaultView && selectedStore) {
+      try {
+        const cachedList = localStorage.getItem(getDashCacheKey('list_default'));
+        if (cachedList) {
+          const parsed = JSON.parse(cachedList);
+          if (parsed && Array.isArray(parsed.data)) {
+             setLocalItems(parsed.data);
+             setTotalPages(Math.ceil((parsed.total || 0) / 50));
+             hasCachedData = parsed.data.length > 0;
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Jika cache ada, tampilkan dulu agar tidak menunggu fetch selesai.
+    setLoading(!hasCachedData);
+
     try {
+      // 2. FETCH DATA
       // If price sorting is active, fetch all data
       if (priceSort !== 'none') {
         // PERBAIKAN: Kirim store dulu, baru filters
@@ -103,6 +138,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
         // Gunakan result.total dari service baru (sebelumnya mungkin result.count)
         const totalCount = result.total || 0;
         setTotalPages(Math.ceil(totalCount / 50));
+        
+        // 3. SAVE CACHE (Jika default view)
+        if (isDefaultView && selectedStore) {
+          localStorage.setItem(getDashCacheKey('list_default'), JSON.stringify(result));
+        }
       }
     } catch (error) {
       console.error("Gagal memuat data dashboard:", error);
@@ -111,6 +151,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [page, debouncedPartNumber, debouncedName, filterType, debouncedBrand, debouncedApp, priceSort, selectedStore]);
 
   const loadStats = useCallback(async () => {
+    // 1. LOAD CACHE STATS
+    if (selectedStore) {
+      try {
+        const cachedStats = localStorage.getItem(getDashCacheKey('stats'));
+        if (cachedStats) setStats(JSON.parse(cachedStats));
+      } catch(e) {}
+    }
+
+    // 2. FETCH STATS
     // fetchInventoryStats sekarang sudah menghitung semua: totalItems, totalStock, totalAsset, todayIn, todayOut
     const invStats = await fetchInventoryStats(selectedStore);
     setStats({
@@ -120,6 +169,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
       todayIn: invStats.todayIn || 0,
       todayOut: invStats.todayOut || 0
     });
+
+    // 3. SAVE CACHE STATS
+    if (selectedStore) {
+      localStorage.setItem(getDashCacheKey('stats'), JSON.stringify(invStats));
+    }
   }, [selectedStore]);
 
   useEffect(() => { loadData(); }, [loadData, refreshTrigger]);
@@ -178,6 +232,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
           loadData(); 
           loadStats();
       }
+  };
+
+  const handleBatchSaveSuccess = (result: InventoryBatchInsertResult) => {
+    const lines = [
+      `Simpan batch selesai.`,
+      `Berhasil: ${result.inserted}`,
+      `Sudah ada (skip): ${result.skippedExisting}`,
+      `Duplikat di input (skip): ${result.skippedDuplicateInput}`,
+      `Baris invalid (skip): ${result.skippedInvalid}`,
+      `Baris kosong (skip): ${result.skippedEmpty}`
+    ];
+    if (result.errors.length > 0) {
+      lines.push(`Error: ${result.errors.slice(0, 3).join(' | ')}`);
+    }
+    alert(lines.join('\n'));
+    setShowBatchForm(false);
+    loadData();
+    loadStats();
   };
 
   // --- Search Suggestions from Database ---
@@ -245,6 +317,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {showItemForm && ( 
         <ItemForm initialData={editingItem} onCancel={() => setShowItemForm(false)} onSuccess={handleFormSuccess} /> 
       )}
+      {showBatchForm && (
+        <InventoryBatchAddModal
+          onClose={() => setShowBatchForm(false)}
+          onSaved={handleBatchSaveSuccess}
+        />
+      )}
 
       {/* 1. STATS SECTION */}
       <DashboardStats stats={stats} onShowDetail={setShowHistoryDetail} />
@@ -259,6 +337,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         viewMode={viewMode} setViewMode={setViewMode}
         priceSort={priceSort} setPriceSort={setPriceSort}
         onAddNew={handleAddNewClick}
+        onAddBatch={() => setShowBatchForm(true)}
       />
 
       {/* 3. INVENTORY LIST */}
@@ -278,8 +357,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* 4. MODALS */}
-      {showHistoryDetail && (
+      {(showHistoryDetail === 'in' || showHistoryDetail === 'out') && (
         <GlobalHistoryModal type={showHistoryDetail} onClose={() => setShowHistoryDetail(null)} />
+      )}
+
+      {showHistoryDetail === 'asset' && (
+        <AssetProfitModal onClose={() => setShowHistoryDetail(null)} />
       )}
 
       {selectedItemHistory && (

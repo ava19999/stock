@@ -4,9 +4,10 @@ import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import { useStore } from '../context/StoreContext';
 import { 
-  fetchOfflineOrders, fetchSoldItems, fetchReturItems,
+  fetchOfflineOrders, fetchReturItems, fetchSoldItemsProgressive,
   processOfflineOrderItem, updateOfflineOrder, fetchInventory, createReturFromSold, updateReturStatus,
-  fetchDistinctEcommerce, deleteBarangLog, updateSoldItemPrice
+  deleteBarangLog, updateSoldItemPrice, updateSoldItemDate, updateSoldItemQty, updateSoldItemKodeToko, updateSoldItemTempo,
+  fetchSalesOrders, processSalesOrderItem, fetchSalesPaidItems
 } from '../services/supabaseService';
 import { OfflineOrderRow, SoldItemRow, ReturRow, CartItem } from '../types';
 import { ReceiptModal } from './shop/ReceiptModal';
@@ -15,6 +16,19 @@ import {
   ChevronDown, ChevronUp, Layers, User, Pencil, Save, XCircle, Trash2, ChevronLeft, ChevronRight,
   PackageX, RotateCw, ArrowLeftRight, Package, Hash, ShoppingBag, Copy, Printer
 } from 'lucide-react';
+
+interface SoldGroup {
+  id: string;
+  customer: string;
+  resi: string;
+  ecommerce: string;
+  tempo: string;
+  toko: string;
+  date: string;
+  items: SoldItemRow[];
+  totalQty: number;
+  totalAmount: number;
+}
 
 // Toast Component Sederhana
 const Toast = ({ msg, type, onClose }: any) => (
@@ -48,11 +62,133 @@ const getEcommerceColor = (ecommerce: string) => {
   }
 };
 
+const formatReceiptDate = (dateStr: string): string => {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr || '-';
+  return date.toLocaleDateString('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
+
+const terbilangRupiah = (value: number): string => {
+  if (!Number.isFinite(value) || value < 0) return '';
+  const satuan = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
+
+  const toWords = (n: number): string => {
+    if (n < 12) return satuan[n];
+    if (n < 20) return `${satuan[n - 10]} belas`;
+    if (n < 100) return `${toWords(Math.floor(n / 10))} puluh ${toWords(n % 10)}`;
+    if (n < 200) return `seratus ${toWords(n - 100)}`;
+    if (n < 1000) return `${toWords(Math.floor(n / 100))} ratus ${toWords(n % 100)}`;
+    if (n < 2000) return `seribu ${toWords(n - 1000)}`;
+    if (n < 1000000) return `${toWords(Math.floor(n / 1000))} ribu ${toWords(n % 1000)}`;
+    if (n < 1000000000) return `${toWords(Math.floor(n / 1000000))} juta ${toWords(n % 1000000)}`;
+    return `${toWords(Math.floor(n / 1000000000))} miliar ${toWords(n % 1000000000)}`;
+  };
+
+  return toWords(Math.floor(value)).replace(/\s+/g, ' ').trim();
+};
+
+const nextReceiptNumber = (storageKey: string): string => {
+  try {
+    const current = parseInt(window.localStorage.getItem(storageKey) || '0', 10) || 0;
+    const next = current + 1;
+    window.localStorage.setItem(storageKey, String(next));
+    return `INV-${String(next).padStart(5, '0')}`;
+  } catch (error) {
+    return `INV-${Date.now()}`;
+  }
+};
+
+const escapeHtml = (value: string): string =>
+  String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const SOLD_KODE_TOKO_OPTIONS = ['MJM', 'BJW', 'LARIS', 'PRAKTIS PART'] as const;
+const SOLD_TEMPO_OPTIONS = ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'] as const;
+const ECOMMERCE_FILTER_OPTIONS = ['OFFLINE', 'TIKTOK', 'SHOPEE', 'RESELLER'] as const;
+
+const normalizeSoldKodeTokoInput = (value: string): string | null => {
+  const normalized = (value || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!normalized) return null;
+  if (normalized === 'PRAKTIS' || normalized === 'PRAKTISPART') return 'PRAKTIS PART';
+  if (SOLD_KODE_TOKO_OPTIONS.includes(normalized as typeof SOLD_KODE_TOKO_OPTIONS[number])) {
+    return normalized;
+  }
+  return null;
+};
+
+const normalizeRupiahValue = (value: unknown): number => {
+  if (value === null || value === undefined || value === '') return 0;
+
+  const parseFinite = (input: string): number => {
+    const parsed = Number(input);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const parseFromString = (rawValue: string): number => {
+    const cleaned = rawValue.replace(/[^\d.,-]/g, '').trim();
+    if (!cleaned) return 0;
+
+    const isNegative = cleaned.startsWith('-');
+    const unsigned = cleaned.replace(/-/g, '');
+    let parsed = 0;
+
+    if (unsigned.includes('.') && unsigned.includes(',')) {
+      const lastDot = unsigned.lastIndexOf('.');
+      const lastComma = unsigned.lastIndexOf(',');
+      const normalized =
+        lastDot > lastComma
+          ? unsigned.replace(/,/g, '')
+          : unsigned.replace(/\./g, '').replace(',', '.');
+      parsed = parseFinite(normalized);
+    } else if (unsigned.includes('.')) {
+      parsed = /^\d{1,3}(\.\d{3})+$/.test(unsigned)
+        ? parseFinite(unsigned.replace(/\./g, ''))
+        : parseFinite(unsigned);
+    } else if (unsigned.includes(',')) {
+      parsed = /^\d{1,3}(,\d{3})+$/.test(unsigned)
+        ? parseFinite(unsigned.replace(/,/g, ''))
+        : parseFinite(unsigned.replace(',', '.'));
+    } else {
+      parsed = parseFinite(unsigned);
+    }
+
+    return isNegative ? -parsed : parsed;
+  };
+
+  if (typeof value === 'string') {
+    return parseFromString(value);
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return 0;
+    if (Number.isInteger(value)) return value;
+
+    const decimalPart = value.toString().split('.')[1] || '';
+    if (decimalPart.length === 3) {
+      return Math.round(value * 1000);
+    }
+
+    return value;
+  }
+
+  const fallback = Number(value);
+  return Number.isFinite(fallback) ? fallback : 0;
+};
+
 // Autocomplete Dropdown with Keyboard Navigation
 interface AutocompleteDropdownProps {
   value: string;
   onChange: (value: string) => void;
-  options: string[];
+  options: Array<{ value: string; secondaryText?: string }>;
   placeholder: string;
   icon: React.ReactNode;
 }
@@ -98,7 +234,7 @@ const AutocompleteDropdown: React.FC<AutocompleteDropdownProps> = ({ value, onCh
       case 'Enter':
         e.preventDefault();
         if (highlightedIndex >= 0 && options[highlightedIndex]) {
-          onChange(options[highlightedIndex]);
+          onChange(options[highlightedIndex].value);
           setIsOpen(false);
           setHighlightedIndex(-1);
         }
@@ -110,8 +246,8 @@ const AutocompleteDropdown: React.FC<AutocompleteDropdownProps> = ({ value, onCh
     }
   };
 
-  const handleSelect = (option: string) => {
-    onChange(option);
+  const handleSelect = (option: { value: string; secondaryText?: string }) => {
+    onChange(option.value);
     setIsOpen(false);
     setHighlightedIndex(-1);
     inputRef.current?.focus();
@@ -143,7 +279,7 @@ const AutocompleteDropdown: React.FC<AutocompleteDropdownProps> = ({ value, onCh
         >
           {options.map((option, index) => (
             <li
-              key={option}
+              key={`${option.value}-${index}`}
               className={`px-4 py-2 text-sm cursor-pointer transition-colors ${
                 index === highlightedIndex
                   ? 'bg-purple-600 text-white'
@@ -153,7 +289,14 @@ const AutocompleteDropdown: React.FC<AutocompleteDropdownProps> = ({ value, onCh
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleSelect(option)}
             >
-              {option}
+              <div className="flex flex-col">
+                <span>{option.value}</span>
+                {option.secondaryText && (
+                  <span className={`text-[11px] ${index === highlightedIndex ? 'text-purple-100' : 'text-gray-400'}`}>
+                    {option.secondaryText}
+                  </span>
+                )}
+              </div>
             </li>
           ))}
         </ul>
@@ -289,28 +432,32 @@ const ReturModal: React.FC<ReturModalProps> = ({ isOpen, item, onClose, onConfir
 
 export const OrderManagement: React.FC = () => {
   const { selectedStore } = useStore();
-  const [activeTab, setActiveTab] = useState<'OFFLINE' | 'TERJUAL' | 'RETUR'>('OFFLINE');
+  const [activeTab, setActiveTab] = useState<'OFFLINE' | 'SALES' | 'TERJUAL' | 'RETUR'>('OFFLINE');
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [customerFilter, setCustomerFilter] = useState('');
   const [partNumberFilter, setPartNumberFilter] = useState('');
   const [ecommerceFilter, setEcommerceFilter] = useState('all');
-  const [ecommerceOptions, setEcommerceOptions] = useState<string[]>([]);
   const [toast, setToast] = useState<{msg: string, type: 'success'|'error'} | null>(null);
   
   // State Grouping
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+  const [selectedSoldGroups, setSelectedSoldGroups] = useState<Set<string>>(new Set());
+  const [salesPartSearchByGroup, setSalesPartSearchByGroup] = useState<Record<string, string>>({});
 
   // State Data
   const [offlineData, setOfflineData] = useState<OfflineOrderRow[]>([]);
+  const [salesData, setSalesData] = useState<OfflineOrderRow[]>([]);
+  const [salesPaidData, setSalesPaidData] = useState<SoldItemRow[]>([]);
   const [soldData, setSoldData] = useState<SoldItemRow[]>([]);
   const [returData, setReturData] = useState<ReturRow[]>([]);
 
   // Pagination for TERJUAL
   const [soldPage, setSoldPage] = useState(1);
   const ITEMS_PER_PAGE = 50;
+  const loadRequestRef = useRef(0);
 
   // Sort options for stock and date
   const [stockSortOrder, setStockSortOrder] = useState<'none' | 'asc' | 'desc'>('none');
@@ -348,6 +495,12 @@ export const OrderManagement: React.FC = () => {
   const [editingSoldItemId, setEditingSoldItemId] = useState<string | null>(null);
   const [editSoldPrice, setEditSoldPrice] = useState<number>(0);
   const [savingSoldPrice, setSavingSoldPrice] = useState(false);
+  const [editingSoldQtyId, setEditingSoldQtyId] = useState<string | null>(null);
+  const [editSoldQty, setEditSoldQty] = useState<number>(0);
+  const [savingSoldQty, setSavingSoldQty] = useState(false);
+  const [editingSoldDateId, setEditingSoldDateId] = useState<string | null>(null);
+  const [editSoldDate, setEditSoldDate] = useState<string>('');
+  const [updatingTempoGroupId, setUpdatingTempoGroupId] = useState<string | null>(null);
 
   // Receipt Modal for Offline Sold Orders
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
@@ -395,35 +548,32 @@ export const OrderManagement: React.FC = () => {
     return map;
   }, [inventoryBjw]);
 
-  // Load inventory langsung saat komponen mount - TANPA CACHE untuk menghindari masalah
+  // Load inventory hanya dari toko aktif agar tidak tercampur antar toko.
   useEffect(() => {
     const loadInventory = async () => {
       setInventoryLoading(true);
       try {
-        console.log('=== LOADING INVENTORY ===');
-        const [invMjm, invBjw] = await Promise.all([
-          fetchInventory('mjm'),
-          fetchInventory('bjw')
-        ]);
-        
-        console.log('MJM items:', invMjm?.length || 0);
-        console.log('BJW items:', invBjw?.length || 0);
-        
-        // Log sample dari setiap toko
-        if (invMjm?.length > 0) {
-          console.log('Sample MJM:', invMjm[0]);
+        if (!selectedStore) {
+          setInventory([]);
+          setInventoryMjm([]);
+          setInventoryBjw([]);
+          return;
         }
-        if (invBjw?.length > 0) {
-          console.log('Sample BJW:', invBjw[0]);
+
+        const activeInventory = await fetchInventory(selectedStore, {
+          includePhotos: false,
+          includePrices: false,
+          includeCostPrices: false
+        });
+        setInventory(activeInventory || []);
+
+        if (selectedStore === 'mjm') {
+          setInventoryMjm(activeInventory || []);
+          setInventoryBjw([]);
+        } else {
+          setInventoryMjm([]);
+          setInventoryBjw(activeInventory || []);
         }
-        
-        // Gabungkan semua
-        const all = [...(invMjm || []), ...(invBjw || [])];
-        console.log('Total inventory:', all.length);
-        
-        setInventory(all);
-        setInventoryMjm(invMjm || []);
-        setInventoryBjw(invBjw || []);
       } catch (err) {
         console.error("Error fetching inventory:", err);
       } finally {
@@ -432,64 +582,184 @@ export const OrderManagement: React.FC = () => {
     };
     
     loadInventory();
-  }, []); // Load sekali saat mount
+  }, [selectedStore]);
+
+  // Dedupe part number agar autocomplete tidak menampilkan item ganda.
+  const inventoryOptions = useMemo(() => {
+    const optionMap = new Map<string, any>();
+    inventory.forEach((item) => {
+      const pn = String(item?.partNumber || '').trim().toUpperCase();
+      if (!pn) return;
+
+      const existing = optionMap.get(pn);
+      if (!existing) {
+        optionMap.set(pn, {
+          ...item,
+          partNumber: pn,
+          quantity: Number(item?.quantity || 0)
+        });
+        return;
+      }
+
+      existing.quantity = Number(existing.quantity || 0) + Number(item?.quantity || 0);
+    });
+
+    return Array.from(optionMap.values()).sort((a, b) => {
+      const aPn = String(a?.partNumber || '');
+      const bPn = String(b?.partNumber || '');
+      return aPn.localeCompare(bPn);
+    });
+  }, [inventory]);
 
   // Update selectedItem when partNumber changes
   useEffect(() => {
     if (!editingId) { setSelectedItem(null); return; }
-    const found = inventory.find((item) => item.partNumber === editForm.partNumber);
+    const found = inventoryOptions.find((item) => item.partNumber === editForm.partNumber);
     setSelectedItem(found || null);
-  }, [editForm.partNumber, inventory, editingId]);
+  }, [editForm.partNumber, inventoryOptions, editingId]);
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({msg, type});
     setTimeout(() => setToast(null), 3000);
   };
 
+  const normalizeOfflineOrderRow = (row: OfflineOrderRow): OfflineOrderRow => ({
+    ...row,
+    quantity: Number((row as any).quantity || 0),
+    harga_satuan: normalizeRupiahValue((row as any).harga_satuan),
+    harga_total: normalizeRupiahValue((row as any).harga_total)
+  });
+
+  const normalizeEcommerceValue = (value: string | null | undefined): string => {
+    const normalized = (value || '').trim().toUpperCase();
+    if (!normalized) return 'OFFLINE';
+    return normalized === 'SHOPPE' ? 'SHOPEE' : normalized;
+  };
+
+  const normalizeSoldItemRow = (row: SoldItemRow): SoldItemRow => {
+    const normalized: any = {
+      ...row,
+      ecommerce: normalizeEcommerceValue((row as any).ecommerce),
+      qty_keluar: Number((row as any).qty_keluar || 0),
+      harga_total: normalizeRupiahValue((row as any).harga_total)
+    };
+
+    if ((row as any).harga_satuan !== undefined) {
+      normalized.harga_satuan = normalizeRupiahValue((row as any).harga_satuan);
+    }
+
+    return normalized as SoldItemRow;
+  };
+
   const loadData = async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
     setLoadingProgress(0);
-    
-    // Start progress animation
-    const progressInterval = setInterval(() => {
-      setLoadingProgress(prev => {
-        if (prev >= 90) return prev; // Stop at 90% until data loads
-        return prev + Math.random() * 15;
-      });
-    }, 200);
+
+    const isSoldTab = activeTab === 'TERJUAL';
+    let progressInterval: ReturnType<typeof setInterval> | null = null;
+
+    // Progress dummy untuk tab selain TERJUAL.
+    if (!isSoldTab) {
+      progressInterval = setInterval(() => {
+        setLoadingProgress(prev => {
+          if (prev >= 90) return prev; // Stop at 90% until data loads
+          return prev + Math.random() * 15;
+        });
+      }, 200);
+    }
     
     try {
-      if (activeTab === 'OFFLINE') setOfflineData(await fetchOfflineOrders(selectedStore));
-      if (activeTab === 'TERJUAL') setSoldData(await fetchSoldItems(selectedStore));
-      if (activeTab === 'RETUR') setReturData(await fetchReturItems(selectedStore));
+      if (activeTab === 'OFFLINE') {
+        const rows = await fetchOfflineOrders(selectedStore);
+        if (requestId !== loadRequestRef.current) return;
+        setOfflineData((rows || []).map(normalizeOfflineOrderRow));
+      }
+      if (activeTab === 'SALES') {
+        const [pendingSales, paidSales] = await Promise.all([
+          fetchSalesOrders(selectedStore),
+          fetchSalesPaidItems(selectedStore)
+        ]);
+        if (requestId !== loadRequestRef.current) return;
+        setSalesData((pendingSales || []).map(normalizeOfflineOrderRow));
+        setSalesPaidData((paidSales || []).map(normalizeSoldItemRow));
+      }
+      if (activeTab === 'TERJUAL') {
+        setSoldData([]);
+        setLoadingProgress(1);
+        let bufferedRows: SoldItemRow[] = [];
+        let lastFlushAt = Date.now();
+
+        const flushBufferedRows = () => {
+          if (bufferedRows.length === 0) return;
+          const batch = bufferedRows;
+          bufferedRows = [];
+          setSoldData(prev => [...prev, ...batch]);
+        };
+
+        await fetchSoldItemsProgressive(selectedStore, ({ chunk, loaded, total }) => {
+          if (requestId !== loadRequestRef.current) return;
+
+          const normalizedChunk = (chunk || []).map(normalizeSoldItemRow);
+          bufferedRows.push(...normalizedChunk);
+
+          const now = Date.now();
+          if (bufferedRows.length >= 1500 || now - lastFlushAt >= 220) {
+            flushBufferedRows();
+            lastFlushAt = now;
+          }
+
+          if (total > 0) {
+            const percent = Math.floor((loaded / total) * 100);
+            setLoadingProgress(Math.min(99, Math.max(1, percent)));
+          } else {
+            setLoadingProgress(prev => Math.min(95, prev + 6));
+          }
+        });
+
+        if (requestId !== loadRequestRef.current) return;
+        flushBufferedRows();
+      }
+      if (activeTab === 'RETUR') {
+        const rows = await fetchReturItems(selectedStore);
+        if (requestId !== loadRequestRef.current) return;
+        setReturData(rows);
+      }
       
       // Complete the progress
-      clearInterval(progressInterval);
+      if (progressInterval) clearInterval(progressInterval);
+      if (requestId !== loadRequestRef.current) return;
       setLoadingProgress(100);
       
       // Reset after animation completes
       setTimeout(() => {
+        if (requestId !== loadRequestRef.current) return;
         setLoading(false);
         setLoadingProgress(0);
-      }, 300);
+      }, 150);
     } catch (e) {
       console.error("Gagal load data:", e);
-      clearInterval(progressInterval);
+      if (progressInterval) clearInterval(progressInterval);
+      if (requestId !== loadRequestRef.current) return;
       setLoading(false);
       setLoadingProgress(0);
     }
   };
 
-  useEffect(() => { loadData(); }, [selectedStore, activeTab]);
-
-  // Load ecommerce options from database
   useEffect(() => {
-    const loadEcommerceOptions = async () => {
-      const options = await fetchDistinctEcommerce(selectedStore);
-      setEcommerceOptions(options);
+    loadData();
+    return () => {
+      // Batalkan commit state dari request lama saat tab/store berubah.
+      loadRequestRef.current += 1;
     };
-    loadEcommerceOptions();
-  }, [selectedStore]);
+  }, [selectedStore, activeTab]);
+
+  // SAFEGUARD: SALES hanya untuk toko BJW
+  useEffect(() => {
+    if (selectedStore !== 'bjw' && activeTab === 'SALES') {
+      setActiveTab('OFFLINE');
+    }
+  }, [selectedStore, activeTab]);
 
   // --- LOGIC GROUPING ---
   const groupedOfflineOrders = useMemo(() => {
@@ -506,8 +776,39 @@ export const OrderManagement: React.FC = () => {
       groups[key].items.push(item);
       groups[key].totalAmount += (Number(item.harga_total) || 0);
     });
-    return Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Urutkan dari yang paling lama (oldest) ke terbaru
+    return Object.values(groups).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [offlineData]);
+
+  // GROUPING SALES DATA (KHUSUS BJW)
+  const groupedSalesOrders = useMemo(() => {
+    const groups: Record<string, { id: string, date: string, customer: string, items: OfflineOrderRow[], totalAmount: number, totalQty: number }> = {};
+    salesData.forEach(item => {
+      const safeDate = (item.tanggal || '').trim();
+      const dateOnlyKey = safeDate.slice(0, 10) || safeDate;
+      const safeCustomer = (item.customer || 'Tanpa Nama').trim() || 'Tanpa Nama';
+      const key = `${dateOnlyKey}__${safeCustomer.toUpperCase()}`;
+      if (!groups[key]) {
+        groups[key] = {
+          id: key,
+          date: dateOnlyKey,
+          customer: safeCustomer,
+          items: [],
+          totalAmount: 0,
+          totalQty: 0
+        };
+      }
+      groups[key].items.push(item);
+      groups[key].totalAmount += (Number(item.harga_total) || 0);
+      groups[key].totalQty += (Number(item.quantity) || 0);
+    });
+
+    return Object.values(groups).sort((a, b) => {
+      const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (dateDiff !== 0) return dateDiff;
+      return a.customer.localeCompare(b.customer, 'id');
+    });
+  }, [salesData]);
 
   // GROUPING SOLD DATA by Customer/Resi
   const groupedSoldData = useMemo(() => {
@@ -528,31 +829,29 @@ export const OrderManagement: React.FC = () => {
       if (partNumberFilter && !(item.part_number || '').toLowerCase().includes(partNumberFilter.toLowerCase())) return false;
       
       // Ecommerce filter
-      if (ecommerceFilter !== 'all' && (item.ecommerce || '').toUpperCase() !== ecommerceFilter.toUpperCase()) return false;
+      const normalizedFilter = normalizeEcommerceValue(ecommerceFilter);
+      if (ecommerceFilter !== 'all' && normalizeEcommerceValue(item.ecommerce) !== normalizedFilter) return false;
       
       return true;
     });
 
-    const groups: Record<string, { 
-      id: string, 
-      customer: string, 
-      resi: string, 
-      ecommerce: string, 
-      tempo: string,
-      toko: string,
-      date: string, 
-      items: SoldItemRow[], 
-      totalQty: number,
-      totalAmount: number 
-    }> = {};
+    const groups: Record<string, SoldGroup> = {};
     
     filtered.forEach(item => {
       const safeCustomer = (item.customer || 'Tanpa Nama').trim();
       const safeResi = (item.resi || '-').trim();
-      const safeEcommerce = (item.ecommerce || 'OFFLINE').trim();
+      const safeEcommerce = normalizeEcommerceValue(item.ecommerce);
+      const safeTempo = (item.tempo || 'CASH').trim();
       const safeToko = (item.kode_toko || '-').trim().toUpperCase();
-      // Group by resi jika ada, kalau tidak by customer + date
-      const key = safeResi !== '-' ? `${safeResi}` : `${safeCustomer}-${item.created_at?.slice(0, 10)}`;
+      const safeCreatedAt = (item.created_at || '').trim();
+      const dateKey = safeCreatedAt ? safeCreatedAt.slice(0, 10) : 'NO_DATE';
+
+      // Group by resi jika ada.
+      // Untuk OFFLINE tanpa resi, group berdasarkan customer + tempo + tanggal (harian),
+      // agar tempo berbeda tidak tercampur, tapi transaksi dengan tempo sama tetap tergabung.
+      const key = safeResi !== '-'
+        ? `${safeResi}`
+        : `${safeCustomer.toUpperCase()}__${safeEcommerce.toUpperCase()}__${safeTempo.toUpperCase()}__${dateKey}`;
       
       if (!groups[key]) {
         groups[key] = {
@@ -560,9 +859,9 @@ export const OrderManagement: React.FC = () => {
           customer: safeCustomer, 
           resi: safeResi, 
           ecommerce: safeEcommerce,
-          tempo: item.tempo || 'CASH',
+          tempo: safeTempo || 'CASH',
           toko: safeToko,
-          date: item.created_at, 
+          date: safeCreatedAt || new Date(0).toISOString(), 
           items: [], 
           totalQty: 0,
           totalAmount: 0
@@ -609,22 +908,65 @@ export const OrderManagement: React.FC = () => {
     const search = customerFilter.toLowerCase();
     const customers = activeTab === 'OFFLINE'
       ? [...new Set(groupedOfflineOrders.map(group => group.customer).filter(Boolean))]
+      : activeTab === 'SALES'
+        ? [
+            ...new Set([
+              ...salesData.map(item => item.customer).filter(Boolean),
+              ...salesPaidData.map(item => item.customer).filter(Boolean)
+            ])
+          ]
       : activeTab === 'RETUR'
         ? [...new Set(returData.map(item => item.customer).filter(Boolean))]
         : [...new Set(soldData.map(item => item.customer).filter(Boolean))];
-    return customers.filter(c => c.toLowerCase().includes(search)).slice(0, 50);
-  }, [activeTab, groupedOfflineOrders, soldData, returData, customerFilter]);
+    return customers
+      .filter(c => c.toLowerCase().includes(search))
+      .slice(0, 50)
+      .map((customer) => ({ value: customer }));
+  }, [activeTab, groupedOfflineOrders, salesData, salesPaidData, soldData, returData, customerFilter]);
 
   const filteredPartNumberOptions = useMemo(() => {
     if (!partNumberFilter || partNumberFilter.length < 1) return [];
     const search = partNumberFilter.toLowerCase();
-    const partNumbers = activeTab === 'OFFLINE'
-      ? [...new Set(offlineData.map(item => item.part_number).filter(Boolean))]
-      : activeTab === 'RETUR'
-        ? [...new Set(returData.map(item => item.part_number).filter(Boolean))]
-        : [...new Set(soldData.map(item => item.part_number).filter(Boolean))];
-    return partNumbers.filter(p => p.toLowerCase().includes(search)).slice(0, 50);
-  }, [activeTab, offlineData, soldData, returData, partNumberFilter]);
+
+    const sourceItems: any[] = activeTab === 'OFFLINE'
+      ? offlineData
+      : activeTab === 'SALES'
+        ? [...salesData, ...salesPaidData]
+        : activeTab === 'RETUR'
+          ? returData
+          : soldData;
+
+    const optionMap = new Map<string, { value: string; application: string }>();
+    sourceItems.forEach((item: any) => {
+      const partNumber = String(item?.part_number || '').trim();
+      if (!partNumber) return;
+
+      const key = partNumber.toUpperCase();
+      const application = String(item?.application || '').trim();
+      const existing = optionMap.get(key);
+
+      if (!existing) {
+        optionMap.set(key, { value: partNumber, application });
+        return;
+      }
+
+      if (!existing.application && application) {
+        existing.application = application;
+      }
+    });
+
+    return Array.from(optionMap.values())
+      .filter((option) => {
+        const pn = option.value.toLowerCase();
+        const ap = option.application.toLowerCase();
+        return pn.includes(search) || ap.includes(search);
+      })
+      .slice(0, 50)
+      .map((option) => ({
+        value: option.value,
+        secondaryText: option.application ? `Aplikasi: ${option.application}` : undefined
+      }));
+  }, [activeTab, offlineData, salesData, salesPaidData, soldData, returData, partNumberFilter]);
 
   // Pagination for grouped sold data
   const paginatedSoldGroups = useMemo(() => {
@@ -632,7 +974,51 @@ export const OrderManagement: React.FC = () => {
     return groupedSoldData.slice(start, start + ITEMS_PER_PAGE);
   }, [groupedSoldData, soldPage]);
 
+  const selectedSoldGroupList = useMemo(
+    () => groupedSoldData.filter(group => selectedSoldGroups.has(group.id)),
+    [groupedSoldData, selectedSoldGroups]
+  );
+
+  const selectedSoldTotalAmount = useMemo(
+    () => selectedSoldGroupList.reduce((sum, group) => sum + (group.totalAmount || 0), 0),
+    [selectedSoldGroupList]
+  );
+
   const soldTotalPages = Math.ceil(groupedSoldData.length / ITEMS_PER_PAGE);
+
+  // Keep TERJUAL pagination stable:
+  // - search/filter/sort should always start from page 1
+  // - data source remains full soldData, only rendered view is paginated
+  useEffect(() => {
+    if (activeTab !== 'TERJUAL') return;
+    setSoldPage(1);
+  }, [
+    activeTab,
+    selectedStore,
+    searchTerm,
+    customerFilter,
+    partNumberFilter,
+    ecommerceFilter,
+    stockSortOrder,
+    dateSortOrder
+  ]);
+
+  // Clamp current page when filtered result shrinks.
+  useEffect(() => {
+    if (activeTab !== 'TERJUAL') return;
+    const maxPage = Math.max(1, Math.ceil(groupedSoldData.length / ITEMS_PER_PAGE));
+    setSoldPage(prev => Math.min(prev, maxPage));
+  }, [activeTab, groupedSoldData.length]);
+
+  useEffect(() => {
+    setSelectedSoldGroups(prev => {
+      if (prev.size === 0) return prev;
+      const validIds = new Set(groupedSoldData.map(group => group.id));
+      const next = new Set(Array.from(prev).filter(id => validIds.has(id)));
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [groupedSoldData]);
 
   // Handle Retur
   const openReturModal = (item: SoldItemRow) => {
@@ -640,24 +1026,56 @@ export const OrderManagement: React.FC = () => {
     setReturModalOpen(true);
   };
 
+  // Hapus item terjual: pilih apakah stok dikembalikan atau tidak.
+  const askDeleteMode = (totalQty: number, itemCount: number = 1): boolean | null => {
+    const targetLabel = itemCount > 1 ? `${itemCount} item` : 'item ini';
+    const choice = window.prompt(
+      `Mode hapus ${targetLabel}:\n` +
+      `1. Hapus + kembalikan stok (+${totalQty} pcs)\n` +
+      `2. Hapus tanpa kembalikan stok\n\n` +
+      `Ketik 1 atau 2 (Cancel untuk batal).`,
+      '1'
+    );
+
+    if (choice === null) return null;
+    const normalized = choice.trim();
+    if (normalized === '' || normalized === '1') return true;
+    if (normalized === '2') return false;
+
+    showToast('Pilihan tidak valid. Ketik 1 atau 2.', 'error');
+    return null;
+  };
+
   // Handle Delete Sold Item
   const handleDeleteSoldItem = async (item: SoldItemRow) => {
-    if (!window.confirm(`Hapus item "${item.name}" dari data penjualan?\n\nStok akan dikembalikan +${item.qty_keluar} pcs.`)) {
+    const restoreStock = askDeleteMode(item.qty_keluar, 1);
+    if (restoreStock === null) {
       return;
     }
+
+    const confirmMsg = restoreStock
+      ? `Hapus item "${item.name}" dari data penjualan?\n\nStok akan dikembalikan +${item.qty_keluar} pcs.`
+      : `Hapus item "${item.name}" dari data penjualan?\n\nStok TIDAK akan dikembalikan.`;
+
+    if (!window.confirm(confirmMsg)) return;
     
     setLoading(true);
     try {
       const success = await deleteBarangLog(
-        parseInt(item.id),
+        item.id,
         'out',
         item.part_number,
         item.qty_keluar,
-        selectedStore
+        selectedStore,
+        restoreStock
       );
       
       if (success) {
-        showToast(`Item "${item.name}" berhasil dihapus, stok +${item.qty_keluar}`);
+        showToast(
+          restoreStock
+            ? `Item "${item.name}" berhasil dihapus, stok +${item.qty_keluar}`
+            : `Item "${item.name}" berhasil dihapus tanpa top up stok`
+        );
         loadData();
       } else {
         showToast('Gagal menghapus item', 'error');
@@ -673,7 +1091,14 @@ export const OrderManagement: React.FC = () => {
     if (items.length === 0) return;
     
     const totalQty = items.reduce((sum, item) => sum + item.qty_keluar, 0);
-    if (!window.confirm(`Hapus SEMUA ${items.length} item dari pesanan ini?\n\nTotal stok yang akan dikembalikan: +${totalQty} pcs`)) {
+    const restoreStock = askDeleteMode(totalQty, items.length);
+    if (restoreStock === null) return;
+
+    const confirmMsg = restoreStock
+      ? `Hapus SEMUA ${items.length} item dari pesanan ini?\n\nTotal stok yang akan dikembalikan: +${totalQty} pcs`
+      : `Hapus SEMUA ${items.length} item dari pesanan ini?\n\nStok TIDAK akan dikembalikan.`;
+
+    if (!window.confirm(confirmMsg)) {
       return;
     }
     
@@ -684,11 +1109,12 @@ export const OrderManagement: React.FC = () => {
     for (const item of items) {
       try {
         const success = await deleteBarangLog(
-          parseInt(item.id),
+          item.id,
           'out',
           item.part_number,
           item.qty_keluar,
-          selectedStore
+          selectedStore,
+          restoreStock
         );
         if (success) successCount++;
         else failCount++;
@@ -700,7 +1126,11 @@ export const OrderManagement: React.FC = () => {
     setLoading(false);
     
     if (failCount === 0) {
-      showToast(`${successCount} item berhasil dihapus, stok +${totalQty}`);
+      showToast(
+        restoreStock
+          ? `${successCount} item berhasil dihapus, stok +${totalQty}`
+          : `${successCount} item berhasil dihapus tanpa top up stok`
+      );
     } else {
       showToast(`${successCount} berhasil, ${failCount} gagal`, failCount > 0 ? 'error' : 'success');
     }
@@ -824,6 +1254,39 @@ export const OrderManagement: React.FC = () => {
     setEditSoldPrice(0);
   };
 
+  // Edit tanggal sold item
+  const startEditSoldDate = (item: SoldItemRow, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSoldDateId(item.id);
+    const d = new Date(item.created_at);
+    const isoLocal = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    setEditSoldDate(isoLocal);
+  };
+
+  const cancelEditSoldDate = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setEditingSoldDateId(null);
+    setEditSoldDate('');
+  };
+
+  const saveEditSoldDate = async (item: SoldItemRow, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!editSoldDate) {
+      showToast('Pilih tanggal terlebih dahulu', 'error');
+      return;
+    }
+    const isoUtc = new Date(editSoldDate).toISOString();
+    const result = await updateSoldItemDate(item.id, isoUtc, selectedStore);
+    if (result.success) {
+      showToast('Tanggal berhasil diupdate!');
+      setEditingSoldDateId(null);
+      setEditSoldDate('');
+      loadData();
+    } else {
+      showToast(result.msg, 'error');
+    }
+  };
+
   const saveEditSoldPrice = async (item: SoldItemRow, e: React.MouseEvent) => {
     e.stopPropagation();
     if (editSoldPrice < 0) {
@@ -842,6 +1305,106 @@ export const OrderManagement: React.FC = () => {
     } else {
       showToast(result.msg, 'error');
     }
+  };
+
+  // Handle Edit Sold Item Qty
+  const startEditSoldQty = (item: SoldItemRow, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSoldQtyId(item.id);
+    setEditSoldQty(Number(item.qty_keluar || 1));
+  };
+
+  const cancelEditSoldQty = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setEditingSoldQtyId(null);
+    setEditSoldQty(0);
+  };
+
+  const saveEditSoldQty = async (item: SoldItemRow, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newQty = Number(editSoldQty);
+
+    if (!Number.isInteger(newQty) || newQty <= 0) {
+      showToast('Qty harus bilangan bulat lebih dari 0', 'error');
+      return;
+    }
+
+    setSavingSoldQty(true);
+    const result = await updateSoldItemQty(item.id, newQty, selectedStore);
+    setSavingSoldQty(false);
+
+    if (result.success) {
+      showToast(result.msg);
+      setEditingSoldQtyId(null);
+      setEditSoldQty(0);
+      loadData();
+    } else {
+      showToast(result.msg, 'error');
+    }
+  };
+
+  const handleEditSoldGroupKodeToko = async (group: SoldGroup, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    const currentKodeToko = (group.toko || '').trim().toUpperCase();
+    const promptValue = window.prompt(
+      `Ganti kode toko untuk transaksi ini (${group.items.length} item).\nPilihan: ${SOLD_KODE_TOKO_OPTIONS.join(', ')}\nMasukkan kode toko baru:`,
+      currentKodeToko || 'MJM'
+    );
+
+    if (promptValue === null) return;
+
+    const nextKodeToko = normalizeSoldKodeTokoInput(promptValue);
+    if (!nextKodeToko) {
+      showToast(`Kode toko tidak valid. Gunakan: ${SOLD_KODE_TOKO_OPTIONS.join(', ')}`, 'error');
+      return;
+    }
+
+    if (nextKodeToko === currentKodeToko) {
+      showToast('Kode toko tidak berubah', 'error');
+      return;
+    }
+
+    setLoading(true);
+    const results = await Promise.all(
+      group.items.map((item) => updateSoldItemKodeToko(item.id, nextKodeToko, selectedStore))
+    );
+    setLoading(false);
+
+    const failed = results.filter((result) => !result.success);
+    if (failed.length > 0) {
+      showToast(failed[0].msg || 'Gagal update kode toko', 'error');
+      return;
+    }
+
+    showToast(`Kode toko transaksi diubah ke ${nextKodeToko}`);
+    loadData();
+  };
+
+  const handleEditSoldGroupTempo = async (group: SoldGroup, nextTempo: string) => {
+    const normalizedTempo = (nextTempo || '').trim().toUpperCase();
+    if (!SOLD_TEMPO_OPTIONS.includes(normalizedTempo as typeof SOLD_TEMPO_OPTIONS[number])) {
+      showToast(`Tempo tidak valid. Pilihan: ${SOLD_TEMPO_OPTIONS.join(', ')}`, 'error');
+      return;
+    }
+
+    const currentTempo = (group.tempo || 'CASH').trim().toUpperCase();
+    if (normalizedTempo === currentTempo) return;
+
+    setUpdatingTempoGroupId(group.id);
+    const results = await Promise.all(
+      group.items.map((item) => updateSoldItemTempo(item.id, normalizedTempo, selectedStore))
+    );
+    setUpdatingTempoGroupId(null);
+
+    const failed = results.filter((result) => !result.success);
+    if (failed.length > 0) {
+      showToast(failed[0].msg || 'Gagal update tempo', 'error');
+      return;
+    }
+
+    showToast(`Tempo transaksi diubah ke ${normalizedTempo}`);
+    loadData();
   };
 
   // --- HANDLERS ---
@@ -870,7 +1433,7 @@ export const OrderManagement: React.FC = () => {
     setLoading(true);
     // Cari nama barang dari inventory jika partNumber valid
     let namaBarang = editForm.partNumber;
-    const found = inventory.find((item) => item.partNumber === editForm.partNumber);
+    const found = inventoryOptions.find((item) => item.partNumber === editForm.partNumber);
     if (found) {
       namaBarang = found.nama_barang || found.name || editForm.partNumber;
     }
@@ -940,6 +1503,60 @@ export const OrderManagement: React.FC = () => {
     loadData();
   };
 
+  // 2.1 SALES HANDLERS (KHUSUS BJW)
+  const handleProcessSalesItem = async (item: OfflineOrderRow, action: 'TERJUAL' | 'KEMBALIKAN') => {
+    const maxQty = Number(item.quantity || 0);
+    if (maxQty <= 0) {
+      showToast('Qty item tidak valid.', 'error');
+      return;
+    }
+
+    const qtyInput = window.prompt(
+      `Masukkan qty untuk ${action === 'TERJUAL' ? 'TERJUAL' : 'KEMBALIKAN'} (max ${maxQty}):`,
+      String(maxQty)
+    );
+    if (qtyInput === null) return;
+
+    const qty = Number(qtyInput);
+    if (!Number.isInteger(qty) || qty <= 0 || qty > maxQty) {
+      showToast(`Qty harus angka bulat 1 sampai ${maxQty}.`, 'error');
+      return;
+    }
+
+    const actionText = action === 'TERJUAL' ? 'Tandai TERJUAL' : 'Kembalikan ke BASE';
+    if (!window.confirm(`${actionText}: ${item.nama_barang} (${item.part_number}) qty ${qty}/${maxQty}?`)) return;
+
+    setLoading(true);
+    const res = await processSalesOrderItem(item, selectedStore, action, qty);
+    setLoading(false);
+
+    if (res.success) {
+      showToast(action === 'TERJUAL' ? `Terjual ${qty} pcs.` : `Dikembalikan ${qty} pcs ke base.`);
+      loadData();
+    } else {
+      showToast(res.msg, 'error');
+    }
+  };
+
+  const handleProcessSalesGroup = async (items: OfflineOrderRow[], action: 'TERJUAL' | 'KEMBALIKAN') => {
+    if (items.length === 0) return;
+
+    const actionText = action === 'TERJUAL' ? 'Tandai TERJUAL semua' : 'Kembalikan semua ke BASE';
+    if (!window.confirm(`${actionText} (${items.length} item)?`)) return;
+
+    setLoading(true);
+    let successCount = 0;
+
+    for (const item of items) {
+      const res = await processSalesOrderItem(item, selectedStore, action);
+      if (res.success) successCount++;
+    }
+
+    setLoading(false);
+    showToast(`${successCount} item Sales berhasil diproses.`);
+    loadData();
+  };
+
   const toggleExpand = (key: string) => {
     setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
   };
@@ -957,6 +1574,18 @@ export const OrderManagement: React.FC = () => {
     });
   };
 
+  const toggleSoldGroupSelection = (groupId: string) => {
+    setSelectedSoldGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  };
+
   // Select/Deselect all groups
   const toggleSelectAll = () => {
     if (selectedGroups.size === filteredGroupedOffline.length) {
@@ -964,6 +1593,14 @@ export const OrderManagement: React.FC = () => {
     } else {
       setSelectedGroups(new Set(filteredGroupedOffline.map(g => g.id)));
     }
+  };
+
+  const toggleSelectAllSold = () => {
+    if (selectedSoldGroupList.length === groupedSoldData.length && groupedSoldData.length > 0) {
+      setSelectedSoldGroups(new Set());
+      return;
+    }
+    setSelectedSoldGroups(new Set(groupedSoldData.map(group => group.id)));
   };
 
   // Bulk ACC all selected groups
@@ -995,7 +1632,176 @@ export const OrderManagement: React.FC = () => {
     loadData();
   };
 
-  const formatRupiah = (val: number) => `Rp ${val.toLocaleString('id-ID')}`;
+  const handlePrintSelectedSoldGroups = () => {
+    if (selectedSoldGroupList.length === 0) {
+      showToast('Pilih minimal 1 transaksi untuk dicetak', 'error');
+      return;
+    }
+
+    const customerKeys = Array.from(
+      new Set(
+        selectedSoldGroupList
+          .map(group => (group.customer || '').trim().toUpperCase())
+          .filter(Boolean)
+      )
+    );
+
+    if (customerKeys.length > 1) {
+      showToast('Pilih transaksi dari 1 customer yang sama untuk cetak tanda terima', 'error');
+      return;
+    }
+
+    const sortedGroups = [...selectedSoldGroupList].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
+    const receiptCustomer = sortedGroups[0]?.customer || 'Customer';
+    const totalAmount = sortedGroups.reduce((sum, group) => sum + (group.totalAmount || 0), 0);
+    const todayStr = new Date().toLocaleDateString('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+    const logoSrc = selectedStore === 'bjw' ? '/assets/bjw-logo.png' : '/assets/mjm-logo.png';
+    const invoiceNo = nextReceiptNumber('soldReceiptCounter');
+    const terbilangText = (terbilangRupiah(totalAmount) || '-').toUpperCase();
+    const formatCurrency = (amount: number) =>
+      new Intl.NumberFormat('id-ID', {
+        style: 'currency',
+        currency: 'IDR',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(amount || 0);
+
+    const rowHtml = sortedGroups.map((group, index) => {
+      const tempoLabel = group.tempo ? ` (${escapeHtml(group.tempo)})` : '';
+      return `<tr>
+        <td class="cell center">${index + 1}</td>
+        <td class="cell">${escapeHtml(formatReceiptDate(group.date))}${tempoLabel}</td>
+        <td class="cell right">${escapeHtml(formatCurrency(group.totalAmount || 0))}</td>
+      </tr>`;
+    });
+
+    const blankRows = Array.from(
+      { length: Math.max(0, 16 - rowHtml.length) },
+      (_, index) => `<tr>
+        <td class="cell center">${rowHtml.length + index + 1}</td>
+        <td class="cell">&nbsp;</td>
+        <td class="cell right">&nbsp;</td>
+      </tr>`
+    );
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Tanda Terima ${escapeHtml(receiptCustomer)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 8mm 10mm 8mm 10mm; }
+    body { font-family: Arial, sans-serif; color: #111; margin: 0; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2px; }
+    .title { font-size: 22px; font-weight: 700; letter-spacing: 0.5px; }
+    .header-left { display: flex; flex-direction: column; gap: 6px; }
+    .meta { line-height: 1.5; font-size: 12px; }
+    .table { width: 100%; border-collapse: collapse; margin-top: 2px; }
+    .table th, .table td { border: 1px solid #444; padding: 6px 8px; font-size: 13px; }
+    .table th { background: #f0f0f0; }
+    .cell { font-size: 13px; }
+    .right { text-align: right; }
+    .center { text-align: center; }
+    .total-row { font-weight: 700; background: #f5f5f5; }
+    .foot { margin-top: 16px; font-size: 12px; }
+    .signature { margin-top: 36px; font-size: 12px; }
+    .logo { height: 170px; max-height: 180px; }
+    .table-wrapper { position: relative; }
+    .watermark {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-10deg);
+      width: 65%;
+      opacity: 0.18;
+      z-index: 0;
+      pointer-events: none;
+    }
+    .table,
+    .header,
+    .foot,
+    .signature { position: relative; z-index: 1; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <div class="title">TANDA TERIMA</div>
+      <div class="meta">
+        <div><strong>NO</strong>: ${escapeHtml(invoiceNo)}</div>
+        <div><strong>KEPADA</strong>: ${escapeHtml(receiptCustomer)}</div>
+        <div><strong>TGL</strong>: ${escapeHtml(todayStr)}</div>
+      </div>
+    </div>
+    <img src="${logoSrc}" alt="logo" class="logo" />
+  </div>
+  <div class="table-wrapper">
+    <img class="watermark" src="${logoSrc}" alt="watermark" />
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width:40px;">NO</th>
+          <th style="width:180px;">TGL</th>
+          <th>PEMBAYARAN</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${[...rowHtml, ...blankRows].join('')}
+        <tr class="total-row">
+          <td colspan="2">TOTAL PEMBAYARAN</td>
+          <td class="right">${escapeHtml(formatCurrency(totalAmount))}</td>
+        </tr>
+        <tr>
+          <td colspan="3" style="padding-top:8px; padding-bottom:8px;">
+            <strong>TERBILANG:</strong> ${escapeHtml(terbilangText)} RUPIAH
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="foot">
+    PEMBAYARAN DILAKUKAN MELALUI<br/>
+    REK BCA<br/>
+    3701158464<br/>
+    A.N ALAN ARIF MUZAQI
+  </div>
+  <div class="signature">
+    PENERIMA<br/><br/><br/>
+    ____________________________
+  </div>
+  <script>
+    window.onload = function () {
+      setTimeout(function () {
+        window.print();
+      }, 300);
+    };
+  </script>
+</body>
+</html>`;
+
+    const printWindow = window.open('', '_blank', 'width=1024,height=768');
+    if (!printWindow) {
+      showToast('Popup print diblokir browser', 'error');
+      return;
+    }
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+    setSelectedSoldGroups(new Set());
+  };
+
+  const formatRupiah = (val: number | string | null | undefined) => {
+    const normalized = normalizeRupiahValue(val);
+    return `Rp ${normalized.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  };
 
   const filterList = (list: any[]) => {
     if (!searchTerm) return list;
@@ -1052,6 +1858,102 @@ export const OrderManagement: React.FC = () => {
     });
   }, [groupedOfflineOrders, searchTerm, customerFilter, partNumberFilter, ecommerceFilter]);
 
+  const totalOfflineAmount = useMemo(() => {
+    return filteredGroupedOffline.reduce((sum, g) => sum + (g.totalAmount || 0), 0);
+  }, [filteredGroupedOffline]);
+
+  const filteredGroupedSales = useMemo(() => {
+    const lowerSearch = searchTerm.trim().toLowerCase();
+    const lowerCustomerFilter = customerFilter.trim().toLowerCase();
+    const lowerPartNumberFilter = partNumberFilter.trim().toLowerCase();
+    const sourceFilter = ecommerceFilter.trim().toUpperCase();
+
+    return groupedSalesOrders.filter(group => {
+      // Ecommerce filter for SALES tab: only ALL / SALES
+      if (sourceFilter !== 'ALL' && sourceFilter !== 'SALES') return false;
+
+      if (
+        lowerCustomerFilter &&
+        !group.customer.toLowerCase().includes(lowerCustomerFilter)
+      ) {
+        return false;
+      }
+
+      if (
+        lowerPartNumberFilter &&
+        !group.items.some(item => (item.part_number || '').toLowerCase().includes(lowerPartNumberFilter))
+      ) {
+        return false;
+      }
+
+      if (lowerSearch) {
+        const matchGroup =
+          group.customer.toLowerCase().includes(lowerSearch) ||
+          new Date(group.date).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' }).toLowerCase().includes(lowerSearch) ||
+          group.date.toLowerCase().includes(lowerSearch);
+
+        const matchItems = group.items.some(item =>
+          (item.customer || '').toLowerCase().includes(lowerSearch) ||
+          (item.nama_barang || '').toLowerCase().includes(lowerSearch) ||
+          (item.part_number || '').toLowerCase().includes(lowerSearch)
+        );
+
+        if (!matchGroup && !matchItems) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [groupedSalesOrders, searchTerm, customerFilter, partNumberFilter, ecommerceFilter]);
+
+  const filteredSalesPaidData = useMemo(() => {
+    const lowerSearch = searchTerm.trim().toLowerCase();
+    const lowerCustomerFilter = customerFilter.trim().toLowerCase();
+    const lowerPartNumberFilter = partNumberFilter.trim().toLowerCase();
+    const sourceFilter = ecommerceFilter.trim().toUpperCase();
+
+    return salesPaidData.filter(item => {
+      if (sourceFilter !== 'ALL' && sourceFilter !== 'SALES') return false;
+
+      if (lowerCustomerFilter && !(item.customer || '').toLowerCase().includes(lowerCustomerFilter)) return false;
+      if (lowerPartNumberFilter && !(item.part_number || '').toLowerCase().includes(lowerPartNumberFilter)) return false;
+
+      if (lowerSearch) {
+        const dateText = new Date(item.created_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }).toLowerCase();
+        const match =
+          (item.customer || '').toLowerCase().includes(lowerSearch) ||
+          (item.name || '').toLowerCase().includes(lowerSearch) ||
+          (item.part_number || '').toLowerCase().includes(lowerSearch) ||
+          (item.resi || '').toLowerCase().includes(lowerSearch) ||
+          dateText.includes(lowerSearch);
+        if (!match) return false;
+      }
+
+      return true;
+    });
+  }, [salesPaidData, searchTerm, customerFilter, partNumberFilter, ecommerceFilter]);
+
+  const salesPendingTotalAmount = useMemo(
+    () => groupedSalesOrders.reduce((sum, g) => sum + (g.totalAmount || 0), 0),
+    [groupedSalesOrders]
+  );
+
+  const salesPendingTotalQty = useMemo(
+    () => groupedSalesOrders.reduce((sum, g) => sum + (g.totalQty || 0), 0),
+    [groupedSalesOrders]
+  );
+
+  const salesPaidTotalAmount = useMemo(
+    () => salesPaidData.reduce((sum, item) => sum + (Number(item.harga_total) || 0), 0),
+    [salesPaidData]
+  );
+
+  const salesPaidTotalQty = useMemo(
+    () => salesPaidData.reduce((sum, item) => sum + (Number(item.qty_keluar) || 0), 0),
+    [salesPaidData]
+  );
+
   return (
     <div className="bg-gray-800 m-4 rounded-2xl border border-gray-700 shadow-xl flex flex-col text-gray-100" style={{ height: 'calc(100vh - 120px)' }}>
       {toast && <Toast msg={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
@@ -1084,6 +1986,7 @@ export const OrderManagement: React.FC = () => {
       <div className="flex border-b border-gray-700 bg-gray-900/50 overflow-x-auto flex-shrink-0">
         {[
           { id: 'OFFLINE', label: 'OFFLINE (Kasir)', icon: ClipboardList, color: 'text-amber-400' },
+          ...(selectedStore === 'bjw' ? [{ id: 'SALES', label: 'SALES', icon: ShoppingBag, color: 'text-cyan-400' }] : []),
           { id: 'TERJUAL', label: 'SUDAH TERJUAL', icon: CheckCircle, color: 'text-green-400' },
           { id: 'RETUR', label: 'RETUR', icon: RotateCcw, color: 'text-red-400' },
         ].map((tab: any) => (
@@ -1101,6 +2004,7 @@ export const OrderManagement: React.FC = () => {
       {/* SCROLLABLE CONTENT AREA - hanya bagian ini yang scroll */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-gray-900 rounded-b-2xl">
         {/* SEARCH FILTERS - Sticky saat scroll */}
+        {activeTab !== 'SALES' && (
         <div className="sticky top-0 z-30 p-4 bg-gray-900 border-b border-gray-700 shadow-lg backdrop-blur-sm">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
             {/* Customer Search with Keyboard-Navigable Dropdown */}
@@ -1130,7 +2034,7 @@ export const OrderManagement: React.FC = () => {
                 onChange={(e) => setEcommerceFilter(e.target.value)}
               >
                 <option value="all">Semua Sumber</option>
-                {ecommerceOptions.map(ecom => (
+                {ECOMMERCE_FILTER_OPTIONS.map(ecom => (
                   <option key={ecom} value={ecom}>{ecom}</option>
                 ))}
               </select>
@@ -1234,6 +2138,9 @@ export const OrderManagement: React.FC = () => {
                   </span>
                 )}
               </div>
+              <div className="flex items-center gap-4 text-sm font-semibold text-orange-300">
+                <span>Total Offline: {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(totalOfflineAmount)}</span>
+              </div>
               {selectedGroups.size > 0 && (
                 <button 
                   onClick={handleBulkAccSelected}
@@ -1244,7 +2151,44 @@ export const OrderManagement: React.FC = () => {
               )}
             </div>
           )}
+
+          {activeTab === 'TERJUAL' && groupedSoldData.length > 0 && (
+            <div className="bg-gray-800 border border-gray-600 rounded-xl p-3 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mt-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedSoldGroupList.length === groupedSoldData.length && groupedSoldData.length > 0}
+                    onChange={toggleSelectAllSold}
+                    className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-purple-500 focus:ring-purple-500 cursor-pointer"
+                  />
+                  <span className="text-sm font-bold text-gray-300">Pilih Semua Transaksi</span>
+                </label>
+                {selectedSoldGroupList.length > 0 && (
+                  <span className="text-sm text-purple-400 font-bold">
+                    {selectedSoldGroupList.length} dipilih
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                {selectedSoldGroupList.length > 0 && (
+                  <span className="text-sm font-semibold text-orange-300">
+                    Total Dipilih: {formatRupiah(selectedSoldTotalAmount)}
+                  </span>
+                )}
+                <button
+                  onClick={handlePrintSelectedSoldGroups}
+                  disabled={selectedSoldGroupList.length === 0}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-bold transition-colors"
+                >
+                  <Printer size={16} />
+                  Print Tanda Terima
+                </button>
+              </div>
+            </div>
+          )}
         </div>
+        )}
 
         <div className="p-4">
           {/* --- 1. TAB OFFLINE (GROUPED VIEW) --- */}
@@ -1278,6 +2222,23 @@ export const OrderManagement: React.FC = () => {
                           </span>
                           <span className="text-sm font-mono bg-gray-700 px-2 py-0.5 rounded text-gray-300">
                             {new Date(group.date).toLocaleString('id-ID', {timeZone: 'Asia/Jakarta'})}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const newDate = prompt('Ubah tanggal pesanan (YYYY-MM-DD HH:mm):', new Date(group.date).toISOString().slice(0,16).replace('T',' '));
+                                if (!newDate) return;
+                                const iso = new Date(newDate.replace(' ', 'T')).toISOString();
+                                const updates = group.items.map(it => updateSoldItemDate(it.id, iso, selectedStore));
+                                Promise.all(updates).then(() => {
+                                  showToast('Tanggal pesanan diupdate', 'success');
+                                  loadData();
+                                }).catch(() => showToast('Gagal update tanggal', 'error'));
+                              }}
+                              className="ml-2 text-gray-400 hover:text-white"
+                              title="Edit tanggal pesanan"
+                            >
+                              <Pencil size={12}/>
+                            </button>
                           </span>
                           <span className="text-sm bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded border border-blue-800 flex items-center gap-1">
                             <Layers size={14} /> {group.items.length} Item
@@ -1349,7 +2310,7 @@ export const OrderManagement: React.FC = () => {
                                         <label className="text-[10px] text-gray-400">Part Number</label>
                                         <Autocomplete
                                           size="small"
-                                          options={inventory}
+                                          options={inventoryOptions}
                                           getOptionLabel={(option) => option?.partNumber || ''}
                                           filterOptions={(options, { inputValue }) => {
                                             console.log('=== FILTER OPTIONS ===');
@@ -1377,7 +2338,7 @@ export const OrderManagement: React.FC = () => {
                                             console.log('Filtered count:', filtered.length);
                                             return filtered.slice(0, 50);
                                           }}
-                                          value={inventory.find((inv) => inv?.partNumber === editForm.partNumber) || null}
+                                          value={inventoryOptions.find((inv) => inv?.partNumber === editForm.partNumber) || null}
                                           onChange={(_, newValue) => {
                                             setEditForm({ ...editForm, partNumber: newValue ? newValue.partNumber : '' });
                                           }}
@@ -1492,6 +2453,221 @@ export const OrderManagement: React.FC = () => {
           </div>
         )}
 
+        {/* --- 2. TAB SALES (KHUSUS BJW) --- */}
+        {activeTab === 'SALES' && selectedStore === 'bjw' && (
+          <div className="space-y-4">
+            {/* Sales Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="bg-gray-800 border border-cyan-800/50 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">Belum Dibayar (Dibawa Sales)</div>
+                <div className="text-2xl font-bold text-cyan-300">{formatRupiah(salesPendingTotalAmount)}</div>
+                <div className="text-xs text-cyan-200 mt-1">{salesPendingTotalQty} pcs</div>
+              </div>
+              <div className="bg-gray-800 border border-emerald-800/50 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">Sudah Dibayar (Sales)</div>
+                <div className="text-2xl font-bold text-emerald-300">{formatRupiah(salesPaidTotalAmount)}</div>
+                <div className="text-xs text-emerald-200 mt-1">{salesPaidTotalQty} pcs</div>
+              </div>
+              <div className="bg-gray-800 border border-blue-800/50 rounded-xl p-4">
+                <div className="text-xs text-gray-400 mb-1">Item Sudah Dibayar</div>
+                <div className="text-2xl font-bold text-blue-300">{salesPaidData.length}</div>
+                <div className="text-xs text-blue-200 mt-1">Baris transaksi</div>
+              </div>
+            </div>
+
+            {/* Pending Sales Items */}
+            <div className="space-y-3">
+              <div className="text-sm font-bold text-cyan-300">Barang Dibawa Sales / Belum Dibayar</div>
+              {filteredGroupedSales.length === 0 && (
+                <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 text-center text-gray-400 text-sm">
+                  Tidak ada barang Sales pending.
+                </div>
+              )}
+
+              {filteredGroupedSales.map((group) => {
+                const groupKey = `SALES-${group.id}`;
+                const isExpanded = expandedGroups[groupKey] !== false;
+                const localPartSearch = (salesPartSearchByGroup[group.id] || '').trim().toLowerCase();
+                const visibleGroupItems = !localPartSearch
+                  ? group.items
+                  : group.items.filter(item => (item.part_number || '').toLowerCase().includes(localPartSearch));
+
+                return (
+                  <div key={groupKey} className="bg-gray-800 border border-cyan-800/50 rounded-xl overflow-hidden shadow-lg">
+                    <div className="p-3 flex flex-col md:flex-row justify-between gap-3 bg-gray-800">
+                      <div className="flex-1 cursor-pointer select-none" onClick={() => toggleExpand(groupKey)}>
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="text-sm font-bold px-3 py-1 rounded border bg-cyan-900/30 border-cyan-700 text-cyan-300">
+                            SALES CUSTOMER
+                          </span>
+                          <span className="text-sm bg-indigo-900/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-800 flex items-center gap-1">
+                            <User size={14} /> {group.customer}
+                          </span>
+                          <span className="text-sm font-mono bg-gray-700 px-2 py-0.5 rounded text-gray-300">
+                            Tanggal: {new Date(group.date).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' })}
+                          </span>
+                          <span className="text-sm bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded border border-blue-800 flex items-center gap-1">
+                            <Layers size={14} /> {group.items.length} Item
+                          </span>
+                          <span className="text-sm bg-cyan-900/20 text-cyan-300 px-2 py-0.5 rounded border border-cyan-800">
+                            Qty: {group.totalQty}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {isExpanded ? <ChevronUp size={20} className="text-cyan-400"/> : <ChevronDown size={20} className="text-gray-400"/>}
+                          <h3 className="font-extrabold text-xl text-white">
+                            {group.customer} - {new Date(group.date).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' })}
+                          </h3>
+                        </div>
+                        <p className="text-[11px] text-gray-400 ml-7 mt-0.5">
+                          Tanggal ambil/input keluar: {new Date(group.date).toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta' })}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col items-end gap-1 border-t md:border-t-0 border-gray-700 pt-2 md:pt-0">
+                        <div>
+                          <span className="text-gray-400 text-xs mr-2">Total Dibawa:</span>
+                          <span className="text-lg font-bold text-cyan-300">{formatRupiah(group.totalAmount)}</span>
+                        </div>
+                        <div className="flex gap-2 w-full md:w-auto">
+                          <button
+                            onClick={() => handleProcessSalesGroup(group.items, 'KEMBALIKAN')}
+                            className="flex-1 md:flex-none bg-orange-900/20 text-orange-300 px-4 py-2 rounded-lg hover:bg-orange-900/40 border border-orange-900/50 text-sm font-bold flex items-center justify-center gap-2 transition-colors"
+                          >
+                            <RotateCcw size={16}/> KEMBALIKAN SEMUA
+                          </button>
+                          <button
+                            onClick={() => handleProcessSalesGroup(group.items, 'TERJUAL')}
+                            className="flex-1 md:flex-none bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-500 shadow-lg shadow-emerald-900/30 text-sm font-bold flex items-center justify-center gap-2 transition-colors"
+                          >
+                            <Check size={16}/> TERJUALKAN SEMUA
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="bg-gray-900/80 border-t border-gray-700 animate-in slide-in-from-top-2 duration-200 overflow-x-auto">
+                        <div className="px-3 py-2 border-b border-gray-700/70 bg-gray-900/60 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                          <div className="relative w-full md:max-w-sm">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                            <input
+                              type="text"
+                              value={salesPartSearchByGroup[group.id] || ''}
+                              onChange={(e) => setSalesPartSearchByGroup(prev => ({ ...prev, [group.id]: e.target.value }))}
+                              placeholder="Cari part number di tabel ini..."
+                              className="w-full pl-9 pr-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-white placeholder-gray-500 focus:ring-1 focus:ring-cyan-500 outline-none"
+                            />
+                          </div>
+                          <div className="text-[11px] text-gray-400">
+                            Tampil {visibleGroupItems.length} dari {group.items.length} item
+                          </div>
+                        </div>
+                        <table className="w-full text-sm min-w-[920px]">
+                          <thead className="bg-gray-900/70 text-gray-400">
+                            <tr>
+                              <th className="px-3 py-2 text-left">Part Number</th>
+                              <th className="px-3 py-2 text-left">Nama Barang</th>
+                              <th className="px-3 py-2 text-right">Qty</th>
+                              <th className="px-3 py-2 text-right">Harga Satuan</th>
+                              <th className="px-3 py-2 text-right">Total</th>
+                              <th className="px-3 py-2 text-right">Aksi</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {visibleGroupItems.map((item, idx) => (
+                              <tr key={`sales-${item.id}-${idx}-${item.part_number}`} className="border-t border-gray-700/60 hover:bg-gray-700/20">
+                                <td className="px-3 py-2 font-mono text-cyan-300">{item.part_number || '-'}</td>
+                                <td className="px-3 py-2 text-gray-200">
+                                  <div className="font-semibold text-gray-100">{item.nama_barang || '-'}</div>
+                                  <div className="text-[11px] text-cyan-300">Titip Sales ({item.tempo || 'SALES'})</div>
+                                </td>
+                                <td className="px-3 py-2 text-right text-white font-semibold">{item.quantity || 0}</td>
+                                <td className="px-3 py-2 text-right text-gray-300">{formatRupiah(item.harga_satuan || 0)}</td>
+                                <td className="px-3 py-2 text-right text-emerald-300 font-bold">{formatRupiah(item.harga_total || 0)}</td>
+                                <td className="px-3 py-2">
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      onClick={() => handleProcessSalesItem(item, 'KEMBALIKAN')}
+                                      className="px-3 py-1.5 rounded bg-orange-900/20 text-orange-300 hover:bg-orange-900/50 border border-orange-900/40 transition-colors text-xs font-bold"
+                                    >
+                                      KEMBALIKAN
+                                    </button>
+                                    <button
+                                      onClick={() => handleProcessSalesItem(item, 'TERJUAL')}
+                                      className="px-3 py-1.5 rounded bg-emerald-900/20 text-emerald-300 hover:bg-emerald-900/50 border border-emerald-900/40 transition-colors text-xs font-bold"
+                                    >
+                                      TERJUAL
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                            {visibleGroupItems.length === 0 && (
+                              <tr>
+                                <td colSpan={6} className="px-3 py-6 text-center text-xs text-gray-400">
+                                  Tidak ada part number yang cocok di tabel ini.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Paid Sales Items */}
+            <div className="bg-gray-800 border border-emerald-800/40 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-700 bg-gray-900/60 flex items-center justify-between">
+                <h3 className="font-bold text-emerald-300">Sudah Dibayar (Sales)</h3>
+                <span className="text-xs text-gray-400">{filteredSalesPaidData.length} item</span>
+              </div>
+              {filteredSalesPaidData.length === 0 ? (
+                <div className="p-6 text-center text-gray-400 text-sm">
+                  Belum ada item Sales yang sudah dibayar.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[900px]">
+                    <thead className="bg-gray-900/70 text-gray-400">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Tanggal</th>
+                        <th className="px-3 py-2 text-left">Customer</th>
+                        <th className="px-3 py-2 text-left">Part Number</th>
+                        <th className="px-3 py-2 text-left">Nama Barang</th>
+                        <th className="px-3 py-2 text-right">Qty</th>
+                        <th className="px-3 py-2 text-right">Harga Satuan</th>
+                        <th className="px-3 py-2 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSalesPaidData.map((item, idx) => {
+                        const unitPrice = item.qty_keluar > 0 ? item.harga_total / item.qty_keluar : 0;
+                        return (
+                          <tr key={`sales-paid-${item.id}-${idx}`} className="border-t border-gray-700/60 hover:bg-gray-700/20">
+                            <td className="px-3 py-2 text-gray-300 whitespace-nowrap">
+                              {new Date(item.created_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}
+                            </td>
+                            <td className="px-3 py-2 text-white">{item.customer || '-'}</td>
+                            <td className="px-3 py-2 font-mono text-cyan-300">{item.part_number || '-'}</td>
+                            <td className="px-3 py-2 text-gray-200">{item.name || '-'}</td>
+                            <td className="px-3 py-2 text-right text-gray-200">{item.qty_keluar || 0}</td>
+                            <td className="px-3 py-2 text-right text-gray-300">{formatRupiah(unitPrice)}</td>
+                            <td className="px-3 py-2 text-right text-emerald-300 font-bold">{formatRupiah(item.harga_total || 0)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* --- 3. TAB TERJUAL (GROUPED VIEW dengan PAGINATION) - MODERN DESIGN --- */}
         {activeTab === 'TERJUAL' && (
           <div className="space-y-4">
@@ -1509,6 +2685,7 @@ export const OrderManagement: React.FC = () => {
               const groupKey = group.id;
               // Default to expanded (true) if not explicitly set to false
               const isExpanded = expandedGroups[groupKey] !== false;
+              const isSelected = selectedSoldGroups.has(groupKey);
               const ecommerceColors = getEcommerceColor(group.ecommerce);
               const isOfflineGroup = (group.ecommerce || '').toUpperCase() === 'OFFLINE';
 
@@ -1527,7 +2704,7 @@ export const OrderManagement: React.FC = () => {
               return (
                 <div 
                   key={groupKey} 
-                  className={`group relative bg-gradient-to-br from-gray-800 to-gray-900 border-2 rounded-2xl overflow-hidden transition-all duration-300 hover:shadow-2xl hover:shadow-purple-900/20 ${ecommerceColors.border}`}
+                  className={`group relative bg-gradient-to-br from-gray-800 to-gray-900 border-2 rounded-2xl overflow-hidden transition-all duration-300 hover:shadow-2xl hover:shadow-purple-900/20 ${isSelected ? 'border-purple-500 ring-2 ring-purple-500/20' : ecommerceColors.border}`}
                   style={{ animationDelay: `${groupIdx * 50}ms` }}
                 >
                   {/* Decorative accent line */}
@@ -1541,7 +2718,16 @@ export const OrderManagement: React.FC = () => {
                   
                   {/* GROUP HEADER */}
                   <div className="p-4 flex flex-col md:flex-row justify-between gap-3">
-                    <div className="flex-1 cursor-pointer select-none" onClick={() => toggleExpand(groupKey)}>
+                    <div className="flex items-start gap-3 flex-1">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => { e.stopPropagation(); toggleSoldGroupSelection(groupKey); }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-6 h-6 mt-1 rounded border-gray-600 bg-gray-700 text-purple-500 focus:ring-purple-500 cursor-pointer flex-shrink-0"
+                        title="Pilih transaksi untuk print tanda terima"
+                      />
+                      <div className="flex-1 cursor-pointer select-none" onClick={() => toggleExpand(groupKey)}>
                       {/* Top Row - Tags */}
                       <div className="flex items-center gap-2 mb-3 flex-wrap">
                         {/* Marketplace Badge */}
@@ -1568,18 +2754,24 @@ export const OrderManagement: React.FC = () => {
                         
                         {/* Store/Toko Badge */}
                         {group.toko && group.toko !== '-' && (
-                          <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg border ${
-                            group.toko === 'MJM' 
-                              ? 'bg-cyan-900/40 text-cyan-300 border-cyan-800/50' 
-                              : group.toko === 'BJW' 
-                                ? 'bg-amber-900/40 text-amber-300 border-amber-800/50'
-                                : 'bg-gray-700/60 text-gray-300 border-gray-600/50'
-                          }`}>
+                          <button
+                            type="button"
+                            onClick={(e) => handleEditSoldGroupKodeToko(group, e)}
+                            className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg border hover:brightness-110 transition-colors ${
+                              group.toko === 'MJM' 
+                                ? 'bg-cyan-900/40 text-cyan-300 border-cyan-800/50' 
+                                : group.toko === 'BJW' 
+                                  ? 'bg-amber-900/40 text-amber-300 border-amber-800/50'
+                                  : 'bg-gray-700/60 text-gray-300 border-gray-600/50'
+                            }`}
+                            title="Klik untuk ganti kode toko transaksi ini"
+                          >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                             </svg>
                             Toko {group.toko}
-                          </span>
+                            <Pencil size={12} className="opacity-70" />
+                          </button>
                         )}
                         
                         {/* Resi Badge */}
@@ -1617,14 +2809,37 @@ export const OrderManagement: React.FC = () => {
                           <h3 className="font-bold text-lg text-white leading-tight">
                             {group.customer}
                           </h3>
-                          {group.ecommerce === 'OFFLINE' && group.tempo && (
-                            <span className={`text-xs font-medium px-2 py-0.5 rounded ${
-                              group.tempo === 'CASH' ? 'bg-green-900/40 text-green-400' : 'bg-orange-900/40 text-orange-400'
-                            }`}>
-                              {group.tempo}
-                            </span>
+                          {group.ecommerce === 'OFFLINE' && (
+                            <div className="mt-1 inline-flex items-center gap-1.5">
+                              <select
+                                value={(group.tempo || 'CASH').toUpperCase()}
+                                onClick={(e) => e.stopPropagation()}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  handleEditSoldGroupTempo(group, e.target.value);
+                                }}
+                                disabled={updatingTempoGroupId === group.id}
+                                className={`text-xs font-semibold px-2 py-0.5 rounded border outline-none transition-colors cursor-pointer ${
+                                  (group.tempo || 'CASH').toUpperCase() === 'CASH'
+                                    ? 'bg-green-900/40 text-green-300 border-green-800/60'
+                                    : 'bg-orange-900/40 text-orange-300 border-orange-800/60'
+                                } ${updatingTempoGroupId === group.id ? 'opacity-60 cursor-wait' : 'hover:brightness-110'}`}
+                                title="Ubah tempo transaksi ini"
+                              >
+                                {SOLD_TEMPO_OPTIONS.map((tempoOption) => (
+                                  <option key={tempoOption} value={tempoOption} className="bg-gray-800 text-white">
+                                    {tempoOption}
+                                  </option>
+                                ))}
+                              </select>
+                              {updatingTempoGroupId === group.id && (
+                                <RefreshCw size={12} className="text-gray-400 animate-spin" />
+                              )}
+                            </div>
                           )}
                         </div>
+                      </div>
                       </div>
                     </div>
 
@@ -1781,6 +2996,50 @@ export const OrderManagement: React.FC = () => {
                                       </span>
                                     )}
                                   </div>
+
+                                  {/* Tanggal / Stok / Qty */}
+                                  <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400 mt-2" onClick={(e) => e.stopPropagation()}>
+                                    {editingSoldDateId === item.id ? (
+                                      <div className="flex items-center gap-1">
+                                        <input
+                                          type="datetime-local"
+                                          value={editSoldDate}
+                                          onChange={(e) => setEditSoldDate(e.target.value)}
+                                          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-xs"
+                                        />
+                                        <button
+                                          onClick={(e) => saveEditSoldDate(item, e)}
+                                          className="p-1 bg-green-800/60 hover:bg-green-700/70 rounded text-green-200"
+                                          title="Simpan tanggal"
+                                        >
+                                          <Save size={14} />
+                                        </button>
+                                        <button
+                                          onClick={(e) => cancelEditSoldDate(e)}
+                                          className="p-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300"
+                                          title="Batal"
+                                        >
+                                          <X size={14} />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        onClick={(e) => startEditSoldDate(item, e)}
+                                        className="px-2 py-1 bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 text-left flex items-center gap-2"
+                                        title="Edit tanggal"
+                                      >
+                                        <Pencil size={12} className="text-gray-400" />
+                                        {new Date(item.created_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                      </button>
+                                    )}
+                                    <span className="px-2 py-1 bg-gray-800 border border-gray-700 rounded">Stok: {hasStock ? currentStock : 'N/A'}</span>
+                                    <span className="px-2 py-1 bg-gray-800 border border-gray-700 rounded">
+                                      Qty: <span className="text-white font-semibold">{item.qty_keluar}</span>
+                                      <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded ${isOutOfStock ? 'bg-red-900/50 text-red-200' : isLowStock ? 'bg-orange-900/50 text-orange-200' : 'bg-green-900/40 text-green-200'}`}>
+                                        {isOutOfStock ? 'Stok Habis' : isLowStock ? 'Stok Rendah' : 'Stok Ok'}
+                                      </span>
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -1790,10 +3049,49 @@ export const OrderManagement: React.FC = () => {
                               {/* Pricing Info */}
                               <div className="flex items-center gap-3">
                                 {/* Quantity Badge */}
-                                <div className="bg-gray-700/60 rounded-lg px-3 py-1.5 text-center border border-gray-600/50">
-                                  <p className="text-lg font-bold text-white leading-tight">{item.qty_keluar}</p>
-                                  <p className="text-[9px] text-gray-400 uppercase tracking-wide">pcs</p>
-                                </div>
+                                {editingSoldQtyId === item.id ? (
+                                  <div className="flex items-center gap-1.5 bg-gray-700/60 rounded-lg px-2 py-1.5 border border-blue-600/60">
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      step={1}
+                                      value={editSoldQty}
+                                      onChange={(e) => setEditSoldQty(Number(e.target.value))}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') saveEditSoldQty(item, e as any);
+                                        if (e.key === 'Escape') cancelEditSoldQty();
+                                      }}
+                                      className="w-16 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-white font-semibold text-center focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                      autoFocus
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                    <button
+                                      onClick={(e) => saveEditSoldQty(item, e)}
+                                      disabled={savingSoldQty}
+                                      className="p-1.5 bg-green-600 hover:bg-green-700 text-white rounded transition-colors disabled:opacity-50"
+                                      title="Simpan qty"
+                                    >
+                                      {savingSoldQty ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                                    </button>
+                                    <button
+                                      onClick={(e) => cancelEditSoldQty(e)}
+                                      className="p-1.5 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
+                                      title="Batal edit qty"
+                                    >
+                                      <X size={14} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={(e) => startEditSoldQty(item, e)}
+                                    className="relative bg-gray-700/60 rounded-lg px-3 py-1.5 text-center border border-gray-600/50 hover:bg-gray-700 transition-colors group/qty"
+                                    title="Klik untuk edit qty"
+                                  >
+                                    <p className="text-lg font-bold text-white leading-tight">{item.qty_keluar}</p>
+                                    <p className="text-[9px] text-gray-400 uppercase tracking-wide">pcs</p>
+                                    <Pencil size={10} className="absolute -top-1 -right-1 text-gray-400 opacity-0 group-hover/qty:opacity-100 transition-opacity" />
+                                  </button>
+                                )}
                                 
                                 {/* Price Breakdown - Editable */}
                                 {editingSoldItemId === item.id ? (

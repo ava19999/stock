@@ -1,32 +1,106 @@
 // FILE: src/components/gudang/KirimBarangView.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Search, Package, ArrowRightLeft, Plus, Send, Check, X,
   Truck, ChevronDown, ChevronUp, AlertCircle, RefreshCw,
-  Filter, Building2, Minus
+  Filter, Building2, Minus, Download
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import {
   KirimBarangItem,
   StockItem,
+  fetchBothStoreStock,
   fetchKirimBarang,
+  getBulkStockComparison,
+  getBulkShelfComparison,
   createKirimBarangRequest,
   approveKirimBarang,
+  revertApprovedKirimBarangToPending,
   sendKirimBarang,
   receiveKirimBarang,
   rejectKirimBarang,
   deleteKirimBarang,
+  updateKirimBarangPartNumber,
   searchItemsBothStores
 } from '../../services/kirimBarangService';
 
 type ViewMode = 'stock_comparison' | 'request_list';
-type FilterType = 'all' | 'incoming' | 'outgoing' | 'pending' | 'completed';
+type FilterType = 'all' | 'incoming' | 'outgoing' | 'rejected' | 'pending' | 'approved' | 'sent' | 'completed';
+type PeriodFilterType = 'all_period' | 'today' | 'yesterday' | 'last_7_days' | 'last_30_days' | 'this_month' | 'last_month';
+const ALL_PERIOD_VALUE: PeriodFilterType = 'all_period';
+const PERIOD_FILTER_OPTIONS: Array<{ value: PeriodFilterType; label: string }> = [
+  { value: ALL_PERIOD_VALUE, label: 'Semua Periode' },
+  { value: 'today', label: 'Hari Ini' },
+  { value: 'yesterday', label: 'Kemarin' },
+  { value: 'last_7_days', label: '7 Hari Terakhir' },
+  { value: 'last_30_days', label: '30 Hari Terakhir' },
+  { value: 'this_month', label: 'Bulan Ini' },
+  { value: 'last_month', label: 'Bulan Lalu' }
+];
 
 // Extended stock item with request quantity
 interface StockItemWithRequest extends StockItem {
   requestQty: number;
   catatan: string;
 }
+
+const getStartOfDay = (date: Date): Date => {
+  const clone = new Date(date);
+  clone.setHours(0, 0, 0, 0);
+  return clone;
+};
+
+const isDateInPeriod = (value: string | null | undefined, period: PeriodFilterType): boolean => {
+  if (period === ALL_PERIOD_VALUE) return true;
+  if (!value) return false;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+
+  const target = getStartOfDay(date);
+  const today = getStartOfDay(new Date());
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  switch (period) {
+    case 'today':
+      return target.getTime() === today.getTime();
+    case 'yesterday':
+      return target.getTime() === yesterday.getTime();
+    case 'last_7_days': {
+      const start = new Date(today);
+      start.setDate(start.getDate() - 6);
+      return target >= start && target <= today;
+    }
+    case 'last_30_days': {
+      const start = new Date(today);
+      start.setDate(start.getDate() - 29);
+      return target >= start && target <= today;
+    }
+    case 'this_month':
+      return target.getFullYear() === today.getFullYear() && target.getMonth() === today.getMonth();
+    case 'last_month': {
+      const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      return target.getFullYear() === lastMonth.getFullYear() && target.getMonth() === lastMonth.getMonth();
+    }
+    default:
+      return true;
+  }
+};
+
+const getPeriodDisplayLabel = (period: PeriodFilterType): string => (
+  PERIOD_FILTER_OPTIONS.find(option => option.value === period)?.label || 'Semua Periode'
+);
+
+const getDateValueByFilter = (item: KirimBarangItem, activeFilter: FilterType): string | null => {
+  switch (activeFilter) {
+    case 'approved': return item.approved_at;
+    case 'sent': return item.sent_at;
+    case 'rejected': return item.rejected_at;
+    case 'completed': return item.received_at;
+    default: return item.created_at;
+  }
+};
 
 export const KirimBarangView: React.FC = () => {
   const { selectedStore, userName } = useStore();
@@ -38,7 +112,11 @@ export const KirimBarangView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<{ mjm: StockItemWithRequest[]; bjw: StockItemWithRequest[] }>({ mjm: [], bjw: [] });
   const [requests, setRequests] = useState<KirimBarangItem[]>([]);
+  const [stockComparisonMap, setStockComparisonMap] = useState<Record<string, { mjm: number; bjw: number }>>({});
+  const [senderShelfMap, setSenderShelfMap] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<FilterType>('all');
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodFilterType>(ALL_PERIOD_VALUE);
+  const [isStatusTableMinimized, setIsStatusTableMinimized] = useState(false);
   const [expandedRequest, setExpandedRequest] = useState<string | null>(null);
   const [rejectModal, setRejectModal] = useState<{ id: string; show: boolean; reason: string }>({
     id: '',
@@ -47,6 +125,12 @@ export const KirimBarangView: React.FC = () => {
   });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [sendingItem, setSendingItem] = useState<string | null>(null);
+  const [sendQtyEdits, setSendQtyEdits] = useState<Record<string, string>>({});
+  const [requestPartSearch, setRequestPartSearch] = useState('');
+  const [partNumberOptionsByStore, setPartNumberOptionsByStore] = useState<{ mjm: StockItem[]; bjw: StockItem[] }>({ mjm: [], bjw: [] });
+  const [partNumberOptionsLoading, setPartNumberOptionsLoading] = useState(false);
+  const [partNumberEdits, setPartNumberEdits] = useState<Record<string, string>>({});
+  const [selectedSendRequestIds, setSelectedSendRequestIds] = useState<string[]>([]);
 
   // Toast helper
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -57,9 +141,32 @@ export const KirimBarangView: React.FC = () => {
   // Load requests
   const loadRequests = useCallback(async () => {
     setLoading(true);
-    const data = await fetchKirimBarang(currentStore, filter);
-    setRequests(data);
-    setLoading(false);
+    try {
+      const data = await fetchKirimBarang(currentStore, filter);
+      setRequests(data);
+
+      const uniquePartNumbers = Array.from(new Set(data.map(item => item.part_number).filter(Boolean)));
+      if (uniquePartNumbers.length > 0) {
+        const [comparisonByPart, shelfByPart] = await Promise.all([
+          getBulkStockComparison(uniquePartNumbers),
+          getBulkShelfComparison(uniquePartNumbers)
+        ]);
+        const comparisonByRequest: Record<string, { mjm: number; bjw: number }> = {};
+        const senderShelfByRequest: Record<string, string> = {};
+        data.forEach(item => {
+          comparisonByRequest[item.id] = comparisonByPart[item.part_number] || { mjm: 0, bjw: 0 };
+          const shelfPair = shelfByPart[item.part_number] || { mjm: '-', bjw: '-' };
+          senderShelfByRequest[item.id] = item.from_store === 'mjm' ? shelfPair.mjm : shelfPair.bjw;
+        });
+        setStockComparisonMap(comparisonByRequest);
+        setSenderShelfMap(senderShelfByRequest);
+      } else {
+        setStockComparisonMap({});
+        setSenderShelfMap({});
+      }
+    } finally {
+      setLoading(false);
+    }
   }, [currentStore, filter]);
 
   useEffect(() => {
@@ -67,6 +174,26 @@ export const KirimBarangView: React.FC = () => {
       loadRequests();
     }
   }, [viewMode, loadRequests]);
+
+  useEffect(() => {
+    setIsStatusTableMinimized(false);
+  }, [filter]);
+
+  const loadPartNumberOptions = useCallback(async () => {
+    setPartNumberOptionsLoading(true);
+    try {
+      const stockOptions = await fetchBothStoreStock();
+      setPartNumberOptionsByStore(stockOptions);
+    } finally {
+      setPartNumberOptionsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (viewMode !== 'request_list') return;
+    if (partNumberOptionsByStore.mjm.length > 0 || partNumberOptionsByStore.bjw.length > 0) return;
+    loadPartNumberOptions();
+  }, [viewMode, loadPartNumberOptions, partNumberOptionsByStore.mjm.length, partNumberOptionsByStore.bjw.length]);
 
   // Search items
   const handleSearch = async () => {
@@ -149,11 +276,21 @@ export const KirimBarangView: React.FC = () => {
   };
 
   // Action handlers for request list
-  const handleApprove = async (id: string) => {
+  const handleApprove = async (id: string, quantityOverride?: number) => {
+    if (typeof quantityOverride === 'number' && quantityOverride <= 0) {
+      showToast('Qty harus lebih dari 0', 'error');
+      return;
+    }
+
     setLoading(true);
-    const result = await approveKirimBarang(id, userName);
+    const result = await approveKirimBarang(id, userName, quantityOverride);
     if (result.success) {
       showToast('Request disetujui!');
+      setSendQtyEdits(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       loadRequests();
     } else {
       showToast(result.error || 'Gagal menyetujui', 'error');
@@ -161,11 +298,21 @@ export const KirimBarangView: React.FC = () => {
     setLoading(false);
   };
 
-  const handleSend = async (id: string) => {
+  const handleSend = async (id: string, quantityOverride?: number) => {
+    if (typeof quantityOverride === 'number' && quantityOverride <= 0) {
+      showToast('Qty kirim harus lebih dari 0', 'error');
+      return;
+    }
+
     setLoading(true);
-    const result = await sendKirimBarang(id, userName);
+    const result = await sendKirimBarang(id, userName, quantityOverride);
     if (result.success) {
       showToast('Barang sudah dikirim! Stok sudah dikurangi.');
+      setSendQtyEdits(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       loadRequests();
     } else {
       showToast(result.error || 'Gagal mengirim', 'error');
@@ -215,6 +362,314 @@ export const KirimBarangView: React.FC = () => {
     setLoading(false);
   };
 
+  const getFilterDisplayLabel = (activeFilter: FilterType): string => {
+    switch (activeFilter) {
+      case 'all': return 'Semua';
+      case 'incoming': return `Masuk ke ${currentStore.toUpperCase()}`;
+      case 'outgoing': return `Keluar dari ${currentStore.toUpperCase()}`;
+      case 'pending': return 'Pending';
+      case 'approved': return 'Disetujui';
+      case 'sent': return 'Sedang Dikirim';
+      case 'rejected': return 'Ditolak';
+      case 'completed': return 'Diterima';
+      default: return activeFilter;
+    }
+  };
+
+  const getFilterDateLabel = (activeFilter: FilterType): string => {
+    switch (activeFilter) {
+      case 'approved': return 'Tanggal Disetujui';
+      case 'sent': return 'Tanggal Dikirim';
+      case 'rejected': return 'Tanggal Ditolak';
+      case 'completed': return 'Tanggal Diterima';
+      default: return 'Tanggal Request';
+    }
+  };
+
+  const getFilterDateValue = (item: KirimBarangItem, activeFilter: FilterType): string | null => {
+    return getDateValueByFilter(item, activeFilter);
+  };
+
+  const isSendQtyEditable = (item: KirimBarangItem) =>
+    (item.status === 'pending' || item.status === 'approved') && item.from_store === currentStore;
+
+  const getSendQtyValue = (item: KirimBarangItem): string => (
+    sendQtyEdits[item.id] ?? String(item.quantity)
+  );
+
+  const getSendQtyNumber = (item: KirimBarangItem): number => {
+    const parsed = Number.parseInt(getSendQtyValue(item), 10);
+    return Number.isNaN(parsed) ? item.quantity : parsed;
+  };
+
+  const updateSendQty = (id: string, value: string) => {
+    if (!/^\d*$/.test(value)) return;
+    setSendQtyEdits(prev => ({ ...prev, [id]: value }));
+  };
+
+  const getStockByStore = (requestId: string, store: 'mjm' | 'bjw'): number | null => {
+    const stock = stockComparisonMap[requestId];
+    if (!stock) return null;
+    return store === 'mjm' ? stock.mjm : stock.bjw;
+  };
+
+  const getSenderShelf = (requestId: string): string => (
+    senderShelfMap[requestId] || '-'
+  );
+
+  const isBulkSendEligible = (item: KirimBarangItem) =>
+    item.status === 'approved' && item.from_store === currentStore;
+
+  const toggleSelectSendRequest = (id: string, checked: boolean) => {
+    setSelectedSendRequestIds(prev => {
+      if (checked) {
+        if (prev.includes(id)) return prev;
+        return [...prev, id];
+      }
+      return prev.filter(itemId => itemId !== id);
+    });
+  };
+
+  const isPartNumberEditable = (item: KirimBarangItem) =>
+    item.status === 'pending' && item.from_store === currentStore;
+  const getPartNumberEditValue = (item: KirimBarangItem): string =>
+    partNumberEdits[item.id] ?? item.part_number;
+  const updatePartNumberEditValue = (id: string, value: string) => {
+    setPartNumberEdits(prev => ({ ...prev, [id]: value }));
+  };
+
+  const handlePartNumberUpdate = async (item: KirimBarangItem, nextPartNumber: string) => {
+    if (!isPartNumberEditable(item)) return;
+
+    const normalizedNext = String(nextPartNumber || '').trim().toUpperCase();
+    const normalizedCurrent = String(item.part_number || '').trim().toUpperCase();
+    if (!normalizedNext || normalizedNext === normalizedCurrent) {
+      setPartNumberEdits(prev => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+      return;
+    }
+
+    setLoading(true);
+    const result = await updateKirimBarangPartNumber(item.id, normalizedNext);
+    if (result.success) {
+      showToast(`Part number diubah ke ${normalizedNext}`);
+      setPartNumberEdits(prev => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+      loadRequests();
+    } else {
+      showToast(result.error || 'Gagal mengubah part number', 'error');
+    }
+    setLoading(false);
+  };
+
+  const handleBulkSendSelected = async () => {
+    const selectedRows = statusTableRows.filter(req =>
+      selectedSendRequestIds.includes(req.id) && isBulkSendEligible(req)
+    );
+
+    if (selectedRows.length === 0) {
+      showToast('Pilih minimal 1 request disetujui untuk dikirim', 'error');
+      return;
+    }
+
+    setLoading(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const req of selectedRows) {
+      const result = await sendKirimBarang(req.id, userName, getSendQtyNumber(req));
+      if (result.success) {
+        successCount += 1;
+      } else {
+        failCount += 1;
+      }
+    }
+
+    if (successCount > 0) {
+      showToast(`${successCount} request berhasil dikirim`);
+    }
+    if (failCount > 0) {
+      showToast(`${failCount} request gagal dikirim`, 'error');
+    }
+
+    setSelectedSendRequestIds([]);
+    await loadRequests();
+    setLoading(false);
+  };
+
+  const handleBulkRevertToPending = async () => {
+    const selectedRows = statusTableRows.filter(req =>
+      selectedSendRequestIds.includes(req.id) && isBulkSendEligible(req)
+    );
+
+    if (selectedRows.length === 0) {
+      showToast('Pilih minimal 1 request disetujui untuk dikembalikan ke pending', 'error');
+      return;
+    }
+
+    if (!confirm(`Kembalikan ${selectedRows.length} request terpilih ke status Pending?`)) {
+      return;
+    }
+
+    setLoading(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const req of selectedRows) {
+      const result = await revertApprovedKirimBarangToPending(req.id);
+      if (result.success) {
+        successCount += 1;
+      } else {
+        failCount += 1;
+      }
+    }
+
+    if (successCount > 0) {
+      showToast(`${successCount} request dikembalikan ke Pending`);
+    }
+    if (failCount > 0) {
+      showToast(`${failCount} request gagal dikembalikan`, 'error');
+    }
+
+    setSelectedSendRequestIds([]);
+    await loadRequests();
+    setLoading(false);
+  };
+
+  const handleDownloadFilterPdf = () => {
+    const isAllPeriodSelected = selectedPeriod === ALL_PERIOD_VALUE;
+    const printableRows = statusTableRows;
+
+    const filterLabel = getFilterDisplayLabel(filter);
+    const selectedDateLabel = getPeriodDisplayLabel(selectedPeriod);
+
+    if (printableRows.length === 0) {
+      showToast(
+        isAllPeriodSelected
+          ? `Tidak ada data filter ${filterLabel.toLowerCase()}`
+          : `Tidak ada data filter ${filterLabel.toLowerCase()} pada periode tersebut`,
+        'error'
+      );
+      return;
+    }
+
+    const escapeHtml = (value: string | null | undefined) =>
+      String(value ?? '-')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    const getPdfQtyValue = (item: KirimBarangItem): string => {
+      const qtyValue = isSendQtyEditable(item) ? getSendQtyValue(item) : String(item.quantity);
+      return qtyValue === '' ? String(item.quantity) : qtyValue;
+    };
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      showToast('Popup diblokir. Izinkan popup untuk export PDF', 'error');
+      return;
+    }
+
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Daftar Request ${filterLabel} - ${currentStore.toUpperCase()}</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          @page { size: A4 landscape; margin: 6mm; }
+          body { font-family: Arial, sans-serif; padding: 0; color: #111827; font-size: 9px; }
+          h1 { font-size: 13px; margin-bottom: 2px; }
+          .subtitle { color: #4b5563; margin-bottom: 6px; font-size: 9px; }
+          .meta { margin-bottom: 6px; font-size: 8px; color: #374151; }
+          table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+          th, td { border: 1px solid #d1d5db; padding: 3px 4px; font-size: 8.5px; text-align: left; vertical-align: top; line-height: 1.2; }
+          th { background: #f3f4f6; font-weight: 700; }
+          .text-center { text-align: center; }
+          .no-wrap { white-space: nowrap; }
+          .col-no { width: 3%; }
+          .col-part { width: 11%; }
+          .col-name { width: 14%; }
+          .col-stock-from { width: 12%; word-break: break-word; }
+          .col-stock-to { width: 7%; }
+          .col-qty { width: 6%; }
+          .col-status { width: 7%; }
+          .col-requester { width: 7%; }
+          .col-date { width: 10%; }
+          .col-note { width: 19%; word-break: break-word; }
+          tr, td, th { page-break-inside: avoid; }
+          thead { display: table-header-group; }
+          .footer { margin-top: 6px; color: #6b7280; font-size: 8px; }
+          @media print {
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          }
+        </style>
+      </head>
+      <body>
+        <h1>Daftar Request ${filterLabel}</h1>
+        <div class="subtitle">Transfer barang antar toko (per periode)</div>
+        <div class="meta">
+          Toko Aktif: <strong>${currentStore.toUpperCase()}</strong> |
+          Periode: <strong>${selectedDateLabel}</strong> |
+          Total Data: <strong>${printableRows.length}</strong> |
+          Tanggal Cetak: <strong>${new Date().toLocaleString('id-ID')}</strong>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th class="text-center col-no no-wrap">No</th>
+              <th class="col-part">Part Number</th>
+              <th class="col-name">Nama Barang</th>
+              <th class="col-stock-from">Stok Dari + Rak</th>
+              <th class="col-stock-to no-wrap">Stok Ke</th>
+              <th class="text-center col-qty no-wrap">Qty</th>
+              <th class="col-status no-wrap">Status</th>
+              <th class="col-requester no-wrap">Request Oleh</th>
+              <th class="col-date">${filterDateLabel}</th>
+              <th class="col-note">${filter === 'rejected' ? 'Alasan Ditolak' : 'Catatan'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${printableRows.map((req, index) => `
+              <tr>
+                <td class="text-center col-no">${index + 1}</td>
+                <td class="col-part">${escapeHtml(req.part_number)}</td>
+                <td class="col-name">${escapeHtml(req.nama_barang)}</td>
+                <td class="col-stock-from">${escapeHtml(`${req.from_store.toUpperCase()}: ${getStockByStore(req.id, req.from_store) ?? '-'} | Rak: ${getSenderShelf(req.id)}`)}</td>
+                <td class="col-stock-to no-wrap">${escapeHtml(`${req.to_store.toUpperCase()}: ${getStockByStore(req.id, req.to_store) ?? '-'}`)}</td>
+                <td class="text-center col-qty no-wrap">${escapeHtml(getPdfQtyValue(req))}</td>
+                <td class="col-status no-wrap">${escapeHtml(getStatusLabel(req.status))}</td>
+                <td class="col-requester no-wrap">${escapeHtml(req.requested_by)}</td>
+                <td class="col-date">${getFilterDateValue(req, filter) ? new Date(getFilterDateValue(req, filter) as string).toLocaleString('id-ID') : '-'}</td>
+                <td class="col-note">${filter === 'rejected' ? escapeHtml(req.catatan_reject || '-') : escapeHtml(req.catatan || req.catatan_reject || '-')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <div class="footer">
+          Dokumen ini dibuat otomatis dari sistem gudang MJM/BJW.
+        </div>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 250);
+
+    showToast(`Dialog PDF filter ${filterLabel.toLowerCase()} dibuka. Pilih "Save as PDF" untuk mengunduh`);
+  };
+
   // Get status badge color
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -237,6 +692,68 @@ export const KirimBarangView: React.FC = () => {
       default: return status;
     }
   };
+
+  const statusTableDateLabel = getPeriodDisplayLabel(selectedPeriod);
+  const filterDisplayLabel = getFilterDisplayLabel(filter);
+  const filterDateLabel = getFilterDateLabel(filter);
+  const availablePeriodOptions = useMemo(() => {
+    const periodCounts: Record<PeriodFilterType, number> = {
+      [ALL_PERIOD_VALUE]: requests.length,
+      today: 0,
+      yesterday: 0,
+      last_7_days: 0,
+      last_30_days: 0,
+      this_month: 0,
+      last_month: 0
+    };
+
+    requests.forEach((item) => {
+      const dateValue = getFilterDateValue(item, filter);
+      if (!dateValue) return;
+
+      (Object.keys(periodCounts) as PeriodFilterType[]).forEach((periodKey) => {
+        if (periodKey === ALL_PERIOD_VALUE) return;
+        if (isDateInPeriod(dateValue, periodKey)) {
+          periodCounts[periodKey] += 1;
+        }
+      });
+    });
+
+    return PERIOD_FILTER_OPTIONS.map(option => ({
+      value: option.value,
+      label: option.label,
+      count: periodCounts[option.value] || 0
+    }));
+  }, [requests, filter]);
+  const selectedPeriodValue = (
+    availablePeriodOptions.some(option => option.value === selectedPeriod)
+  )
+    ? selectedPeriod
+    : ALL_PERIOD_VALUE;
+  const normalizePartNumberSearch = (value: string): string =>
+    String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const requestPartSearchKey = normalizePartNumberSearch(requestPartSearch);
+  const matchesPartNumber = (partNumber: string | null | undefined): boolean => (
+    !requestPartSearchKey || normalizePartNumberSearch(partNumber || '').includes(requestPartSearchKey)
+  );
+  const allRequestRows = requests.filter(req => matchesPartNumber(req.part_number));
+  const statusTableRowsBase = requests.filter(req =>
+    isDateInPeriod(getFilterDateValue(req, filter), selectedPeriod)
+  );
+  const statusTableRows = statusTableRowsBase.filter(req => matchesPartNumber(req.part_number));
+  const approvedSendableRows = statusTableRows.filter(req => isBulkSendEligible(req));
+  const selectedApprovedSendableRows = approvedSendableRows.filter(req => selectedSendRequestIds.includes(req.id));
+  const isAllApprovedSelected = approvedSendableRows.length > 0 && selectedApprovedSendableRows.length === approvedSendableRows.length;
+
+  useEffect(() => {
+    setSelectedSendRequestIds(prev => {
+      const next = prev.filter(id => approvedSendableRows.some(req => req.id === id));
+      if (next.length === prev.length && next.every((id, idx) => id === prev[idx])) {
+        return prev;
+      }
+      return next;
+    });
+  }, [approvedSendableRows]);
 
   // Render stock table with inline request input
   const renderStockTable = (items: StockItemWithRequest[], store: 'mjm' | 'bjw') => {
@@ -443,10 +960,25 @@ export const KirimBarangView: React.FC = () => {
       {/* Request List View */}
       {viewMode === 'request_list' && (
         <div className="space-y-4">
+          <datalist id="part-options-mjm">
+            {partNumberOptionsByStore.mjm.map(option => (
+              <option key={`mjm-${option.part_number}`} value={option.part_number}>
+                {option.name}
+              </option>
+            ))}
+          </datalist>
+          <datalist id="part-options-bjw">
+            {partNumberOptionsByStore.bjw.map(option => (
+              <option key={`bjw-${option.part_number}`} value={option.part_number}>
+                {option.name}
+              </option>
+            ))}
+          </datalist>
+
           {/* Filter */}
           <div className="flex flex-wrap gap-2 items-center">
             <Filter size={18} className="text-gray-500" />
-            {(['all', 'incoming', 'outgoing', 'pending', 'completed'] as FilterType[]).map((f) => (
+            {(['all', 'incoming', 'outgoing', 'rejected', 'pending', 'approved', 'sent', 'completed'] as FilterType[]).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -459,16 +991,31 @@ export const KirimBarangView: React.FC = () => {
                 {f === 'all' && 'Semua'}
                 {f === 'incoming' && `Masuk ke ${currentStore.toUpperCase()}`}
                 {f === 'outgoing' && `Keluar dari ${currentStore.toUpperCase()}`}
+                {f === 'rejected' && 'Ditolak'}
                 {f === 'pending' && 'Pending'}
-                {f === 'completed' && 'Selesai'}
+                {f === 'approved' && 'Setujui'}
+                {f === 'sent' && 'Dikirim'}
+                {f === 'completed' && 'Diterima'}
               </button>
             ))}
-            <button
-              onClick={loadRequests}
-              className="ml-auto p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400"
-            >
-              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-            </button>
+            <div className="ml-auto flex w-full md:w-auto items-center gap-2">
+              <div className="relative w-full md:w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={14} />
+                <input
+                  type="text"
+                  value={requestPartSearch}
+                  onChange={(e) => setRequestPartSearch(e.target.value)}
+                  placeholder="Cari part number..."
+                  className="w-full pl-9 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-100 placeholder-gray-500 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+              <button
+                onClick={loadRequests}
+                className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400"
+              >
+                <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+              </button>
+            </div>
           </div>
 
           {/* Request List */}
@@ -481,14 +1028,17 @@ export const KirimBarangView: React.FC = () => {
               <Package size={48} className="mx-auto mb-4 opacity-50" />
               <p>Belum ada request transfer</p>
             </div>
-          ) : (
+          ) : filter === 'all' ? (
             <div className="space-y-3">
-              {requests.map((req) => (
+              {allRequestRows.length === 0 ? (
+                <div className="text-center py-10 text-gray-500 text-sm bg-gray-800/40 border border-gray-700 rounded-xl">
+                  <p>Part number "{requestPartSearch}" tidak ditemukan.</p>
+                </div>
+              ) : allRequestRows.map((req) => (
                 <div
                   key={req.id}
                   className="bg-gray-800/50 border border-gray-700 rounded-xl overflow-hidden"
                 >
-                  {/* Request Header */}
                   <div
                     className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-gray-700/30"
                     onClick={() => setExpandedRequest(expandedRequest === req.id ? null : req.id)}
@@ -508,12 +1058,44 @@ export const KirimBarangView: React.FC = () => {
                         </span>
                       </div>
                       <div>
-                        <p className="text-gray-200 font-medium">{req.part_number}</p>
+                        {isPartNumberEditable(req) ? (
+                          <input
+                            type="text"
+                            list={req.from_store === 'mjm' ? 'part-options-mjm' : 'part-options-bjw'}
+                            value={getPartNumberEditValue(req)}
+                            onChange={(e) => updatePartNumberEditValue(req.id, e.target.value)}
+                            onBlur={() => handlePartNumberUpdate(req, getPartNumberEditValue(req))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                (e.currentTarget as HTMLInputElement).blur();
+                              }
+                            }}
+                            disabled={loading || partNumberOptionsLoading}
+                            className="w-56 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-gray-100 text-xs font-mono"
+                            placeholder={`Ketik part number (${req.from_store.toUpperCase()})`}
+                            title={`Ketik atau pilih part number dari base_${req.from_store}`}
+                          />
+                        ) : (
+                          <p className="text-gray-200 font-medium">{req.part_number}</p>
+                        )}
                         <p className="text-gray-500 text-xs truncate max-w-[200px]">{req.nama_barang}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-lg font-bold text-indigo-400">x{req.quantity}</span>
+                      {stockComparisonMap[req.id] && (
+                        <div className="hidden md:flex items-center gap-1 text-[11px]">
+                          <span className="px-2 py-0.5 rounded border border-blue-800/50 bg-blue-900/30 text-blue-300">
+                            MJM: {stockComparisonMap[req.id].mjm}
+                          </span>
+                          <span className="px-2 py-0.5 rounded border border-purple-800/50 bg-purple-900/30 text-purple-300">
+                            BJW: {stockComparisonMap[req.id].bjw}
+                          </span>
+                        </div>
+                      )}
+                      <span className="text-lg font-bold text-indigo-400">
+                        x{isSendQtyEditable(req) ? getSendQtyNumber(req) : req.quantity}
+                      </span>
                       <span className={`px-2 py-1 rounded-lg text-xs font-medium border ${getStatusColor(req.status)}`}>
                         {getStatusLabel(req.status)}
                       </span>
@@ -521,10 +1103,9 @@ export const KirimBarangView: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Expanded Details */}
                   {expandedRequest === req.id && (
                     <div className="px-4 py-3 border-t border-gray-700 bg-gray-800/30">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm mb-4">
                         <div>
                           <span className="text-gray-500 text-xs">Brand</span>
                           <p className="text-gray-300">{req.brand || '-'}</p>
@@ -540,6 +1121,10 @@ export const KirimBarangView: React.FC = () => {
                         <div>
                           <span className="text-gray-500 text-xs">Tanggal</span>
                           <p className="text-gray-300">{new Date(req.created_at).toLocaleDateString('id-ID')}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 text-xs">Rak Pengirim</span>
+                          <p className="text-gray-300">{getSenderShelf(req.id)}</p>
                         </div>
                       </div>
 
@@ -557,7 +1142,6 @@ export const KirimBarangView: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Timeline */}
                       <div className="flex flex-wrap gap-2 text-xs mb-4">
                         {req.approved_at && (
                           <span className="px-2 py-1 bg-blue-900/20 text-blue-400 rounded">
@@ -576,14 +1160,41 @@ export const KirimBarangView: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Action Buttons */}
+                      {stockComparisonMap[req.id] && (
+                        <div className="mb-4 p-3 bg-emerald-900/20 border border-emerald-800/40 rounded-lg">
+                          <p className="text-emerald-300 text-xs mb-2">Perbandingan Stok MJM vs BJW</p>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="rounded-lg border border-blue-800/40 bg-blue-900/20 px-3 py-2">
+                              <span className="text-[11px] text-blue-300/80">Stok MJM</span>
+                              <p className="text-blue-300 font-bold text-lg leading-tight">{stockComparisonMap[req.id].mjm}</p>
+                            </div>
+                            <div className="rounded-lg border border-purple-800/40 bg-purple-900/20 px-3 py-2">
+                              <span className="text-[11px] text-purple-300/80">Stok BJW</span>
+                              <p className="text-purple-300 font-bold text-lg leading-tight">{stockComparisonMap[req.id].bjw}</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="flex flex-wrap gap-2">
-                        {/* Pending: Can approve or reject (from source store) */}
                         {req.status === 'pending' && req.from_store === currentStore && (
                           <>
+                            <input
+                              type="number"
+                              min="1"
+                              value={getSendQtyValue(req)}
+                              onChange={(e) => updateSendQty(req.id, e.target.value)}
+                              className="w-20 px-2 py-1.5 bg-gray-700 border border-gray-600 rounded-lg text-sm text-gray-100"
+                              title="Edit qty"
+                            />
                             <button
-                              onClick={() => handleApprove(req.id)}
-                              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium flex items-center gap-1 hover:bg-blue-700"
+                              onClick={() => handleApprove(req.id, getSendQtyNumber(req))}
+                              disabled={getSendQtyNumber(req) <= 0}
+                              className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1 ${
+                                getSendQtyNumber(req) > 0
+                                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                  : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                              }`}
                             >
                               <Check size={14} /> Setujui
                             </button>
@@ -596,17 +1207,30 @@ export const KirimBarangView: React.FC = () => {
                           </>
                         )}
 
-                        {/* Approved: Can send (from source store) */}
                         {req.status === 'approved' && req.from_store === currentStore && (
-                          <button
-                            onClick={() => handleSend(req.id)}
-                            className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm font-medium flex items-center gap-1 hover:bg-purple-700"
-                          >
-                            <Truck size={14} /> Kirim Barang
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="1"
+                              value={getSendQtyValue(req)}
+                              onChange={(e) => updateSendQty(req.id, e.target.value)}
+                              className="w-20 px-2 py-1.5 bg-gray-700 border border-gray-600 rounded-lg text-sm text-gray-100"
+                              title="Qty kirim"
+                            />
+                            <button
+                              onClick={() => handleSend(req.id, getSendQtyNumber(req))}
+                              disabled={getSendQtyNumber(req) <= 0}
+                              className={`px-3 py-1.5 text-white rounded-lg text-sm font-medium flex items-center gap-1 ${
+                                getSendQtyNumber(req) > 0
+                                  ? 'bg-purple-600 hover:bg-purple-700'
+                                  : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                              }`}
+                            >
+                              <Truck size={14} /> Kirim Barang
+                            </button>
+                          </div>
                         )}
 
-                        {/* Sent: Can receive (at destination store) */}
                         {req.status === 'sent' && req.to_store === currentStore && (
                           <>
                             <button
@@ -624,7 +1248,6 @@ export const KirimBarangView: React.FC = () => {
                           </>
                         )}
 
-                        {/* Pending: Can delete (by requester) */}
                         {req.status === 'pending' && req.to_store === currentStore && (
                           <button
                             onClick={() => handleDelete(req.id)}
@@ -638,6 +1261,291 @@ export const KirimBarangView: React.FC = () => {
                   )}
                 </div>
               ))}
+            </div>
+          ) : (
+            <div className="bg-gray-800/50 border border-gray-700 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-gray-100">
+                    Tabel Request {filterDisplayLabel} - {statusTableDateLabel}
+                  </p>
+                  <p className="text-xs text-gray-400">Total item: {statusTableRows.length}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={selectedPeriodValue}
+                    onChange={(e) => setSelectedPeriod(e.target.value as PeriodFilterType)}
+                    className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200"
+                    title="Pilih periode data"
+                    disabled={requests.length === 0}
+                  >
+                    {availablePeriodOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label} ({option.count})
+                      </option>
+                    ))}
+                  </select>
+                  {filter === 'approved' && approvedSendableRows.length > 0 && (
+                    <button
+                      onClick={handleBulkSendSelected}
+                      disabled={selectedApprovedSendableRows.length === 0 || loading}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 ${
+                        selectedApprovedSendableRows.length > 0 && !loading
+                          ? 'bg-purple-700 text-white hover:bg-purple-600'
+                          : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                      }`}
+                      title="Kirim semua request yang dicentang"
+                    >
+                      <Truck size={14} />
+                      Kirim Terpilih ({selectedApprovedSendableRows.length})
+                    </button>
+                  )}
+                  {filter === 'approved' && approvedSendableRows.length > 0 && (
+                    <button
+                      onClick={handleBulkRevertToPending}
+                      disabled={selectedApprovedSendableRows.length === 0 || loading}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 ${
+                        selectedApprovedSendableRows.length > 0 && !loading
+                          ? 'bg-amber-700 text-white hover:bg-amber-600'
+                          : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                      }`}
+                      title="Kembalikan semua request yang dicentang ke pending"
+                    >
+                      <X size={14} />
+                      Kembali Pending ({selectedApprovedSendableRows.length})
+                    </button>
+                  )}
+                  <button
+                    onClick={handleDownloadFilterPdf}
+                    className={`px-3 py-1.5 text-white rounded-lg text-xs font-medium flex items-center gap-1 ${
+                      filter === 'rejected'
+                        ? 'bg-red-700 hover:bg-red-600'
+                        : filter === 'approved'
+                          ? 'bg-blue-700 hover:bg-blue-600'
+                          : 'bg-indigo-700 hover:bg-indigo-600'
+                    }`}
+                    title="Download PDF per periode"
+                  >
+                    <Download size={14} />
+                    PDF
+                  </button>
+                  <button
+                    onClick={() => setIsStatusTableMinimized(prev => !prev)}
+                    className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg text-xs font-medium flex items-center gap-1"
+                    title="Minimize/Buka tabel"
+                  >
+                    {isStatusTableMinimized ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+                    {isStatusTableMinimized ? 'Buka' : 'Minimize'}
+                  </button>
+                </div>
+              </div>
+
+              {!isStatusTableMinimized && (
+                <div className="border-t border-gray-700">
+                  {statusTableRows.length === 0 ? (
+                    <div className="text-center py-10 text-gray-500 text-sm">
+                      {selectedPeriod === ALL_PERIOD_VALUE ? (
+                        <p>Tidak ada data request untuk filter {filterDisplayLabel.toLowerCase()}</p>
+                      ) : (
+                        <p>Tidak ada data request untuk filter {filterDisplayLabel.toLowerCase()} pada periode {statusTableDateLabel}</p>
+                      )}
+                      {requestPartSearchKey && (
+                        <p className="mt-1 text-xs text-gray-400">Part number "{requestPartSearch}" tidak ditemukan.</p>
+                      )}
+                      {requests.length > 0 && (
+                        <p className="mt-1 text-xs text-gray-400">Coba ubah pilihan periode di atas untuk melihat data lainnya.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-gray-900/70">
+                          <tr>
+                            {filter === 'approved' && (
+                              <th className="px-3 py-2 text-center text-gray-400">
+                                <input
+                                  type="checkbox"
+                                  checked={isAllApprovedSelected}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedSendRequestIds(approvedSendableRows.map(req => req.id));
+                                    } else {
+                                      setSelectedSendRequestIds([]);
+                                    }
+                                  }}
+                                  disabled={approvedSendableRows.length === 0 || loading}
+                                  className="h-3.5 w-3.5 accent-purple-600"
+                                  title="Pilih semua untuk kirim"
+                                />
+                              </th>
+                            )}
+                            <th className="px-3 py-2 text-left text-gray-400">No</th>
+                            <th className="px-3 py-2 text-left text-gray-400">Part Number</th>
+                            <th className="px-3 py-2 text-left text-gray-400">Nama Barang</th>
+                            <th className="px-3 py-2 text-center text-gray-400">Stok Dari</th>
+                            <th className="px-3 py-2 text-center text-gray-400">Stok Ke</th>
+                            <th className="px-3 py-2 text-left text-gray-400">Rak Pengirim</th>
+                            <th className="px-3 py-2 text-right text-gray-400">Qty</th>
+                            <th className="px-3 py-2 text-left text-gray-400">Status</th>
+                            <th className="px-3 py-2 text-left text-gray-400">Request Oleh</th>
+                            <th className="px-3 py-2 text-left text-gray-400">{filterDateLabel}</th>
+                            <th className="px-3 py-2 text-left text-gray-400">{filter === 'rejected' ? 'Alasan Ditolak' : 'Catatan'}</th>
+                            <th className="px-3 py-2 text-left text-gray-400">Aksi</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {statusTableRows.map((req, index) => (
+                            <tr key={req.id} className="border-t border-gray-700/50 hover:bg-gray-700/20">
+                              {filter === 'approved' && (
+                                <td className="px-3 py-2 text-center">
+                                  {isBulkSendEligible(req) ? (
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedSendRequestIds.includes(req.id)}
+                                      onChange={(e) => toggleSelectSendRequest(req.id, e.target.checked)}
+                                      disabled={loading}
+                                      className="h-3.5 w-3.5 accent-purple-600"
+                                      title="Pilih request ini untuk kirim massal"
+                                    />
+                                  ) : (
+                                    <span className="text-gray-600">-</span>
+                                  )}
+                                </td>
+                              )}
+                              <td className="px-3 py-2 text-gray-300">{index + 1}</td>
+                              <td className="px-3 py-2 text-gray-200 font-mono">
+                                {isPartNumberEditable(req) ? (
+                                  <input
+                                    type="text"
+                                    list={req.from_store === 'mjm' ? 'part-options-mjm' : 'part-options-bjw'}
+                                    value={getPartNumberEditValue(req)}
+                                    onChange={(e) => updatePartNumberEditValue(req.id, e.target.value)}
+                                    onBlur={() => handlePartNumberUpdate(req, getPartNumberEditValue(req))}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        (e.currentTarget as HTMLInputElement).blur();
+                                      }
+                                    }}
+                                    disabled={loading || partNumberOptionsLoading}
+                                    className="w-52 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-gray-100 text-xs font-mono"
+                                    placeholder={`Ketik part number (${req.from_store.toUpperCase()})`}
+                                    title={`Ketik atau pilih part number dari base_${req.from_store}`}
+                                  />
+                                ) : (
+                                  req.part_number
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-gray-200">{req.nama_barang}</td>
+                              <td className="px-3 py-2 text-center">
+                                <span className={req.from_store === 'mjm' ? 'text-blue-300' : 'text-purple-300'}>
+                                  {req.from_store.toUpperCase()}: {getStockByStore(req.id, req.from_store) ?? '-'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <span className={req.to_store === 'mjm' ? 'text-blue-300' : 'text-purple-300'}>
+                                  {req.to_store.toUpperCase()}: {getStockByStore(req.id, req.to_store) ?? '-'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-gray-300">{getSenderShelf(req.id)}</td>
+                              <td className="px-3 py-2 text-right">
+                                {isSendQtyEditable(req) ? (
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={getSendQtyValue(req)}
+                                    onChange={(e) => updateSendQty(req.id, e.target.value)}
+                                    className="w-20 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-gray-100 text-xs text-right"
+                                    title="Edit qty kirim"
+                                  />
+                                ) : (
+                                  <span className="text-indigo-300 font-semibold">{req.quantity}</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${getStatusColor(req.status)}`}>
+                                  {getStatusLabel(req.status)}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-gray-300">{req.requested_by || '-'}</td>
+                              <td className="px-3 py-2 text-gray-300">
+                                {getFilterDateValue(req, filter)
+                                  ? new Date(getFilterDateValue(req, filter) as string).toLocaleString('id-ID')
+                                  : '-'}
+                              </td>
+                              <td className="px-3 py-2 text-gray-300">
+                                {filter === 'rejected' ? (req.catatan_reject || '-') : (req.catatan || req.catatan_reject || '-')}
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="flex flex-wrap gap-1">
+                                  {req.status === 'pending' && req.from_store === currentStore && (
+                                    <>
+                                      <button
+                                        onClick={() => handleApprove(req.id, getSendQtyNumber(req))}
+                                        disabled={getSendQtyNumber(req) <= 0}
+                                        className={`px-2 py-1 rounded text-[10px] font-medium ${
+                                          getSendQtyNumber(req) > 0
+                                            ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                            : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                        }`}
+                                      >
+                                        Setujui
+                                      </button>
+                                      <button
+                                        onClick={() => setRejectModal({ id: req.id, show: true, reason: '' })}
+                                        className="px-2 py-1 bg-red-600 text-white rounded text-[10px] font-medium hover:bg-red-700"
+                                      >
+                                        Tolak
+                                      </button>
+                                    </>
+                                  )}
+                                  {req.status === 'approved' && req.from_store === currentStore && (
+                                    <button
+                                      onClick={() => handleSend(req.id, getSendQtyNumber(req))}
+                                      disabled={getSendQtyNumber(req) <= 0}
+                                      className={`px-2 py-1 rounded text-[10px] font-medium ${
+                                        getSendQtyNumber(req) > 0
+                                          ? 'bg-purple-600 text-white hover:bg-purple-700'
+                                          : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                      }`}
+                                    >
+                                      Kirim
+                                    </button>
+                                  )}
+                                  {req.status === 'sent' && req.to_store === currentStore && (
+                                    <>
+                                      <button
+                                        onClick={() => handleReceive(req.id)}
+                                        className="px-2 py-1 bg-green-600 text-white rounded text-[10px] font-medium hover:bg-green-700"
+                                      >
+                                        Terima
+                                      </button>
+                                      <button
+                                        onClick={() => setRejectModal({ id: req.id, show: true, reason: '' })}
+                                        className="px-2 py-1 bg-red-600 text-white rounded text-[10px] font-medium hover:bg-red-700"
+                                      >
+                                        Tolak
+                                      </button>
+                                    </>
+                                  )}
+                                  {req.status === 'pending' && req.to_store === currentStore && (
+                                    <button
+                                      onClick={() => handleDelete(req.id)}
+                                      className="px-2 py-1 bg-gray-600 text-white rounded text-[10px] font-medium hover:bg-gray-700"
+                                    >
+                                      Hapus
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

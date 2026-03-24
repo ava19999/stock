@@ -60,6 +60,38 @@ interface PivotFilterDropdownProps {
   onChange: (next: string[]) => void;
 }
 
+const fetchAllRowsPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  buildQuery: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+  const pageSize = options?.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase.from(table).select(selectColumns);
+    query = buildQuery(query);
+    if (options?.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) {
+      console.error(`Error fetching paged rows from ${table}:`, error);
+      return rows;
+    }
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
 const PivotFilterDropdown: React.FC<PivotFilterDropdownProps> = ({
   label,
   options,
@@ -223,30 +255,107 @@ export const ClosingView: React.FC = () => {
     return type === 'masuk' ? `barang_masuk_${store}` : `barang_keluar_${store}`;
   };
 
+  const normalizeMoneyValue = (value: unknown): number => {
+    if (value === null || value === undefined || value === '') return 0;
+
+    const parseFinite = (input: string): number => {
+      const parsed = Number(input);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const parseFromString = (rawValue: string): number => {
+      const cleaned = rawValue.replace(/[^\d.,-]/g, '').trim();
+      if (!cleaned) return 0;
+
+      const isNegative = cleaned.startsWith('-');
+      const unsigned = cleaned.replace(/-/g, '');
+      let parsed = 0;
+
+      if (unsigned.includes('.') && unsigned.includes(',')) {
+        const lastDot = unsigned.lastIndexOf('.');
+        const lastComma = unsigned.lastIndexOf(',');
+        const normalized =
+          lastDot > lastComma
+            ? unsigned.replace(/,/g, '')
+            : unsigned.replace(/\./g, '').replace(',', '.');
+        parsed = parseFinite(normalized);
+      } else if (unsigned.includes('.')) {
+        parsed = /^\d{1,3}(\.\d{3})+$/.test(unsigned)
+          ? parseFinite(unsigned.replace(/\./g, ''))
+          : parseFinite(unsigned);
+      } else if (unsigned.includes(',')) {
+        parsed = /^\d{1,3}(,\d{3})+$/.test(unsigned)
+          ? parseFinite(unsigned.replace(/,/g, ''))
+          : parseFinite(unsigned.replace(',', '.'));
+      } else {
+        parsed = parseFinite(unsigned);
+      }
+
+      return isNegative ? -parsed : parsed;
+    };
+
+    if (typeof value === 'string') {
+      return parseFromString(value);
+    }
+
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) return 0;
+      if (Number.isInteger(value)) return value;
+
+      // Handle values that likely came from Indonesian thousand separators, e.g. 268.961 -> 268961
+      const decimalPart = value.toString().split('.')[1] || '';
+      if (decimalPart.length === 3) {
+        return Math.round(value * 1000);
+      }
+
+      return value;
+    }
+
+    const fallback = Number(value);
+    return Number.isFinite(fallback) ? fallback : 0;
+  };
+
+  const normalizeBarangMasukRow = (row: BarangMasukRow): BarangMasukRow => ({
+    ...row,
+    qty_masuk: Number((row as any).qty_masuk || 0),
+    harga_satuan: normalizeMoneyValue((row as any).harga_satuan),
+    harga_total: normalizeMoneyValue((row as any).harga_total)
+  });
+
+  const normalizeBarangKeluarRow = (row: BarangKeluarRow): BarangKeluarRow => ({
+    ...row,
+    qty_keluar: Number((row as any).qty_keluar || 0),
+    harga_satuan: normalizeMoneyValue((row as any).harga_satuan),
+    harga_total: normalizeMoneyValue((row as any).harga_total)
+  });
+
   const loadData = async () => {
     setLoading(true);
     try {
-      // Fetch Barang Masuk
-      const { data: masukData, error: masukError } = await supabase
-        .from(getTableName('masuk'))
-        .select('*')
-        .gte('created_at', `${startDate}T00:00:00`)
-        .lte('created_at', `${endDate}T23:59:59`)
-        .order('created_at', { ascending: true });
-      
-      if (masukError) console.error('Error fetching barang masuk:', masukError);
-      setBarangMasuk(masukData || []);
+      const [masukData, keluarData] = await Promise.all([
+        fetchAllRowsPaged<BarangMasukRow>(
+          getTableName('masuk'),
+          '*',
+          (q) => q
+            .gte('created_at', `${startDate}T00:00:00`)
+            .lte('created_at', `${endDate}T23:59:59`),
+          { orderBy: 'created_at', ascending: true }
+        ),
+        fetchAllRowsPaged<BarangKeluarRow>(
+          getTableName('keluar'),
+          '*',
+          (q) => q
+            .gte('created_at', `${startDate}T00:00:00`)
+            .lte('created_at', `${endDate}T23:59:59`),
+          { orderBy: 'created_at', ascending: true }
+        )
+      ]);
 
-      // Fetch Barang Keluar
-      const { data: keluarData, error: keluarError } = await supabase
-        .from(getTableName('keluar'))
-        .select('*')
-        .gte('created_at', `${startDate}T00:00:00`)
-        .lte('created_at', `${endDate}T23:59:59`)
-        .order('created_at', { ascending: true });
-      
-      if (keluarError) console.error('Error fetching barang keluar:', keluarError);
-      setBarangKeluar(keluarData || []);
+      const normalizedMasuk = (masukData || []).map(normalizeBarangMasukRow);
+      const normalizedKeluar = (keluarData || []).map(normalizeBarangKeluarRow);
+
+      setBarangMasuk(normalizedMasuk);
+      setBarangKeluar(normalizedKeluar);
 
       // Expand all groups by default
       setExpandedKeys(new Set());
@@ -260,7 +369,8 @@ export const ClosingView: React.FC = () => {
     return new Intl.NumberFormat('id-ID', {
       style: 'currency',
       currency: 'IDR',
-      minimumFractionDigits: 0
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
     }).format(amount);
   };
 

@@ -36,11 +36,13 @@ const normalizeDraftRows = (raw: unknown, mode: 'in' | 'out'): QuickInputRow[] =
   const hydrated = raw.map((entry, index) => {
     const baseRow = createEmptyRow(index + 1);
     const draft = entry && typeof entry === 'object' ? (entry as Partial<QuickInputRow>) : {};
+    const draftTanggal = typeof draft.tanggal === 'string' ? draft.tanggal : baseRow.tanggal;
 
     return {
       ...baseRow,
       ...draft,
       id: index + 1,
+      tanggal: draftTanggal,
       operation: mode,
       error: undefined,
       isLoading: false
@@ -68,6 +70,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const itemsPerPage = 100;
   const COLUMNS_COUNT = 8; 
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const saveAllInFlightRef = useRef(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // --- FETCH SUPPLIERS LIST ---
@@ -239,7 +242,6 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
 
   const handlePartNumberChange = (id: number, value: string) => {
     setRows(prev => prev.map(row => row.id === id ? { ...row, partNumber: value.toUpperCase() } : row));
-    const rowIndex = rows.findIndex(r => r.id === id);
     if (value.length >= 2) {
       clearTimeout(searchTimeoutRef.current);
       searchTimeoutRef.current = setTimeout(() => {
@@ -247,7 +249,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
         // Pencarian barang tetap sama
         const matches = items.filter(item => item.partNumber && item.partNumber.toLowerCase().includes(lowerVal)).slice(0, 10);
         setSuggestions(matches);
-        setActiveSearchIndex(rowIndex);
+        setActiveSearchIndex(id);
         setHighlightedIndex(-1);
       }, 300);
     } else {
@@ -308,6 +310,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   const updateRow = (id: number, updates: Partial<QuickInputRow> | keyof QuickInputRow, value?: any) => {
     setRows(prev => prev.map(row => {
         if (row.id !== id) return row;
+
         if (typeof updates === 'string') {
             return { ...row, [updates]: value, error: undefined };
         } else {
@@ -395,93 +398,141 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
   };
 
   const saveAllRows = async () => {
+    if (saveAllInFlightRef.current) return;
+    saveAllInFlightRef.current = true;
     setIsSavingAll(true);
-    const rowsToSave = rows.filter(row => checkIsRowComplete(row));
-    if (rowsToSave.length === 0) {
-        setIsSavingAll(false);
-        if (showToast) showToast('Isi lengkap data sebelum menyimpan!', 'error');
-        return;
-    }
-    
-    if (mode === 'out') {
-      // Barang Keluar: Group by customer + tanggal, save to orders
-      // First validate all rows
-      const validationResults = await Promise.all(rowsToSave.map(row => saveRow(row)));
-      const allValid = validationResults.every(r => r);
-      
-      if (!allValid) {
-        setIsSavingAll(false);
-        if (showToast) showToast('Beberapa item gagal validasi. Periksa kembali.', 'error');
-        return;
+
+    try {
+      const rowsToSave = rows.filter(row => checkIsRowComplete(row));
+      if (rowsToSave.length === 0) {
+          if (showToast) showToast('Isi lengkap data sebelum menyimpan!', 'error');
+          return;
       }
       
-      // Group by customer + date (using JSON.stringify for safer key generation)
-      const groupedOrders: Record<string, QuickInputRow[]> = {};
-      rowsToSave.forEach(row => {
-        const key = JSON.stringify([row.customer.trim().toLowerCase(), row.tanggal]);
-        if (!groupedOrders[key]) groupedOrders[key] = [];
-        groupedOrders[key].push(row);
-      });
-      
-      // Save each group as an order
-      let successCount = 0;
-      for (const [key, groupRows] of Object.entries(groupedOrders)) {
-        const firstRow = groupRows[0];
-        const cartItems = groupRows.map(row => ({
-          partNumber: row.partNumber,
-          name: row.namaBarang,
-          cartQuantity: row.qtyKeluar,
-          price: row.hargaSatuan,
-          brand: row.brand || '',
-          application: row.aplikasi || '',
-        }));
+      if (mode === 'out') {
+        // Barang Keluar: Group by customer + tanggal, save to orders
+        // First validate all rows
+        const validationResults = await Promise.all(rowsToSave.map(row => saveRow(row)));
+        const allValid = validationResults.every(r => r);
         
-        const success = await saveOfflineOrder(cartItems, firstRow.customer, firstRow.tempo || 'CASH', selectedStore);
-        if (success) {
-          successCount += groupRows.length;
-          // Remove saved rows
-          setRows(prev => prev.filter(r => !groupRows.find(gr => gr.id === r.id)));
+        if (!allValid) {
+          if (showToast) showToast('Beberapa item gagal validasi. Periksa kembali.', 'error');
+          return;
+        }
+        
+        // Group by customer + date (BJW: include tempo to avoid mixing SALES/non-SALES in one order)
+        const groupedOrders: Record<string, QuickInputRow[]> = {};
+        rowsToSave.forEach(row => {
+          const key = selectedStore === 'bjw'
+            ? JSON.stringify([row.customer.trim().toLowerCase(), row.tanggal, (row.tempo || 'CASH').trim().toUpperCase()])
+            : JSON.stringify([row.customer.trim().toLowerCase(), row.tanggal]);
+          if (!groupedOrders[key]) groupedOrders[key] = [];
+          groupedOrders[key].push(row);
+        });
+        
+        // Save each group as an order
+        let successCount = 0;
+        for (const [key, groupRows] of Object.entries(groupedOrders)) {
+          const firstRow = groupRows[0];
+          const cartItems = groupRows.map(row => ({
+            partNumber: row.partNumber,
+            name: row.namaBarang,
+            cartQuantity: row.qtyKeluar,
+            price: row.hargaSatuan,
+            brand: row.brand || '',
+            application: row.aplikasi || '',
+          }));
+          
+          const success = await saveOfflineOrder(
+            cartItems,
+            firstRow.customer,
+            firstRow.tempo || 'CASH',
+            selectedStore,
+            firstRow.tanggal
+          );
+          if (success) {
+            successCount += groupRows.length;
+            // Remove saved rows
+            setRows(prev => prev.filter(r => !groupRows.find(gr => gr.id === r.id)));
+          }
+        }
+        
+        if (showToast && successCount > 0) {
+          showToast(`${successCount} item berhasil disimpan ke Proses Pesanan`, 'success');
+        }
+        
+        if (successCount === rowsToSave.length) {
+          // Reset with empty rows
+          const initialRows = createInitialRowsForMode(mode);
+          setRows(initialRows);
+        }
+        
+        if (onRefresh) onRefresh();
+        setRefreshTableTrigger(prev => prev + 1);
+      } else {
+        // Barang Masuk: proses berurutan untuk mencegah race/update ganda.
+        let successCount = 0;
+        for (const row of rowsToSave) {
+          const success = await saveRow(row);
+          if (success) successCount += 1;
+        }
+        
+        if (showToast && successCount > 0) showToast(`${successCount} item berhasil diproses`, 'success');
+        if (successCount > 0) {
+            if (onRefresh) onRefresh();
+            setRefreshTableTrigger(prev => prev + 1); 
+        }
+        
+        const remainingRows = rows.length - successCount;
+        if (remainingRows === 0) {
+           // Reset dengan rows kosong baru sesuai mode
+           const initialRows = createInitialRowsForMode(mode);
+           setRows(initialRows);
         }
       }
-      
-      if (showToast && successCount > 0) {
-        showToast(`${successCount} item berhasil disimpan ke Proses Pesanan`, 'success');
-      }
-      
-      if (successCount === rowsToSave.length) {
-        // Reset with empty rows
-        const initialRows = createInitialRowsForMode(mode);
-        setRows(initialRows);
-      }
-      
-      if (onRefresh) onRefresh();
-      setRefreshTableTrigger(prev => prev + 1);
-    } else {
-      // Barang Masuk: existing logic
-      const results = await Promise.all(rowsToSave.map(row => saveRow(row)));
-      const successCount = results.filter(r => r).length;
-      
-      if (showToast && successCount > 0) showToast(`${successCount} item berhasil diproses`, 'success');
-      if (successCount > 0) {
-          if (onRefresh) onRefresh();
-          setRefreshTableTrigger(prev => prev + 1); 
-      }
-      
-      const remainingRows = rows.length - successCount;
-      if (remainingRows === 0) {
-         // Reset dengan rows kosong baru sesuai mode
-         const initialRows = createInitialRowsForMode(mode);
-         setRows(initialRows);
-      }
+    } finally {
+      setIsSavingAll(false);
+      saveAllInFlightRef.current = false;
     }
-    
-    setIsSavingAll(false);
   };
 
   const validRowsCount = rows.filter(r => checkIsRowComplete(r)).length;
   const startIndex = (currentPage - 1) * itemsPerPage;
   const currentRows = rows.slice(startIndex, startIndex + itemsPerPage);
   const totalPages = Math.ceil(rows.length / itemsPerPage);
+  // Aggregate total per supplier (mode in)
+  const supplierTotals = React.useMemo(() => {
+    if (mode !== 'in') return [];
+    const map = new Map<string, number>();
+    rows.forEach(r => {
+      const name = (r.customer || '').trim();
+      if (!name) return;
+      const total = r.totalHarga || 0;
+      if (total > 0) {
+        map.set(name, (map.get(name) || 0) + total);
+      }
+    });
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, total]) => ({ name, total }));
+  }, [rows, mode]);
+
+  // Aggregate total per customer (mode out)
+  const customerTotals = React.useMemo(() => {
+    if (mode !== 'out') return [];
+    const map = new Map<string, number>();
+    rows.forEach(r => {
+      const name = (r.customer || '').trim();
+      if (!name) return;
+      const total = r.totalHarga || 0;
+      if (total > 0) {
+        map.set(name, (map.get(name) || 0) + total);
+      }
+    });
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, total]) => ({ name, total }));
+  }, [rows, mode]);
 
   return (
     <div className="bg-gray-800 flex flex-col overflow-hidden text-gray-100">
@@ -521,12 +572,14 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
           isSaving={isSavingAll} 
           validCount={validRowsCount}
           mode={mode}
+          supplierTotals={supplierTotals}
+          customerTotals={customerTotals}
           customTitle={mode === 'out' ? `Simpan (${validRowsCount})` : undefined} 
         />
 
         <div className="bg-yellow-900/20 px-4 py-1 text-xs text-yellow-200 text-center border-b border-yellow-900/30">
             Mode: <strong>{mode === 'in' ? 'BARANG MASUK (Tambah Stok)' : 'BARANG KELUAR (Kurangi Stok)'}</strong>. 
-            Pastikan pilihan Tempo: <em>CASH, 3 BLN, 2 BLN, TEMPO, atau NADIR</em>.
+            Pastikan pilihan Tempo: <em>{mode === 'out' && selectedStore === 'bjw' ? 'CASH, 3 BLN, 2 BLN, 1 BLN, atau SALES' : 'CASH, 3 BLN, 2 BLN, 1 BLN, atau NADIR'}</em>.
         </div>
 
         <QuickInputTable
@@ -545,6 +598,7 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
           onSearchKeyDown={handleSearchKeyDown}
           onGridKeyDown={handleGridKeyDown}
           mode={mode}
+          selectedStore={selectedStore}
         />
 
         <QuickInputFooter 
@@ -561,12 +615,17 @@ export const QuickInputView: React.FC<QuickInputViewProps> = ({ items, onRefresh
       ) : (
           <div className="bg-gray-900 border-t border-gray-700 p-6 text-center">
               <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 max-w-2xl mx-auto">
-                  <h4 className="text-lg font-bold text-red-400 mb-2">📋 Alur Barang Keluar</h4>
+                  <h4 className="text-lg font-bold text-red-400 mb-2">Alur Barang Keluar</h4>
                   <p className="text-sm text-gray-300 mb-2">
                       Data akan masuk ke <strong>Proses Pesanan</strong> untuk di-ACC terlebih dahulu.
                   </p>
+                  {selectedStore === 'bjw' && (
+                    <p className="text-xs text-cyan-300 mb-2">
+                      Khusus BJW: tempo <strong>SALES</strong> akan langsung mengurangi stok base dan masuk ke tab <strong>Pesanan &gt; Sales</strong>.
+                    </p>
+                  )}
                   <p className="text-xs text-gray-400">
-                      💡 Tips: Customer & tanggal yang sama akan digabung jadi 1 nota.
+                      Tips: Customer dan tanggal yang sama akan digabung jadi 1 nota.
                   </p>
               </div>
           </div>

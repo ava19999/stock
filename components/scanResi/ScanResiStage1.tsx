@@ -71,6 +71,7 @@ import {
   getResellerNamesFromBarangKeluar,
   addReseller
 } from '../../services/resiScanService';
+import { supabase } from '../../services/supabaseClient';
 import { 
   ResiScanStage, 
   EcommercePlatform, 
@@ -116,6 +117,19 @@ const Toast = ({ message, type, onClose }: any) => (
 
 export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refreshTrigger }) => {
   const { selectedStore, userName } = useStore();
+
+  const normalizeSubTokoValue = (value: string | null | undefined): SubToko => {
+    const normalized = String(value || '')
+      .trim()
+      .toUpperCase()
+      .replace(/_/g, ' ');
+
+    if (normalized === 'MJM' || normalized === 'BJW' || normalized === 'LARIS' || normalized === 'PRAKTIS PART') {
+      return normalized as SubToko;
+    }
+
+    return (selectedStore === 'bjw' ? 'BJW' : 'MJM') as SubToko;
+  };
   
   // State untuk scanning
   const [ecommerce, setEcommerce] = useState<EcommercePlatform>('SHOPEE');
@@ -191,6 +205,19 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
     setSubToko(defaultToko as SubToko);
     setBulkSubToko(defaultToko as SubToko);
   }, [selectedStore]);
+
+  // Jika e-commerce berubah dari RESELLER ke lainnya, jangan bawa nama reseller sebagai sub_toko
+  useEffect(() => {
+    const defaultToko = selectedStore === 'bjw' ? 'BJW' : 'MJM';
+    const allowedSubToko = ['MJM', 'BJW', 'LARIS', 'PRAKTIS PART'];
+    if (ecommerce !== 'RESELLER') {
+      setSubToko(prev => {
+        const upper = String(prev || '').toUpperCase().replace(/_/g, ' ');
+        return allowedSubToko.includes(upper) ? upper as SubToko : defaultToko as SubToko;
+      });
+      setSelectedReseller('');
+    }
+  }, [ecommerce, selectedStore]);
   
   // Auto focus on resi input
   useEffect(() => {
@@ -250,6 +277,61 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
     const names = await getResellerNamesFromBarangKeluar(selectedStore);
     setResellerNamesList(names);
   };
+
+  // Sinkronisasi lintas-device: auto refresh jika ada perubahan di tabel scan_resi.
+  useEffect(() => {
+    if (!selectedStore) return;
+
+    const tableName = selectedStore === 'bjw' ? 'scan_resi_bjw' : 'scan_resi_mjm';
+    let active = true;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const silentReload = async () => {
+      try {
+        const data = await getResiStage1List(selectedStore);
+        if (!active) return;
+        setResiList(data);
+      } catch (error) {
+        console.warn('Stage1 silent reload failed:', error);
+      }
+    };
+
+    const scheduleReload = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        silentReload();
+      }, 250);
+    };
+
+    const channel = supabase
+      .channel(`stage1-sync-${selectedStore}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: tableName },
+        () => scheduleReload()
+      )
+      .subscribe();
+
+    const pollingId = window.setInterval(() => {
+      silentReload();
+    }, 15000);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        silentReload();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      active = false;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      window.clearInterval(pollingId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      supabase.removeChannel(channel);
+    };
+  }, [selectedStore]);
   
   const handleScanResi = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -262,11 +344,17 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
     setLoading(true);
     
     const now = new Date().toISOString(); // atau gunakan format sesuai kebutuhan
+    const defaultToko = selectedStore === 'bjw' ? 'BJW' : 'MJM';
+    const allowedSubToko = ['MJM', 'BJW', 'LARIS', 'PRAKTIS PART'];
+    const normalizedSubToko = normalizeSubTokoValue(subToko);
+    const subTokoForSave = ecommerce === 'RESELLER'
+      ? (String(subToko || '').trim() as SubToko)
+      : (allowedSubToko.includes((normalizedSubToko || '').toUpperCase()) ? normalizedSubToko : defaultToko as SubToko);
 
     const payload = {
       resi: resiInput.trim(),
       ecommerce,
-      sub_toko: subToko,
+      sub_toko: subTokoForSave,
       negara_ekspor: ecommerce === 'EKSPOR' ? negaraEkspor : undefined,
       scanned_by: userName || 'Admin',
       tanggal: now,
@@ -595,9 +683,12 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
 
   const validBulkCount = bulkResiList.filter(r => r.resi.trim() && !r.isDuplicate).length;
   const duplicateBulkCount = bulkResiList.filter(r => r.isDuplicate).length;
+
+  const isCompletedResi = (resi: ResiScanStage) =>
+    resi.stage3_completed || String(resi.status || '').toLowerCase() === 'completed';
   
   const getStatusBadge = (resi: ResiScanStage) => {
-    if (resi.stage3_completed) {
+    if (isCompletedResi(resi)) {
       return <span className="px-2 py-1 text-xs bg-green-600 text-white rounded-full">Selesai</span>;
     }
     if (resi.stage2_verified) {
@@ -683,13 +774,13 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
               ) : (
                 <select
                   value={subToko}
-                  onChange={(e) => setSubToko(e.target.value as SubToko)}
+                  onChange={(e) => setSubToko(normalizeSubTokoValue(e.target.value))}
                   className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="MJM">MJM</option>
                   <option value="BJW">BJW</option>
                   <option value="LARIS">LARIS</option>
-                  <option value="PRAKTIS_PART">PRAKTIS PART</option>
+                  <option value="PRAKTIS PART">PRAKTIS PART</option>
                 </select>
               )}
             </div>
@@ -756,7 +847,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
       <div className="bg-gray-800 rounded-t-xl shadow-lg border border-gray-700 border-b-0">
         <div className="p-4 md:p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">Daftar Resi Stage 1</h2>
+            <h2 className="text-lg font-semibold">Daftar Resi Stage 1 (Pending)</h2>
             <div className="text-sm text-gray-400">
               Total: <span className="font-semibold text-blue-400">{filteredResiList.length}</span>
             </div>
@@ -902,11 +993,11 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
                           <Edit2 size={16} />
                         </button>
                         <button
-                          onClick={() => handleDeleteResi(resi.id, resi.stage2_verified, resi.stage3_completed)}
+                          onClick={() => handleDeleteResi(resi.id, resi.stage2_verified, isCompletedResi(resi))}
                           className={`p-2 hover:bg-red-600/20 rounded-lg transition-colors ${
-                            resi.stage3_completed ? 'text-green-400' : resi.stage2_verified ? 'text-orange-400' : 'text-red-400'
+                            isCompletedResi(resi) ? 'text-green-400' : resi.stage2_verified ? 'text-orange-400' : 'text-red-400'
                           }`}
-                          title={resi.stage3_completed ? 'Hapus (Stage 3)' : resi.stage2_verified ? 'Hapus (Stage 2)' : 'Hapus'}
+                          title={isCompletedResi(resi) ? 'Hapus (Completed)' : resi.stage2_verified ? 'Hapus (Stage 2)' : 'Hapus'}
                         >
                           <Trash2 size={16} />
                         </button>
@@ -1020,13 +1111,13 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
                   ) : (
                     <select
                       value={bulkSubToko}
-                      onChange={(e) => setBulkSubToko(e.target.value as SubToko)}
+                      onChange={(e) => setBulkSubToko(normalizeSubTokoValue(e.target.value))}
                       className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
                     >
                       <option value="MJM">MJM</option>
                       <option value="BJW">BJW</option>
                       <option value="LARIS">LARIS</option>
-                      <option value="PRAKTIS_PART">PRAKTIS PART</option>
+                      <option value="PRAKTIS PART">PRAKTIS PART</option>
                     </select>
                   )}
                 </div>
@@ -1276,7 +1367,7 @@ export const ScanResiStage1: React.FC<ScanResiStage1Props> = ({ onRefresh, refre
               {/* Status Info */}
               <div className="p-3 bg-gray-700/50 rounded-lg">
                 <p className="text-sm text-gray-400">
-                  Status: {editingResi.stage3_completed ? 'Stage 3 (Completed)' : editingResi.stage2_verified ? 'Stage 2' : 'Stage 1'}
+                  Status: {isCompletedResi(editingResi) ? 'Completed' : editingResi.stage2_verified ? 'Stage 2' : 'Stage 1'}
                 </p>
               </div>
             </div>

@@ -1,7 +1,7 @@
 // FILE: src/components/ItemForm.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { InventoryFormData, InventoryItem } from '../types';
-import { fetchPriceHistoryBySource, fetchSellPriceHistory, updateInventory, addInventory } from '../services/supabaseService';
+import { fetchPriceHistoryBySource, fetchSellPriceHistory, updateInventory, addInventory, saveItemImages } from '../services/supabaseService';
 import { X, Save, Upload, Loader2, Package, Layers, DollarSign, History, AlertCircle, ArrowLeft, Plus, User, Calendar, Search } from 'lucide-react';
 import { compressImage, formatRupiah } from '../utils';
 import { useStore } from '../context/StoreContext';
@@ -44,6 +44,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
   const [priceSearchQuery, setPriceSearchQuery] = useState('');
   const [sellPriceSearchQuery, setSellPriceSearchQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const submitInFlightRef = useRef(false);
 
   useEffect(() => {
     if (initialData) {
@@ -167,9 +168,10 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
     !sellPriceSearchQuery || ph.source.toLowerCase().includes(sellPriceSearchQuery.toLowerCase())
   );
 
-  const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
-    e?.preventDefault?.();
-    if (loading) return;
+  const handleSubmit = async (e: React.FormEvent) => {
+    if (submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
+    e.preventDefault();
     setLoading(true);
     setError(null);
 
@@ -228,6 +230,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, onCancel, onSuc
       setError("Kesalahan Sistem.");
     } finally {
       setLoading(false);
+      submitInFlightRef.current = false;
     }
   };
 

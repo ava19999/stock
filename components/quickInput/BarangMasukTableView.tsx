@@ -12,6 +12,18 @@ interface Props {
     onRefresh?: () => void;
 }
 
+const EDITABLE_TEMPO_OPTIONS = ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'] as const;
+
+const normalizeEditableTempo = (tempo?: string): (typeof EDITABLE_TEMPO_OPTIONS)[number] => {
+    const normalized = (tempo || '').trim().toUpperCase();
+    if (!normalized || normalized.includes('CASH')) return 'CASH';
+    if (normalized.includes('NADIR')) return 'NADIR';
+    if (normalized.includes('3')) return '3 BLN';
+    if (normalized.includes('2')) return '2 BLN';
+    if (normalized.includes('1')) return '1 BLN';
+    return 'CASH';
+};
+
 // Helper to extract all photo URLs from foto row
 const extractPhotoUrls = (fotoRow: any): string[] => {
     if (!fotoRow) return [];
@@ -25,6 +37,35 @@ const extractPhotoUrls = (fotoRow: any): string[] => {
     return urls;
 };
 
+const fetchAllRowsPaged = async <T,>(
+    table: string,
+    selectColumns: string,
+    buildQuery: (query: any) => any,
+    options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+    const pageSize = options?.pageSize ?? 1000;
+    const rows: T[] = [];
+    let from = 0;
+
+    while (true) {
+        let query = supabase.from(table).select(selectColumns);
+        query = buildQuery(query);
+        if (options?.orderBy) {
+            query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+        }
+
+        const { data, error } = await query.range(from, from + pageSize - 1);
+        if (error) throw error;
+
+        const page = (data || []) as T[];
+        rows.push(...page);
+        if (page.length < pageSize) break;
+        from += pageSize;
+    }
+
+    return rows;
+};
+
 export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefresh }) => {
     const { selectedStore } = useStore();
     const [data, setData] = useState<any[]>([]);
@@ -36,6 +77,12 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     const [filterDateTo, setFilterDateTo] = useState('');
     const [filterPartNumber, setFilterPartNumber] = useState('');
     const [filterCustomer, setFilterCustomer] = useState('');
+    const [debouncedFilters, setDebouncedFilters] = useState({
+        dateFrom: '',
+        dateTo: '',
+        partNumber: '',
+        customer: ''
+    });
     const [deletingId, setDeletingId] = useState<number | null>(null);
     const [editingId, setEditingId] = useState<number | null>(null);
     const [editForm, setEditForm] = useState<{
@@ -131,23 +178,37 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
 
     // Load part number options for dropdown
     const loadPartOptions = useCallback(async () => {
+        if (!selectedStore) {
+            setPartOptions([]);
+            return;
+        }
+
         try {
-            const tableName = selectedStore === 'mjm' ? 'inventory_mjm' : 'inventory_bjw';
-            const { data: parts, error } = await supabase
-                .from(tableName)
-                .select('part_number, nama_barang, stok_akhir')
-                .order('part_number', { ascending: true })
-                .limit(1000);
-            
-            if (!error && parts) {
-                setPartOptions(parts.map(p => ({
+            const tableName = selectedStore === 'mjm' ? 'base_mjm' : 'base_bjw';
+            const parts = await fetchAllRowsPaged<{ part_number: string; name: string; quantity: number }>(
+                tableName,
+                'part_number, name, quantity',
+                (query) =>
+                    query
+                        .not('part_number', 'is', null)
+                        .not('part_number', 'eq', ''),
+                { orderBy: 'part_number', ascending: true }
+            );
+
+            if (parts) {
+                setPartOptions(parts
+                    .filter(p => p.part_number !== 'SYSTEM-BANNER-PROMO')
+                    .map(p => ({
                     part_number: p.part_number,
-                    name: p.nama_barang || '',
-                    quantity: p.stok_akhir || 0
+                    name: p.name || '',
+                    quantity: Number(p.quantity || 0)
                 })));
+            } else {
+                setPartOptions([]);
             }
         } catch (e) {
             console.error('Error loading part options:', e);
+            setPartOptions([]);
         }
     }, [selectedStore]);
 
@@ -207,10 +268,10 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         try {
             // Build filters object for server-side filtering
             const filters = {
-                partNumber: filterPartNumber || undefined,
-                customer: filterCustomer || undefined,
-                dateFrom: filterDateFrom || undefined,
-                dateTo: filterDateTo || undefined,
+                partNumber: debouncedFilters.partNumber || undefined,
+                customer: debouncedFilters.customer || undefined,
+                dateFrom: debouncedFilters.dateFrom || undefined,
+                dateTo: debouncedFilters.dateTo || undefined,
             };
             
             const { data: logs, total } = await fetchBarangMasukLog(selectedStore, page, LIMIT, filters);
@@ -273,6 +334,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         setFilterDateTo('');
         setFilterPartNumber('');
         setFilterCustomer('');
+        setDebouncedFilters({ dateFrom: '', dateTo: '', partNumber: '', customer: '' });
         setPage(1);
     };
 
@@ -283,7 +345,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
             quantity: String(item.quantity || item.qty_masuk || 0),
             harga_satuan: String(item.harga_satuan || 0),
             customer: item.customer || '',
-            tempo: item.tempo || 'CASH',
+            tempo: normalizeEditableTempo(item.tempo),
         });
     };
 
@@ -296,6 +358,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         const newQty = parseInt(editForm.quantity);
         const newHarga = parseFloat(editForm.harga_satuan) || 0;
         const newPartNumber = editForm.part_number.trim().toUpperCase();
+        const normalizedTempo = normalizeEditableTempo(editForm.tempo);
         const oldQty = item.quantity || item.qty_masuk || 0;
         const oldPartNumber = item.part_number;
         const partNumberChanged = newPartNumber !== oldPartNumber;
@@ -313,8 +376,9 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
         setSavingId(item.id);
         try {
             const tableName = selectedStore === 'mjm' ? 'barang_masuk_mjm' : 'barang_masuk_bjw';
-            const inventoryTable = selectedStore === 'mjm' ? 'inventory_mjm' : 'inventory_bjw';
+            const inventoryTable = selectedStore === 'mjm' ? 'base_mjm' : 'base_bjw';
             const qtyDiff = newQty - oldQty;
+            let resultingCurrentQty = item.current_qty || 0;
 
             // Update barang_masuk record (including part_number)
             const { error: updateError } = await supabase
@@ -325,7 +389,7 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                     harga_satuan: newHarga,
                     harga_total: newQty * newHarga,
                     customer: editForm.customer || null,
-                    tempo: editForm.tempo || 'CASH',
+                    tempo: normalizedTempo,
                 })
                 .eq('id', item.id);
 
@@ -336,51 +400,63 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                 // Part number changed: reduce stock from old part, add to new part
                 
                 // 1. Reduce stock from old part number
-                const { data: oldInventory } = await supabase
+                const { data: oldInventory, error: oldInventoryError } = await supabase
                     .from(inventoryTable)
-                    .select('stok_akhir')
+                    .select('quantity')
                     .eq('part_number', oldPartNumber)
-                    .single();
+                    .maybeSingle();
+
+                if (oldInventoryError) throw oldInventoryError;
 
                 if (oldInventory) {
-                    const oldStock = oldInventory.stok_akhir || 0;
+                    const oldStock = Number(oldInventory.quantity || 0);
                     const newOldStock = Math.max(0, oldStock - oldQty);
-                    await supabase
+                    const { error: oldUpdateError } = await supabase
                         .from(inventoryTable)
-                        .update({ stok_akhir: newOldStock })
+                        .update({ quantity: newOldStock })
                         .eq('part_number', oldPartNumber);
+                    if (oldUpdateError) throw oldUpdateError;
                 }
 
                 // 2. Add stock to new part number
-                const { data: newInventory } = await supabase
+                const { data: newInventory, error: newInventoryError } = await supabase
                     .from(inventoryTable)
-                    .select('stok_akhir')
+                    .select('quantity')
                     .eq('part_number', newPartNumber)
-                    .single();
+                    .maybeSingle();
 
-                if (newInventory) {
-                    const currentNewStock = newInventory.stok_akhir || 0;
-                    await supabase
-                        .from(inventoryTable)
-                        .update({ stok_akhir: currentNewStock + newQty })
-                        .eq('part_number', newPartNumber);
-                }
+                if (newInventoryError) throw newInventoryError;
+                if (!newInventory) throw new Error(`Part number ${newPartNumber} tidak ditemukan di ${inventoryTable}`);
+
+                const currentNewStock = Number(newInventory.quantity || 0);
+                const finalNewStock = currentNewStock + newQty;
+                const { error: newUpdateError } = await supabase
+                    .from(inventoryTable)
+                    .update({ quantity: finalNewStock })
+                    .eq('part_number', newPartNumber);
+                if (newUpdateError) throw newUpdateError;
+
+                resultingCurrentQty = finalNewStock;
             } else if (qtyDiff !== 0) {
                 // Same part number, only qty changed
-                const { data: inventoryData } = await supabase
+                const { data: inventoryData, error: inventoryError } = await supabase
                     .from(inventoryTable)
-                    .select('stok_akhir')
+                    .select('quantity')
                     .eq('part_number', item.part_number)
-                    .single();
+                    .maybeSingle();
+
+                if (inventoryError) throw inventoryError;
 
                 if (inventoryData) {
-                    const currentStock = inventoryData.stok_akhir || 0;
+                    const currentStock = Number(inventoryData.quantity || 0);
                     const newStock = Math.max(0, currentStock + qtyDiff);
-
-                    await supabase
+                    const { error: stockUpdateError } = await supabase
                         .from(inventoryTable)
-                        .update({ stok_akhir: newStock })
+                        .update({ quantity: newStock })
                         .eq('part_number', item.part_number);
+                    if (stockUpdateError) throw stockUpdateError;
+
+                    resultingCurrentQty = newStock;
                 }
             }
 
@@ -395,8 +471,8 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                         harga_satuan: newHarga, 
                         harga_total: newQty * newHarga,
                         customer: editForm.customer,
-                        tempo: editForm.tempo,
-                        current_qty: partNumberChanged ? newQty : ((d.current_qty || 0) + qtyDiff)
+                        tempo: normalizedTempo,
+                        current_qty: resultingCurrentQty
                     } 
                     : d
             ));
@@ -414,8 +490,19 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
     };
 
     useEffect(() => { setPage(1); }, [selectedStore]);
-    // Note: Filters trigger immediate reload. For production, consider debouncing filter inputs to reduce API calls.
-    useEffect(() => { loadData(); }, [selectedStore, page, refreshTrigger, filterDateFrom, filterDateTo, filterPartNumber, filterCustomer]);
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedFilters({
+                dateFrom: filterDateFrom,
+                dateTo: filterDateTo,
+                partNumber: filterPartNumber,
+                customer: filterCustomer
+            });
+        }, 350);
+        return () => clearTimeout(timer);
+    }, [filterDateFrom, filterDateTo, filterPartNumber, filterCustomer]);
+
+    useEffect(() => { loadData(); }, [selectedStore, page, refreshTrigger, debouncedFilters]);
 
     const totalPages = Math.ceil(totalRows / LIMIT);
 
@@ -642,8 +729,11 @@ export const BarangMasukTableView: React.FC<Props> = ({ refreshTrigger, onRefres
                                                 onChange={(e) => setEditForm({ ...editForm, tempo: e.target.value })}
                                                 className="w-20 px-2 py-1 text-xs bg-gray-900 border border-gray-500 rounded text-gray-300 focus:outline-none"
                                             >
-                                                <option value="CASH">CASH</option>
-                                                <option value="TEMPO">TEMPO</option>
+                                                {EDITABLE_TEMPO_OPTIONS.map((tempoOption) => (
+                                                    <option key={tempoOption} value={tempoOption}>
+                                                        {tempoOption}
+                                                    </option>
+                                                ))}
                                             </select>
                                         ) : (
                                             <span className="text-gray-500">{item.tempo || '-'}</span>

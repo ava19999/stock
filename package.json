@@ -6,7 +6,17 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "quick:start": "cmd /c ops\\start-quick.cmd",
+    "quick:stop": "cmd /c ops\\stop-quick.cmd",
+    "quick:status": "cmd /c ops\\status-quick.cmd",
+    "public:start": "cmd /c ops\\start-public.cmd",
+    "public:stop": "cmd /c ops\\stop-public.cmd",
+    "public:status": "cmd /c ops\\status-public.cmd",
+    "public:use-env": "cmd /c ops\\use-public-env.cmd",
+    "public:backup": "cmd /c ops\\backup-server.cmd -IncludeStorage",
+    "public:restore": "cmd /c ops\\restore-server.cmd",
+    "public:migrate": "cmd /c ops\\migrate-to-new-pc.cmd"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -25,6 +35,7 @@
   "devDependencies": {
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "supabase": "^2.78.1",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

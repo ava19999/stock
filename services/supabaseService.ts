@@ -33,25 +33,610 @@ const parseDateToNumber = (dateVal: any): number => {
   return isNaN(parsed) ? Date.now() : parsed;
 };
 
+const toSafeNumber = (value: unknown): number => {
+  const n = Number(value || 0);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const normalizePart = (value: string | null | undefined): string => {
+  return (value || '').trim().toUpperCase();
+};
+
+const normalizeTempo = (value: string | null | undefined): string => {
+  return (value || '').trim().toUpperCase();
+};
+
+const normalizeText = (value: string | null | undefined): string => {
+  const v = (value || '').trim().toUpperCase();
+  return v || 'UNKNOWN';
+};
+
+const INVENTORY_SELECT_COLUMNS = 'part_number,name,brand,application,shelf,quantity,created_at';
+const FOTO_SELECT_COLUMNS = 'part_number,foto_1,foto_2,foto_3,foto_4,foto_5,foto_6,foto_7,foto_8,foto_9,foto_10';
+// NOTE:
+// Table barang_masuk_mjm/barang_masuk_bjw does not have columns `resi` and `kode_toko`.
+// Keep this select list aligned with actual schema, otherwise Supabase returns 42703
+// and riwayat/detail barang masuk becomes empty.
+const BARANG_MASUK_LOG_SELECT_COLUMNS = 'id,created_at,part_number,nama_barang,qty_masuk,stok_akhir,harga_satuan,harga_total,customer,tempo,ecommerce';
+const BARANG_KELUAR_LOG_SELECT_COLUMNS = 'id,created_at,part_number,name,qty_keluar,stock_ahir,harga_satuan,harga_total,customer,tempo,resi,ecommerce,kode_toko';
+const SOLD_ITEM_SELECT_COLUMNS = 'id,created_at,kode_toko,tempo,ecommerce,customer,part_number,name,qty_keluar,harga_satuan,harga_total,resi';
+
+const normalizePartForLookup = (pn: string | null | undefined): string =>
+  (pn || '').trim().toUpperCase().replace(/\s+/g, ' ');
+
+const photoRowCache = new Map<string, any | null>();
+const PHOTO_ROW_CACHE_STORAGE_KEY = 'mjm_bjw_photo_row_cache_v1';
+const PHOTO_ROW_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 jam
+const PHOTO_ROW_CACHE_MAX_ENTRIES = 1200;
+const SELL_PRICE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 menit
+const SELL_PRICE_MISS_TTL_MS = 60 * 1000; // 1 menit
+const COST_PRICE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 menit
+const COST_PRICE_MISS_TTL_MS = 60 * 1000; // 1 menit
+const sellPriceCache = new Map<string, { value: number; expiresAt: number }>();
+const costPriceCache = new Map<string, { value: number; expiresAt: number }>();
+
+interface PersistedPhotoCacheEntry {
+  value: any | null;
+  expiresAt: number;
+  updatedAt: number;
+}
+
+let persistedPhotoCacheLoaded = false;
+let persistedPhotoCache: Record<string, PersistedPhotoCacheEntry> = {};
+let persistPhotoCacheTimer: ReturnType<typeof setTimeout> | null = null;
+
+const normalizePhotoCacheKey = (partNumber: string | null | undefined): string =>
+  String(partNumber || '').trim().toUpperCase();
+
+const canUseLocalStorage = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  try {
+    return typeof window.localStorage !== 'undefined';
+  } catch {
+    return false;
+  }
+};
+
+const prunePersistedPhotoCache = () => {
+  const now = Date.now();
+  const validEntries = Object.entries(persistedPhotoCache).filter(([, entry]) => entry.expiresAt > now);
+
+  if (validEntries.length <= PHOTO_ROW_CACHE_MAX_ENTRIES) {
+    persistedPhotoCache = Object.fromEntries(validEntries);
+    return;
+  }
+
+  validEntries.sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
+  persistedPhotoCache = Object.fromEntries(validEntries.slice(0, PHOTO_ROW_CACHE_MAX_ENTRIES));
+};
+
+const loadPersistedPhotoCache = () => {
+  if (persistedPhotoCacheLoaded) return;
+  persistedPhotoCacheLoaded = true;
+
+  if (!canUseLocalStorage()) return;
+
+  try {
+    const raw = window.localStorage.getItem(PHOTO_ROW_CACHE_STORAGE_KEY);
+    if (!raw) return;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return;
+
+    const now = Date.now();
+    const valid: Record<string, PersistedPhotoCacheEntry> = {};
+
+    Object.entries(parsed).forEach(([key, value]) => {
+      if (!key || !value || typeof value !== 'object') return;
+      const entry = value as PersistedPhotoCacheEntry;
+      if (!entry.expiresAt || entry.expiresAt <= now) return;
+      valid[key] = entry;
+      photoRowCache.set(key, entry.value ?? null);
+    });
+
+    persistedPhotoCache = valid;
+  } catch (error) {
+    console.warn('Gagal load cache foto produk:', error);
+  }
+};
+
+const writePersistedPhotoCache = () => {
+  if (!canUseLocalStorage()) return;
+
+  prunePersistedPhotoCache();
+
+  try {
+    window.localStorage.setItem(PHOTO_ROW_CACHE_STORAGE_KEY, JSON.stringify(persistedPhotoCache));
+  } catch (error) {
+    // Jika quota penuh, kurangi cache jadi separuh lalu coba lagi.
+    try {
+      const entries = Object.entries(persistedPhotoCache)
+        .sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0))
+        .slice(0, Math.max(100, Math.floor(PHOTO_ROW_CACHE_MAX_ENTRIES / 2)));
+      persistedPhotoCache = Object.fromEntries(entries);
+      window.localStorage.setItem(PHOTO_ROW_CACHE_STORAGE_KEY, JSON.stringify(persistedPhotoCache));
+    } catch (retryError) {
+      console.warn('Gagal simpan cache foto produk:', retryError);
+    }
+  }
+};
+
+const schedulePersistedPhotoCacheWrite = () => {
+  if (!canUseLocalStorage()) return;
+  if (persistPhotoCacheTimer) return;
+  persistPhotoCacheTimer = setTimeout(() => {
+    persistPhotoCacheTimer = null;
+    writePersistedPhotoCache();
+  }, 250);
+};
+
+const buildStorePartCacheKey = (store: string | null | undefined, partNumber: string): string => {
+  const safeStore = String(store || 'all').trim().toLowerCase();
+  const safePart = normalizePartForLookup(partNumber);
+  return `${safeStore}::${safePart}`;
+};
+
+const getNumberCacheValue = (
+  cache: Map<string, { value: number; expiresAt: number }>,
+  key: string
+): number | undefined => {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return undefined;
+  }
+  return entry.value;
+};
+
+const setNumberCacheValue = (
+  cache: Map<string, { value: number; expiresAt: number }>,
+  key: string,
+  value: number,
+  ttlMs: number
+) => {
+  cache.set(key, {
+    value,
+    expiresAt: Date.now() + ttlMs
+  });
+};
+
+const setPriceMapEntry = (
+  target: Record<string, PriceData>,
+  partNumber: string,
+  harga: number
+) => {
+  const trimmed = String(partNumber || '').trim();
+  if (!trimmed || !Number.isFinite(harga) || harga <= 0) return;
+  target[trimmed] = { part_number: trimmed, harga };
+  const normalized = normalizePartForLookup(trimmed);
+  if (normalized && normalized !== trimmed) {
+    target[normalized] = { part_number: normalized, harga };
+  }
+};
+
+const setCostPriceMapEntry = (
+  target: Record<string, CostPriceData>,
+  partNumber: string,
+  hargaSatuan: number
+) => {
+  const trimmed = String(partNumber || '').trim();
+  if (!trimmed || !Number.isFinite(hargaSatuan) || hargaSatuan <= 0) return;
+  target[trimmed] = { part_number: trimmed, harga_satuan: hargaSatuan };
+  const normalized = normalizePartForLookup(trimmed);
+  if (normalized && normalized !== trimmed) {
+    target[normalized] = { part_number: normalized, harga_satuan: hargaSatuan };
+  }
+};
+
+const hasPhotoRowCacheEntry = (partNumber: string | null | undefined): boolean => {
+  const key = normalizePhotoCacheKey(partNumber);
+  if (!key) return false;
+
+  loadPersistedPhotoCache();
+
+  if (photoRowCache.has(key)) return true;
+
+  const entry = persistedPhotoCache[key];
+  if (!entry) return false;
+
+  if (entry.expiresAt <= Date.now()) {
+    delete persistedPhotoCache[key];
+    schedulePersistedPhotoCacheWrite();
+    return false;
+  }
+
+  photoRowCache.set(key, entry.value ?? null);
+  return true;
+};
+
+const getPhotoRowCacheEntry = (partNumber: string | null | undefined): any | null | undefined => {
+  const key = normalizePhotoCacheKey(partNumber);
+  if (!key) return undefined;
+
+  if (!hasPhotoRowCacheEntry(key)) return undefined;
+  return photoRowCache.get(key);
+};
+
+const setPhotoRowCacheEntry = (partNumber: string | null | undefined, value: any | null) => {
+  const key = normalizePhotoCacheKey(partNumber);
+  if (!key) return;
+
+  loadPersistedPhotoCache();
+
+  photoRowCache.set(key, value ?? null);
+  persistedPhotoCache[key] = {
+    value: value ?? null,
+    expiresAt: Date.now() + PHOTO_ROW_CACHE_TTL_MS,
+    updatedAt: Date.now()
+  };
+
+  schedulePersistedPhotoCacheWrite();
+};
+
+const fetchStockQtyMapByPartNumbers = async (
+  stockTable: string,
+  partNumbers: string[]
+): Promise<Record<string, number>> => {
+  const uniquePartNumbers = [...new Set((partNumbers || []).map(p => (p || '').toString().trim()).filter(Boolean))];
+  if (uniquePartNumbers.length === 0) return {};
+
+  const stockRows: Array<{ part_number: string; quantity: number }> = [];
+  const { data: exactRows, error: exactError } = await supabase
+    .from(stockTable)
+    .select('part_number, quantity')
+    .in('part_number', uniquePartNumbers);
+
+  if (!exactError && exactRows) {
+    stockRows.push(...(exactRows as Array<{ part_number: string; quantity: number }>));
+  }
+
+  const normalizedMatched = new Set(
+    stockRows
+      .map(row => normalizePartForLookup(row.part_number))
+      .filter(Boolean)
+  );
+
+  const unresolved = uniquePartNumbers.filter(pn => !normalizedMatched.has(normalizePartForLookup(pn)));
+
+  if (unresolved.length > 0 && unresolved.length <= 40) {
+    const fallbackResults = await Promise.all(
+      unresolved.map((pn) =>
+        supabase
+          .from(stockTable)
+          .select('part_number, quantity')
+          .ilike('part_number', pn)
+          .limit(1)
+      )
+    );
+
+    fallbackResults.forEach(({ data, error }) => {
+      if (!error && data && data[0]) {
+        stockRows.push(data[0] as { part_number: string; quantity: number });
+      }
+    });
+  }
+
+  const stockByNormalized = stockRows.reduce((acc, row) => {
+    const original = (row.part_number || '').toString();
+    const normalized = normalizePartForLookup(original);
+    const qty = Number(row.quantity || 0);
+    if (original) acc[original] = qty;
+    if (normalized) acc[normalized] = qty;
+    return acc;
+  }, {} as Record<string, number>);
+
+  return uniquePartNumbers.reduce((acc, pn) => {
+    const normalized = normalizePartForLookup(pn);
+    acc[pn] = stockByNormalized[pn] ?? stockByNormalized[normalized] ?? 0;
+    return acc;
+  }, {} as Record<string, number>);
+};
+
+const isReturMasuk = (row: { tempo?: string | null; customer?: string | null }): boolean => {
+  const tempo = normalizeTempo(row.tempo);
+  const customer = normalizeText(row.customer);
+  if (tempo.includes('RETUR')) return true;
+  if (customer.includes('RETUR')) return true;
+  return false;
+};
+
+interface ModalMasukRow {
+  part_number: string | null;
+  harga_satuan: number | null;
+  tempo: string | null;
+  customer: string | null;
+}
+
+interface ModalKeluarRow {
+  part_number: string | null;
+  qty_keluar: number | null;
+  harga_total: number | null;
+  customer: string | null;
+}
+
+interface ModalBaseItemRow {
+  part_number: string | null;
+  name: string | null;
+  quantity: number | null;
+}
+
+export type ModalSourceType = 'HARGA_TERENDAH_MASUK' | 'ESTIMASI_80PCT_AVG_JUAL' | 'TANPA_MODAL';
+
+export interface AssetProfitDetailRow {
+  partNumber: string;
+  name: string;
+  stockQty: number;
+  soldQty: number;
+  avgSellPrice: number;
+  unitModal: number;
+  modalSource: ModalSourceType;
+  modalStock: number;
+  salesTotal: number;
+  hppSold: number;
+  keuntungan: number;
+}
+
+export interface AssetProfitDetailsResult {
+  rows: AssetProfitDetailRow[];
+  totalItems: number;
+  totalModalStock: number;
+  totalSales: number;
+  totalHppSold: number;
+  totalProfit: number;
+  estimasiModalItems: number;
+  tanpaModalItems: number;
+}
+
+const fetchAllRowsForModal = async <T,>(
+  table: string,
+  select: string,
+  orderColumn: string
+): Promise<T[]> => {
+  const pageSize = 1000;
+  let from = 0;
+  const rows: T[] = [];
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(select)
+      .order(orderColumn, { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error(`Gagal mengambil data ${table} untuk hitung modal:`, error);
+      return rows;
+    }
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
+const fetchAllRowsForModalFiltered = async <T,>(
+  table: string,
+  select: string,
+  orderColumn: string,
+  applyFilters: (query: any) => any,
+  ascending: boolean = true
+): Promise<T[]> => {
+  const pageSize = 1000;
+  let from = 0;
+  const rows: T[] = [];
+
+  while (true) {
+    let query = supabase.from(table).select(select);
+    query = applyFilters(query);
+
+    const { data, error } = await query
+      .order(orderColumn, { ascending })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error(`Gagal mengambil data ${table} (filtered):`, error);
+      return rows;
+    }
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
+const fetchAllModalLogs = async (): Promise<{ masukRows: ModalMasukRow[]; keluarRows: ModalKeluarRow[] }> => {
+  const [masukMjm, masukBjw, keluarMjm, keluarBjw] = await Promise.all([
+    fetchAllRowsForModal<ModalMasukRow>(
+      'barang_masuk_mjm',
+      'part_number,harga_satuan,tempo,customer,created_at',
+      'created_at'
+    ),
+    fetchAllRowsForModal<ModalMasukRow>(
+      'barang_masuk_bjw',
+      'part_number,harga_satuan,tempo,customer,created_at',
+      'created_at'
+    ),
+    fetchAllRowsForModal<ModalKeluarRow>(
+      'barang_keluar_mjm',
+      'part_number,qty_keluar,harga_total,customer,created_at',
+      'created_at'
+    ),
+    fetchAllRowsForModal<ModalKeluarRow>(
+      'barang_keluar_bjw',
+      'part_number,qty_keluar,harga_total,customer,created_at',
+      'created_at'
+    ),
+  ]);
+
+  return {
+    masukRows: [...masukMjm, ...masukBjw],
+    keluarRows: [...keluarMjm, ...keluarBjw],
+  };
+};
+
+const isKeluarKeBjw = (customer: string | null | undefined): boolean => {
+  const normalized = normalizeText(customer).replace(/[^A-Z0-9]/g, '');
+  return normalized.includes('KELUARKEBJW');
+};
+
+const buildAssetProfitRows = (
+  items: Array<{ part_number?: string | null; name?: string | null; quantity?: number | null }>,
+  masukRows: ModalMasukRow[],
+  keluarRows: ModalKeluarRow[]
+): AssetProfitDetailRow[] => {
+  if (!items || items.length === 0) return [];
+
+  const minCostByPartExact = new Map<string, number>();
+
+  for (const row of masukRows) {
+    if (isReturMasuk(row)) continue;
+
+    const part = normalizePart(row.part_number);
+    if (!part) continue;
+
+    const price = toSafeNumber(row.harga_satuan);
+    if (price <= 0) continue;
+
+    const exactPrev = minCostByPartExact.get(part);
+    if (exactPrev === undefined || price < exactPrev) {
+      minCostByPartExact.set(part, price);
+    }
+  }
+
+  const salesByPart = new Map<string, { qty: number; total: number }>();
+  for (const row of keluarRows) {
+    if (isKeluarKeBjw(row.customer)) continue;
+
+    const part = normalizePart(row.part_number);
+    if (!part) continue;
+
+    if (!salesByPart.has(part)) {
+      salesByPart.set(part, { qty: 0, total: 0 });
+    }
+
+    const agg = salesByPart.get(part)!;
+    agg.qty += toSafeNumber(row.qty_keluar);
+    agg.total += toSafeNumber(row.harga_total);
+  }
+
+  return items
+    .map((item) => {
+      const part = normalizePart(item.part_number);
+      const stockQty = toSafeNumber(item.quantity);
+      const salesAgg = salesByPart.get(part) || { qty: 0, total: 0 };
+      const avgSellPrice = salesAgg.qty > 0 ? salesAgg.total / salesAgg.qty : 0;
+
+      // Sesuai database: modal diambil hanya dari part_number exact yang sama.
+      const minCost = minCostByPartExact.get(part) || 0;
+
+      let unitModal = 0;
+      let modalSource: ModalSourceType = 'TANPA_MODAL';
+      if (minCost > 0) {
+        unitModal = minCost;
+        modalSource = 'HARGA_TERENDAH_MASUK';
+      } else if (avgSellPrice > 0) {
+        unitModal = avgSellPrice * 0.8;
+        modalSource = 'ESTIMASI_80PCT_AVG_JUAL';
+      }
+
+      const soldQty = salesAgg.qty;
+      const salesTotal = salesAgg.total;
+      const modalStock = stockQty * unitModal;
+      const hppSold = soldQty * unitModal;
+      const keuntungan = salesTotal - hppSold;
+
+      return {
+        partNumber: part,
+        name: (item.name || '').trim(),
+        stockQty,
+        soldQty,
+        avgSellPrice,
+        unitModal,
+        modalSource,
+        modalStock,
+        salesTotal,
+        hppSold,
+        keuntungan,
+      };
+    })
+    .sort((a, b) => b.salesTotal - a.salesTotal);
+};
+
+const summarizeAssetProfitRows = (rows: AssetProfitDetailRow[]): AssetProfitDetailsResult => {
+  return {
+    rows,
+    totalItems: rows.length,
+    totalModalStock: rows.reduce((sum, row) => sum + row.modalStock, 0),
+    totalSales: rows.reduce((sum, row) => sum + row.salesTotal, 0),
+    totalHppSold: rows.reduce((sum, row) => sum + row.hppSold, 0),
+    totalProfit: rows.reduce((sum, row) => sum + row.keuntungan, 0),
+    estimasiModalItems: rows.filter((row) => row.modalSource === 'ESTIMASI_80PCT_AVG_JUAL').length,
+    tanpaModalItems: rows.filter((row) => row.modalSource === 'TANPA_MODAL').length,
+  };
+};
+
+const calculateModalStockTotal = async (items: Array<{ part_number?: string | null; quantity?: number | null }>): Promise<number> => {
+  if (!items || items.length === 0) return 0;
+  try {
+    const { masukRows, keluarRows } = await fetchAllModalLogs();
+    const rows = buildAssetProfitRows(items, masukRows, keluarRows);
+    return rows.reduce((sum, row) => sum + row.modalStock, 0);
+  } catch (err) {
+    console.error('Gagal menghitung total modal stock:', err);
+    return 0;
+  }
+};
+
+export const fetchAssetProfitDetails = async (store: string | null): Promise<AssetProfitDetailsResult> => {
+  const table = getTableName(store);
+
+  try {
+    const [baseItems, { masukRows, keluarRows }] = await Promise.all([
+      fetchAllRowsForModal<ModalBaseItemRow>(table, 'part_number,name,quantity', 'part_number'),
+      fetchAllModalLogs(),
+    ]);
+
+    const rows = buildAssetProfitRows(baseItems, masukRows, keluarRows);
+    return summarizeAssetProfitRows(rows);
+  } catch (err) {
+    console.error('Gagal mengambil detail asset/profit:', err);
+    return summarizeAssetProfitRows([]);
+  }
+};
+
 // --- FETCH DISTINCT ECOMMERCE VALUES ---
 export const fetchDistinctEcommerce = async (store: string | null): Promise<string[]> => {
   const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
   if (!table) return [];
 
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('ecommerce')
-      .not('ecommerce', 'is', null)
-      .not('ecommerce', 'eq', '');
+    const rows = await fetchAllRowsForModalFiltered<{ ecommerce: string | null }>(
+      table,
+      'ecommerce',
+      'created_at',
+      (query) =>
+        query
+          .not('ecommerce', 'is', null)
+          .not('ecommerce', 'eq', ''),
+      false
+    );
 
-    if (error) {
-      console.error('Fetch Distinct Ecommerce Error:', error);
-      return [];
-    }
+    const baseOptions = ['OFFLINE', 'TIKTOK', 'SHOPEE', 'RESELLER'];
+    const normalizedOptions = rows
+      .map((row) => (row.ecommerce || '').trim().toUpperCase())
+      .filter((value) => value !== '')
+      .map((value) => (value === 'SHOPPE' ? 'SHOPEE' : value));
 
-    // Get unique values
-    const uniqueValues = [...new Set((data || []).map(d => d.ecommerce?.toUpperCase()).filter(Boolean))];
+    const uniqueValues = [...new Set([...baseOptions, ...normalizedOptions])];
     return uniqueValues.sort();
   } catch (err) {
     console.error('Fetch Distinct Ecommerce Exception:', err);
@@ -65,24 +650,26 @@ export const fetchDistinctSuppliers = async (store: string | null): Promise<stri
   if (!table) return [];
 
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('customer')
-      .not('customer', 'is', null)
-      .not('customer', 'eq', '')
-      .not('customer', 'eq', '-');
+    const rows = await fetchAllRowsForModalFiltered<{ customer: string | null }>(
+      table,
+      'customer',
+      'customer',
+      (query) =>
+        query
+          .not('customer', 'is', null)
+          .not('customer', 'eq', '')
+          .not('customer', 'eq', '-')
+          .not('customer', 'ilike', '%RETUR%'),
+      true
+    );
 
-    if (error) {
-      console.error('Fetch Distinct Suppliers Error:', error);
-      return [];
-    }
-
-    // Get unique values and filter out empty/dash
+    // Get unique values and filter out empty/dash/retur
     const uniqueValues = [...new Set(
-      (data || [])
+      rows
         .map(d => d.customer?.trim().toUpperCase())
-        .filter(Boolean)
+        .filter((c): c is string => Boolean(c))
         .filter(c => c !== '-' && c !== '')
+        .filter(c => !c.includes('RETUR'))
     )];
     return uniqueValues.sort();
   } catch (err) {
@@ -97,24 +684,26 @@ export const fetchDistinctCustomers = async (store: string | null): Promise<stri
   if (!table) return [];
 
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('customer')
-      .not('customer', 'is', null)
-      .not('customer', 'eq', '')
-      .not('customer', 'eq', '-');
+    const rows = await fetchAllRowsForModalFiltered<{ customer: string | null }>(
+      table,
+      'customer',
+      'customer',
+      (query) =>
+        query
+          .not('customer', 'is', null)
+          .not('customer', 'eq', '')
+          .not('customer', 'eq', '-')
+          .not('customer', 'ilike', '%RETUR%'),
+      true
+    );
 
-    if (error) {
-      console.error('Fetch Distinct Customers Error:', error);
-      return [];
-    }
-
-    // Get unique values and filter out empty/dash
+    // Get unique values and filter out empty/dash/retur
     const uniqueValues = [...new Set(
-      (data || [])
+      rows
         .map(d => d.customer?.trim().toUpperCase())
-        .filter(Boolean)
+        .filter((c): c is string => Boolean(c))
         .filter(c => c !== '-' && c !== '')
+        .filter(c => !c.includes('RETUR'))
     )];
     return uniqueValues.sort();
   } catch (err) {
@@ -165,6 +754,7 @@ export const fetchAllDistinctValues = async (
   field: 'part_number' | 'name' | 'brand' | 'application'
 ): Promise<string[]> => {
   const table = getTableName(store);
+
   try {
     const { data, error } = await supabase
       .from(table)
@@ -190,512 +780,6 @@ export const fetchAllDistinctValues = async (
   }
 };
 
-// --- ORDER SUPPLIER (KERANJANG SUPPLIER BARU) ---
-export const saveOrderSupplier = async (
-  store: string,
-  supplier: string,
-  items: Array<{ partNumber: string; name: string; qty: number; price?: number }>,
-  notes?: string
-): Promise<boolean> => {
-  if (!store || !supplier || !items || items.length === 0) return false;
-
-  const normalizedItemsMap = new Map<string, { partNumber: string; name: string; qty: number; price: number }>();
-  items.forEach(item => {
-    const partNumber = (item.partNumber || '').trim();
-    const qty = Number(item.qty || 0);
-    if (!partNumber || qty <= 0) return;
-
-    const existing = normalizedItemsMap.get(partNumber);
-    if (existing) {
-      existing.qty += qty;
-      existing.name = item.name || existing.name;
-      existing.price = Number(item.price || existing.price || 0);
-      return;
-    }
-
-    normalizedItemsMap.set(partNumber, {
-      partNumber,
-      name: item.name || '',
-      qty,
-      price: Number(item.price || 0)
-    });
-  });
-
-  const normalizedItems = Array.from(normalizedItemsMap.values());
-  if (normalizedItems.length === 0) return false;
-
-  try {
-    const partNumbers = normalizedItems.map(item => item.partNumber);
-    const { data: existingRows, error: existingError } = await supabase
-      .from('order_supplier')
-      .select('id, part_number, qty')
-      .eq('store', store)
-      .eq('supplier', supplier)
-      .eq('status', 'PENDING')
-      .in('part_number', partNumbers)
-      .order('id', { ascending: true });
-    if (existingError) throw existingError;
-
-    const existingByPart: Record<string, Array<{ id: number; qty: number }>> = {};
-    (existingRows || []).forEach((row: any) => {
-      const partNumber = (row.part_number || '').trim();
-      if (!partNumber) return;
-      if (!existingByPart[partNumber]) existingByPart[partNumber] = [];
-      existingByPart[partNumber].push({
-        id: Number(row.id),
-        qty: Number(row.qty || 0)
-      });
-    });
-
-    const inserts: any[] = [];
-    const updates: Array<{ id: number; qty: number; name: string; price: number }> = [];
-    const duplicateIds: number[] = [];
-
-    normalizedItems.forEach(item => {
-      const matches = existingByPart[item.partNumber] || [];
-      if (matches.length === 0) {
-        inserts.push({
-          store,
-          supplier,
-          part_number: item.partNumber,
-          name: item.name,
-          qty: item.qty,
-          price: item.price,
-          status: 'PENDING',
-          notes: notes || ''
-        });
-        return;
-      }
-
-      const primaryRow = matches[0];
-      const existingQty = matches.reduce((sum, row) => sum + row.qty, 0);
-      updates.push({
-        id: primaryRow.id,
-        qty: existingQty + item.qty,
-        name: item.name,
-        price: item.price
-      });
-
-      if (matches.length > 1) {
-        matches.slice(1).forEach(row => duplicateIds.push(row.id));
-      }
-    });
-
-    if (inserts.length > 0) {
-      const { error: insertError } = await supabase.from('order_supplier').insert(inserts);
-      if (insertError) throw insertError;
-    }
-
-    if (updates.length > 0) {
-      const updateResults = await Promise.all(
-        updates.map(updateItem =>
-          supabase
-            .from('order_supplier')
-            .update({
-              qty: updateItem.qty,
-              name: updateItem.name,
-              price: updateItem.price,
-              notes: notes || ''
-            })
-            .eq('id', updateItem.id)
-        )
-      );
-      const failedUpdate = updateResults.find(result => result.error);
-      if (failedUpdate?.error) throw failedUpdate.error;
-    }
-
-    if (duplicateIds.length > 0) {
-      const { error: duplicateDeleteError } = await supabase
-        .from('order_supplier')
-        .delete()
-        .in('id', duplicateIds);
-      if (duplicateDeleteError) throw duplicateDeleteError;
-    }
-
-    return true;
-  } catch (e: any) {
-    console.error('saveOrderSupplier Error:', e);
-    return false;
-  }
-};
-
-export const fetchOrderSupplier = async (
-  store: string,
-  supplier?: string
-): Promise<any[]> => {
-  let query = supabase.from('order_supplier').select('*').eq('store', store);
-  if (supplier) query = query.eq('supplier', supplier);
-  const { data, error } = await query.order('created_at', { ascending: false });
-  if (error) {
-    console.error('fetchOrderSupplier Error:', error);
-    return [];
-  }
-  return data || [];
-};
-
-export const fetchPendingOrderSupplier = async (
-  store: string,
-  supplier?: string,
-  options?: { statuses?: string[] }
-): Promise<any[]> => {
-  if (!store) return [];
-  const normalizedStatuses = Array.from(
-    new Set(
-      (options?.statuses && options.statuses.length > 0 ? options.statuses : ['PENDING'])
-        .map(status => (status || '').trim().toUpperCase())
-        .filter(Boolean)
-    )
-  );
-
-  let query = supabase
-    .from('order_supplier')
-    .select('*')
-    .eq('store', store);
-
-  if (normalizedStatuses.length === 1) {
-    query = query.eq('status', normalizedStatuses[0]);
-  } else {
-    query = query.in('status', normalizedStatuses);
-  }
-
-  if (supplier) query = query.eq('supplier', supplier);
-  const { data, error } = await query.order('created_at', { ascending: false });
-  if (error) {
-    console.error('fetchPendingOrderSupplier Error:', error);
-    return [];
-  }
-  return data || [];
-};
-
-export const setPendingOrderSupplierQty = async (
-  store: string,
-  supplier: string,
-  partNumber: string,
-  qty: number,
-  options?: { name?: string; price?: number; notes?: string }
-): Promise<boolean> => {
-  const normalizedPartNumber = (partNumber || '').trim();
-  if (!store || !supplier || !normalizedPartNumber) return false;
-
-  try {
-    const { data: rows, error: rowsError } = await supabase
-      .from('order_supplier')
-      .select('id, qty')
-      .eq('store', store)
-      .eq('supplier', supplier)
-      .eq('part_number', normalizedPartNumber)
-      .eq('status', 'PENDING')
-      .order('id', { ascending: true });
-    if (rowsError) throw rowsError;
-
-    const existingRows = rows || [];
-    const safeQty = Math.floor(Number(qty || 0));
-
-    if (safeQty <= 0) {
-      if (existingRows.length === 0) return true;
-      const idsToDelete = existingRows.map((row: any) => Number(row.id)).filter(Boolean);
-      if (idsToDelete.length === 0) return true;
-      const { error: deleteError } = await supabase
-        .from('order_supplier')
-        .delete()
-        .in('id', idsToDelete);
-      if (deleteError) throw deleteError;
-      return true;
-    }
-
-    if (existingRows.length === 0) {
-      const { error: insertError } = await supabase.from('order_supplier').insert({
-        store,
-        supplier,
-        part_number: normalizedPartNumber,
-        name: options?.name || normalizedPartNumber,
-        qty: safeQty,
-        price: Number(options?.price || 0),
-        status: 'PENDING',
-        notes: options?.notes || ''
-      });
-      if (insertError) throw insertError;
-      return true;
-    }
-
-    const primaryRowId = Number(existingRows[0].id);
-    const updatePayload: any = { qty: safeQty };
-    if (typeof options?.name === 'string' && options.name.trim() !== '') {
-      updatePayload.name = options.name;
-    }
-    if (typeof options?.price === 'number') {
-      updatePayload.price = Number(options.price || 0);
-    }
-    if (typeof options?.notes === 'string') {
-      updatePayload.notes = options.notes;
-    }
-
-    const { error: updateError } = await supabase
-      .from('order_supplier')
-      .update(updatePayload)
-      .eq('id', primaryRowId);
-    if (updateError) throw updateError;
-
-    const duplicateIds = existingRows.slice(1).map((row: any) => Number(row.id)).filter(Boolean);
-    if (duplicateIds.length > 0) {
-      const { error: duplicateDeleteError } = await supabase
-        .from('order_supplier')
-        .delete()
-        .in('id', duplicateIds);
-      if (duplicateDeleteError) throw duplicateDeleteError;
-    }
-
-    return true;
-  } catch (e: any) {
-    console.error('setPendingOrderSupplierQty Error:', e);
-    return false;
-  }
-};
-
-export const deletePendingOrderSupplier = async (
-  store: string,
-  options?: { supplier?: string; partNumbers?: string[] }
-): Promise<boolean> => {
-  if (!store) return false;
-  try {
-    let query = supabase
-      .from('order_supplier')
-      .delete()
-      .eq('store', store)
-      .eq('status', 'PENDING');
-
-    if (options?.supplier) {
-      query = query.eq('supplier', options.supplier);
-    }
-
-    if (options?.partNumbers && options.partNumbers.length > 0) {
-      query = query.in('part_number', options.partNumbers);
-    }
-
-    const { error } = await query;
-    if (error) throw error;
-    return true;
-  } catch (e: any) {
-    console.error('deletePendingOrderSupplier Error:', e);
-    return false;
-  }
-};
-
-export const markOrderSupplierAsOrdered = async (
-  store: string,
-  supplier: string,
-  partNumbers?: string[]
-): Promise<{ success: boolean; updatedCount: number; msg: string }> => {
-  if (!store || !supplier) {
-    return { success: false, updatedCount: 0, msg: 'Store/supplier tidak valid' };
-  }
-
-  const normalizedPartNumbers = Array.from(
-    new Set(
-      (partNumbers || [])
-        .map(partNumber => (partNumber || '').trim())
-        .filter(Boolean)
-    )
-  );
-
-  try {
-    let query = supabase
-      .from('order_supplier')
-      .update({ status: 'ORDERED' })
-      .eq('store', store)
-      .eq('supplier', supplier)
-      .eq('status', 'PENDING');
-
-    if (normalizedPartNumbers.length > 0) {
-      query = query.in('part_number', normalizedPartNumbers);
-    }
-
-    const { data, error } = await query.select('id');
-    if (error) throw error;
-
-    return {
-      success: true,
-      updatedCount: data?.length || 0,
-      msg: `Status order_supplier diupdate ke ORDERED (${data?.length || 0} baris).`
-    };
-  } catch (e: any) {
-    console.error('markOrderSupplierAsOrdered Error:', e);
-    return {
-      success: false,
-      updatedCount: 0,
-      msg: e?.message || 'Gagal update status order_supplier'
-    };
-  }
-};
-
-interface CompleteOrderSupplierRequestPayload {
-  orderId: number;
-  store: 'mjm' | 'bjw';
-  partNumber: string;
-  name?: string;
-  brand?: string;
-  qty: number;
-  costPrice?: number;
-  supplier?: string;
-  completedBy?: string;
-  tempo?: string;
-  ecommerce?: string;
-}
-
-const getOrderSupplierTargetTables = (store: 'mjm' | 'bjw') => {
-  if (store === 'bjw') {
-    return { baseTable: 'base_bjw', barangMasukTable: 'barang_masuk_bjw' };
-  }
-  return { baseTable: 'base_mjm', barangMasukTable: 'barang_masuk_mjm' };
-};
-
-export const completeOrderSupplierRequest = async (
-  payload: CompleteOrderSupplierRequestPayload
-): Promise<{ success: boolean; msg: string }> => {
-  const safePartNumber = (payload.partNumber || '').trim();
-  const safeQty = Math.max(0, Math.floor(Number(payload.qty || 0)));
-  const safeCostPrice = Math.max(0, Math.floor(Number(payload.costPrice || 0)));
-  const safeStore: 'mjm' | 'bjw' = payload.store === 'bjw' ? 'bjw' : 'mjm';
-  const safeName = (payload.name || '').trim();
-  const safeBrand = (payload.brand || '').trim();
-  const completedAt = getWIBDate().toISOString();
-  const logTempo = (payload.tempo || '').trim() || 'CASH';
-  const logEcommerce = (payload.ecommerce || '').trim() || '-';
-
-  if (!Number.isFinite(payload.orderId) || payload.orderId <= 0) {
-    return { success: false, msg: 'ID order_supplier tidak valid.' };
-  }
-  if (!safePartNumber) {
-    return { success: false, msg: 'Part number kosong.' };
-  }
-  if (safeQty <= 0) {
-    return { success: false, msg: 'Qty harus lebih dari 0.' };
-  }
-
-  const { baseTable, barangMasukTable } = getOrderSupplierTargetTables(safeStore);
-
-  try {
-    const { data: activeRequest, error: activeRequestError } = await supabase
-      .from('order_supplier')
-      .select('id')
-      .eq('id', payload.orderId)
-      .eq('store', safeStore)
-      .in('status', ['PENDING', 'ORDERED'])
-      .maybeSingle();
-    if (activeRequestError) {
-      throw new Error(`Gagal cek status request: ${activeRequestError.message}`);
-    }
-    if (!activeRequest) {
-      return { success: false, msg: 'Request tidak ditemukan atau sudah diproses.' };
-    }
-
-    const { data: existingItem, error: fetchError } = await supabase
-      .from(baseTable)
-      .select('part_number, name, brand, application, shelf, quantity')
-      .ilike('part_number', safePartNumber)
-      .limit(1)
-      .maybeSingle();
-    if (fetchError) throw new Error(`Gagal baca stok: ${fetchError.message}`);
-
-    const hadExistingItem = Boolean(existingItem);
-    const previousQty = Number(existingItem?.quantity || 0);
-    let finalQty = safeQty;
-    let finalPartNumber = safePartNumber;
-    let finalName = safeName || safePartNumber;
-    let finalBrand = safeBrand;
-    let finalApplication = '';
-    let finalShelf = '-';
-
-    if (existingItem) {
-      finalQty = previousQty + safeQty;
-      finalPartNumber = existingItem.part_number || safePartNumber;
-      finalName = existingItem.name || finalName;
-      finalBrand = existingItem.brand || finalBrand;
-      finalApplication = existingItem.application || '';
-      finalShelf = existingItem.shelf || '-';
-
-      const { error: updateError } = await supabase
-        .from(baseTable)
-        .update({ quantity: finalQty })
-        .eq('part_number', finalPartNumber);
-      if (updateError) throw new Error(`Gagal menambah stok: ${updateError.message}`);
-    } else {
-      const { error: insertError } = await supabase
-        .from(baseTable)
-        .insert({
-          part_number: safePartNumber,
-          name: finalName,
-          brand: finalBrand,
-          application: '',
-          quantity: safeQty,
-          shelf: '-'
-        });
-      if (insertError) throw new Error(`Gagal menambah stok baru: ${insertError.message}`);
-    }
-
-    const { error: logError } = await supabase.from(barangMasukTable).insert([{
-      part_number: finalPartNumber,
-      nama_barang: finalName,
-      brand: finalBrand,
-      application: finalApplication,
-      rak: finalShelf,
-      qty_masuk: safeQty,
-      stok_akhir: finalQty,
-      harga_satuan: safeCostPrice,
-      harga_total: safeCostPrice * safeQty,
-      customer: (payload.supplier || '').trim() || 'ORDER SUPPLIER',
-      tempo: logTempo,
-      ecommerce: logEcommerce,
-      created_at: completedAt
-    }]);
-
-    if (logError) {
-      // Best effort rollback stok jika log barang_masuk gagal.
-      if (hadExistingItem) {
-        await supabase
-          .from(baseTable)
-          .update({ quantity: previousQty })
-          .eq('part_number', finalPartNumber);
-      } else {
-        await supabase
-          .from(baseTable)
-          .delete()
-          .eq('part_number', finalPartNumber);
-      }
-      throw new Error(`Gagal simpan log barang_masuk: ${logError.message}`);
-    }
-
-    const { data: markedRows, error: markError } = await supabase
-      .from('order_supplier')
-      .update({ status: 'RECEIVED' })
-      .eq('id', payload.orderId)
-      .in('status', ['PENDING', 'ORDERED'])
-      .select('id');
-    if (markError) throw new Error(`Gagal update status request: ${markError.message}`);
-    if (!markedRows || markedRows.length === 0) {
-      return { success: false, msg: 'Request tidak ditemukan atau status sudah diproses.' };
-    }
-
-    const { error: deleteError } = await supabase
-      .from('order_supplier')
-      .delete()
-      .eq('id', payload.orderId)
-      .eq('status', 'RECEIVED');
-    if (deleteError) {
-      console.error('completeOrderSupplierRequest delete error:', deleteError);
-      return {
-        success: true,
-        msg: `Request selesai, stok sudah bertambah, tetapi baris order_supplier gagal dihapus: ${deleteError.message}`
-      };
-    }
-
-    return { success: true, msg: 'Request selesai. Stok bertambah dan data request dihapus.' };
-  } catch (e: any) {
-    console.error('completeOrderSupplierRequest Error:', e);
-    return { success: false, msg: e?.message || 'Gagal menyelesaikan request supplier' };
-  }
-};
-
 // --- FETCH INVENTORY BY PART NUMBER (untuk quick search) ---
 export const fetchInventoryByPartNumber = async (
   store: string | null,
@@ -708,7 +792,7 @@ export const fetchInventoryByPartNumber = async (
     // First try exact match on part_number
     let { data, error } = await supabase
       .from(table)
-      .select('*')
+      .select(INVENTORY_SELECT_COLUMNS)
       .ilike('part_number', searchValue)
       .limit(1)
       .single();
@@ -717,7 +801,7 @@ export const fetchInventoryByPartNumber = async (
     if (error || !data) {
       const { data: nameData, error: nameError } = await supabase
         .from(table)
-        .select('*')
+        .select(INVENTORY_SELECT_COLUMNS)
         .ilike('name', `%${searchValue}%`)
         .limit(1)
         .single();
@@ -728,13 +812,20 @@ export const fetchInventoryByPartNumber = async (
       data = nameData;
     }
 
-    // Fetch photo if exists
+    // Fetch photo (pakai cache jika ada)
     const partNumber = data.part_number;
+    const cachedPhoto = getPhotoRowCacheEntry(partNumber);
+    if (cachedPhoto !== undefined) {
+      return mapItemFromDB(data, cachedPhoto || undefined);
+    }
+
     const { data: photoData } = await supabase
       .from('foto')
-      .select('*')
+      .select(FOTO_SELECT_COLUMNS)
       .eq('part_number', partNumber)
-      .single();
+      .maybeSingle();
+
+    setPhotoRowCacheEntry(partNumber, photoData || null);
 
     return mapItemFromDB(data, photoData);
   } catch (err) {
@@ -744,26 +835,6 @@ export const fetchInventoryByPartNumber = async (
 };
 
 // --- HELPER: MAPPING FOTO ---
-const normalizePartNumber = (value: any): string => {
-  return typeof value === 'string' ? value.trim() : '';
-};
-
-const sanitizeImageList = (images: any): string[] => {
-  if (!Array.isArray(images)) return [];
-  return images
-    .filter((url) => typeof url === 'string' && url.trim() !== '')
-    .map((url) => url.trim())
-    .slice(0, 10);
-};
-
-const getPrimaryImage = (item: any): string => {
-  const images = sanitizeImageList(item?.images);
-  if (images.length > 0) return images[0];
-  if (typeof item?.imageUrl === 'string' && item.imageUrl.trim() !== '') return item.imageUrl.trim();
-  if (typeof item?.image_url === 'string' && item.image_url.trim() !== '') return item.image_url.trim();
-  return '';
-};
-
 const mapPhotoRowToImages = (photoRow: any): string[] => {
   if (!photoRow) return [];
   const images: string[] = [];
@@ -771,14 +842,13 @@ const mapPhotoRowToImages = (photoRow: any): string[] => {
     const url = photoRow[`foto_${i}`];
     if (url && typeof url === 'string' && url.trim() !== '') images.push(url);
   }
-  return sanitizeImageList(images);
+  return images;
 };
 
 const mapImagesToPhotoRow = (partNumber: string, images: string[]) => {
-  const row: any = { part_number: normalizePartNumber(partNumber) || partNumber };
-  const safeImages = sanitizeImageList(images);
+  const row: any = { part_number: partNumber };
   for (let i = 1; i <= 10; i++) row[`foto_${i}`] = null;
-  safeImages.forEach((url, index) => {
+  images.forEach((url, index) => {
     if (index < 10) row[`foto_${index + 1}`] = url;
   });
   return row;
@@ -789,10 +859,7 @@ const mapItemFromDB = (item: any, photoData?: any): InventoryItem => {
   const pk = item.part_number || item.partNumber || '';
   
   const imagesFromTable = photoData ? mapPhotoRowToImages(photoData) : [];
-  const fallbackImage = typeof item.image_url === 'string' && item.image_url.trim() !== ''
-    ? item.image_url.trim()
-    : '';
-  const finalImages = imagesFromTable.length > 0 ? imagesFromTable : (fallbackImage ? [fallbackImage] : []);
+  const finalImages = imagesFromTable;
 
   return {
     ...item,
@@ -838,275 +905,231 @@ interface CostPriceData { part_number: string; harga_satuan: number; }
 // Fetch harga modal terakhir dari barang_masuk
 const fetchLatestCostPricesForItems = async (items: any[], store?: string | null): Promise<Record<string, CostPriceData>> => {
   if (!items || items.length === 0) return {};
-  const partNumbersToCheck = Array.from(
-    new Set(
-      items
-        .map(i => {
-          const pn = i.part_number || i.partNumber;
-          return typeof pn === 'string' ? pn.trim() : pn;
-        })
-        .filter(Boolean)
-    )
-  );
+  const partNumbersToCheck = [...new Set(
+    items
+      .map(i => {
+        const pn = i.part_number || i.partNumber;
+        return typeof pn === 'string' ? pn.trim() : '';
+      })
+      .filter(Boolean)
+  )];
   if (partNumbersToCheck.length === 0) return {};
 
-  // Keep `store` parameter for backward compatibility.
-  void store;
+  const costPriceMap: Record<string, CostPriceData> = {};
+  const missingPartNumbers: string[] = [];
 
-  const logTables = ['barang_masuk_mjm', 'barang_masuk_bjw'];
-  const CHUNK_SIZE = 200;
-
-  try {
-    const latestByPart: Record<string, { harga_satuan: number; ts: number }> = {};
-
-    for (const logTable of logTables) {
-      for (let i = 0; i < partNumbersToCheck.length; i += CHUNK_SIZE) {
-        const partNumberChunk = partNumbersToCheck.slice(i, i + CHUNK_SIZE);
-        const { data, error } = await supabase
-          .from(logTable)
-          .select('part_number, harga_satuan, created_at')
-          .in('part_number', partNumberChunk)
-          .not('harga_satuan', 'is', null)
-          .gt('harga_satuan', 0)
-          .order('created_at', { ascending: false });
-
-        if (error) {
-          console.error('fetchLatestCostPricesForItems Error:', error);
-          continue;
-        }
-
-        (data || []).forEach((row: any) => {
-          const pk = (row.part_number || '').trim();
-          if (!pk) return;
-          const ts = new Date(row.created_at || 0).getTime();
-          const safeTs = Number.isFinite(ts) ? ts : 0;
-          const hargaSatuan = Number(row.harga_satuan || 0);
-          if (!(hargaSatuan > 0)) return;
-
-          const previous = latestByPart[pk];
-          if (!previous || safeTs > previous.ts) {
-            latestByPart[pk] = { harga_satuan: hargaSatuan, ts: safeTs };
-          }
-        });
-      }
+  partNumbersToCheck.forEach((pn) => {
+    const cacheKey = buildStorePartCacheKey(store, pn);
+    const cached = getNumberCacheValue(costPriceCache, cacheKey);
+    if (cached !== undefined) {
+      setCostPriceMapEntry(costPriceMap, pn, cached);
+      return;
     }
+    missingPartNumbers.push(pn);
+  });
 
-    const costPriceMap: Record<string, CostPriceData> = {};
-    Object.entries(latestByPart).forEach(([pk, value]) => {
-      costPriceMap[pk] = { part_number: pk, harga_satuan: Number(value.harga_satuan || 0) };
+  if (missingPartNumbers.length === 0) return costPriceMap;
+
+  const logTable = getLogTableName('barang_masuk', store);
+  
+  try {
+    // Ambil semua barang masuk untuk part numbers yang belum ada di cache.
+    const { data, error } = await supabase
+      .from(logTable)
+      .select('part_number, harga_satuan, created_at')
+      .in('part_number', missingPartNumbers)
+      .not('harga_satuan', 'is', null)
+      .gt('harga_satuan', 0)
+      .order('created_at', { ascending: false });
+    
+    if (error) return costPriceMap;
+
+    const resolvedNorm = new Set<string>();
+    (data || []).forEach((row: any) => {
+      const pk = (row.part_number || '').trim();
+      if (!pk) return;
+      const norm = normalizePartForLookup(pk);
+      if (resolvedNorm.has(norm)) return;
+
+      const harga = Number(row.harga_satuan || 0);
+      resolvedNorm.add(norm);
+      if (harga > 0) {
+        setNumberCacheValue(costPriceCache, buildStorePartCacheKey(store, pk), harga, COST_PRICE_CACHE_TTL_MS);
+        setCostPriceMapEntry(costPriceMap, pk, harga);
+      }
+    });
+
+    missingPartNumbers.forEach((pn) => {
+      const norm = normalizePartForLookup(pn);
+      if (!resolvedNorm.has(norm)) {
+        setNumberCacheValue(costPriceCache, buildStorePartCacheKey(store, pn), 0, COST_PRICE_MISS_TTL_MS);
+      }
     });
 
     return costPriceMap;
-  } catch (e) { return {}; }
+  } catch (e) { return costPriceMap; }
 };
 
 // Fetch harga jual dari list_harga_jual, fallback ke barang_keluar jika 0
 const fetchLatestPricesForItems = async (items: any[], store?: string | null): Promise<Record<string, PriceData>> => {
   if (!items || items.length === 0) return {};
-  const partNumbersToCheck = items.map(i => {
-       const pn = i.part_number || i.partNumber;
-       return typeof pn === 'string' ? pn.trim() : pn;
-  }).filter(Boolean);
+  const partNumbersToCheck = [...new Set(
+    items
+      .map(i => {
+        const pn = i.part_number || i.partNumber;
+        return typeof pn === 'string' ? pn.trim() : '';
+      })
+      .filter(Boolean)
+  )];
   if (partNumbersToCheck.length === 0) return {};
 
+  const priceMap: Record<string, PriceData> = {};
+  const missingPartNumbers: string[] = [];
+  const originalByNorm = new Map<string, string>();
+
+  partNumbersToCheck.forEach((pn) => {
+    const norm = normalizePartForLookup(pn);
+    if (!originalByNorm.has(norm)) originalByNorm.set(norm, pn);
+
+    const cacheKey = buildStorePartCacheKey(store, pn);
+    const cached = getNumberCacheValue(sellPriceCache, cacheKey);
+    if (cached !== undefined) {
+      if (cached > 0) setPriceMapEntry(priceMap, pn, cached);
+      return;
+    }
+    missingPartNumbers.push(pn);
+  });
+
+  if (missingPartNumbers.length === 0) return priceMap;
+
   try {
-    // 1. Ambil harga dari list_harga_jual (pusat)
-    const { data, error } = await supabase.from('list_harga_jual').select('part_number, harga').in('part_number', partNumbersToCheck);
-    if (error) return {};
-    
-    const priceMap: Record<string, PriceData> = {};
-    const zeroOrMissingParts: string[] = [];
+    // 1. Ambil harga dari list_harga_jual untuk part number yang belum ada cache.
+    const { data, error } = await supabase
+      .from('list_harga_jual')
+      .select('part_number, harga')
+      .in('part_number', missingPartNumbers);
+    if (error) return priceMap;
+
+    const unresolvedNorms = new Set(missingPartNumbers.map((pn) => normalizePartForLookup(pn)));
     
     (data || []).forEach((row: any) => {
       if (row.part_number) {
         const pk = row.part_number.trim();
         const harga = Number(row.harga || 0);
-        priceMap[pk] = { part_number: pk, harga };
-        if (harga === 0) zeroOrMissingParts.push(pk);
+        const norm = normalizePartForLookup(pk);
+
+        if (harga > 0) {
+          setNumberCacheValue(sellPriceCache, buildStorePartCacheKey(store, pk), harga, SELL_PRICE_CACHE_TTL_MS);
+          setPriceMapEntry(priceMap, pk, harga);
+          unresolvedNorms.delete(norm);
+        } else {
+          setNumberCacheValue(sellPriceCache, buildStorePartCacheKey(store, pk), 0, SELL_PRICE_MISS_TTL_MS);
+          unresolvedNorms.add(norm);
+        }
       }
     });
-    
-    // Cari part numbers yang tidak ada di list_harga_jual
-    partNumbersToCheck.forEach(pk => {
-      if (!priceMap[pk]) zeroOrMissingParts.push(pk);
-    });
-    
-    // 2. Jika ada harga 0 atau tidak ada, cari dari barang_keluar (harga terakhir laku)
-    if (zeroOrMissingParts.length > 0) {
+
+    // 2. Jika harga masih 0 / belum ada, cari dari barang_keluar (harga terakhir laku)
+    if (unresolvedNorms.size > 0) {
+      const unresolvedParts = Array.from(unresolvedNorms)
+        .map((norm) => originalByNorm.get(norm) || norm)
+        .filter(Boolean);
+
       const outTable = getLogTableName('barang_keluar', store);
       const { data: outData } = await supabase
         .from(outTable)
         .select('part_number, harga_satuan, created_at')
-        .in('part_number', zeroOrMissingParts)
+        .in('part_number', unresolvedParts)
         .not('harga_satuan', 'is', null)
         .gt('harga_satuan', 0)
         .order('created_at', { ascending: false });
       
-      // Map harga terakhir dari barang_keluar
-      const outPriceMap: Record<string, number> = {};
+      const outPriceMapByNorm: Record<string, number> = {};
       (outData || []).forEach((row: any) => {
         const pk = (row.part_number || '').trim();
-        if (pk && !outPriceMap[pk]) {
-          outPriceMap[pk] = Number(row.harga_satuan || 0);
+        const norm = normalizePartForLookup(pk);
+        if (pk && !outPriceMapByNorm[norm]) {
+          outPriceMapByNorm[norm] = Number(row.harga_satuan || 0);
         }
       });
-      
-      // Update priceMap dengan harga dari barang_keluar jika harga = 0 atau tidak ada
-      zeroOrMissingParts.forEach(pk => {
-        if (outPriceMap[pk] && outPriceMap[pk] > 0) {
-          priceMap[pk] = { part_number: pk, harga: outPriceMap[pk] };
+
+      unresolvedNorms.forEach((norm) => {
+        const fallbackHarga = Number(outPriceMapByNorm[norm] || 0);
+        const originalPn = originalByNorm.get(norm) || norm;
+        if (fallbackHarga > 0) {
+          setNumberCacheValue(sellPriceCache, buildStorePartCacheKey(store, originalPn), fallbackHarga, SELL_PRICE_CACHE_TTL_MS);
+          setPriceMapEntry(priceMap, originalPn, fallbackHarga);
+        } else {
+          setNumberCacheValue(sellPriceCache, buildStorePartCacheKey(store, originalPn), 0, SELL_PRICE_MISS_TTL_MS);
         }
       });
     }
     
     return priceMap;
-  } catch (e) { return {}; }
+  } catch (e) { return priceMap; }
 };
 
 const fetchPhotosForItems = async (items: any[]) => {
   if (!items || items.length === 0) return {};
-  const partNumbers = Array.from(new Set(
+  const partNumbers = [...new Set(
     items
-      .map(i => normalizePartNumber(i.part_number || i.partNumber))
+      .map(i => String(i.part_number || i.partNumber || '').trim())
       .filter(Boolean)
-  ));
+  )];
   if (partNumbers.length === 0) return {};
   try {
-    const { data, error } = await supabase.from('foto').select('*').in('part_number', partNumbers);
-    if (error) {
-      console.error('fetchPhotosForItems Error:', error);
-      return {};
-    }
     const photoMap: Record<string, any> = {};
-    (data || []).forEach((row: any) => {
-      if (!row.part_number) return;
-      const rawKey = row.part_number;
-      const normalizedKey = normalizePartNumber(row.part_number);
-      photoMap[rawKey] = row;
-      if (normalizedKey) photoMap[normalizedKey] = row;
-    });
-    return photoMap;
-  } catch (e) {
-    console.error('fetchPhotosForItems Exception:', e);
-    return {};
-  }
-};
+    const missingPartNumbers = partNumbers.filter((pn) => !hasPhotoRowCacheEntry(pn));
 
-const getPhotoRowByPartNumber = (photoMap: Record<string, any>, partNumber: string): any => {
-  if (!partNumber) return undefined;
-  return photoMap[partNumber] || photoMap[normalizePartNumber(partNumber)];
-};
-
-const isMissingOnConflictConstraintError = (error: any): boolean => {
-  const message = (error?.message || '').toLowerCase();
-  return error?.code === '42P10' || message.includes('no unique or exclusion constraint');
-};
-
-const upsertFotoRowByPartNumber = async (partNumber: string, payload: Record<string, any>): Promise<{ success: boolean; error?: any }> => {
-  const normalizedPartNumber = normalizePartNumber(partNumber);
-  if (!normalizedPartNumber) {
-    return { success: false, error: new Error('part_number kosong') };
-  }
-
-  const finalPayload = { ...payload, part_number: normalizedPartNumber };
-
-  const { error: upsertError } = await supabase
-    .from('foto')
-    .upsert(finalPayload, { onConflict: 'part_number' });
-
-  if (!upsertError) return { success: true };
-  if (!isMissingOnConflictConstraintError(upsertError)) return { success: false, error: upsertError };
-
-  // Fallback when DB has no UNIQUE/EXCLUSION constraint on part_number:
-  // try update first, if no row then insert.
-  const { data: updatedRows, error: updateError } = await supabase
-    .from('foto')
-    .update(finalPayload)
-    .eq('part_number', normalizedPartNumber)
-    .select('id')
-    .limit(1);
-
-  if (updateError) return { success: false, error: updateError };
-  if ((updatedRows || []).length > 0) return { success: true };
-
-  const { error: insertError } = await supabase
-    .from('foto')
-    .insert(finalPayload);
-
-  if (!insertError) return { success: true };
-
-  // Handle race condition (row inserted by another request between update and insert).
-  const isDuplicateKey = insertError.code === '23505' || /duplicate key/i.test(insertError.message || '');
-  if (isDuplicateKey) {
-    const { error: retryUpdateError } = await supabase
-      .from('foto')
-      .update(finalPayload)
-      .eq('part_number', normalizedPartNumber);
-    if (!retryUpdateError) return { success: true };
-    return { success: false, error: retryUpdateError };
-  }
-
-  return { success: false, error: insertError };
-};
-
-const savePhotosToTable = async (partNumber: string, images: string[]): Promise<boolean> => {
-  const normalizedPartNumber = normalizePartNumber(partNumber);
-  if (!normalizedPartNumber) return false;
-  const safeImages = sanitizeImageList(images);
-  try {
-    if (safeImages.length === 0) {
-      const { error: deleteError } = await supabase
+    if (missingPartNumbers.length > 0) {
+      const { data } = await supabase
         .from('foto')
-        .delete()
-        .eq('part_number', normalizedPartNumber);
-      if (deleteError) {
-        console.error('Error deleting photos:', deleteError);
-        return false;
-      }
-      return true;
-    }
-    const photoPayload = mapImagesToPhotoRow(normalizedPartNumber, safeImages);
-    const upsertResult = await upsertFotoRowByPartNumber(normalizedPartNumber, photoPayload);
-    const upsertError = upsertResult.success ? null : upsertResult.error;
+        .select(FOTO_SELECT_COLUMNS)
+        .in('part_number', missingPartNumbers);
 
-    // Fallback for older schemas that only have foto_1.
-    if (upsertError && /foto_\d+/i.test(upsertError.message || '')) {
-      const fallbackPayload = { part_number: normalizedPartNumber, foto_1: safeImages[0] || null };
-      const fallbackResult = await upsertFotoRowByPartNumber(normalizedPartNumber, fallbackPayload);
-      const fallbackError = fallbackResult.success ? null : fallbackResult.error;
-      if (fallbackError) {
-        console.error('Error saving photos (fallback):', fallbackError);
-        return false;
-      }
-      return true;
+      const fetchedRows = data || [];
+      fetchedRows.forEach((row: any) => {
+        if (row?.part_number) {
+          setPhotoRowCacheEntry(row.part_number, row);
+        }
+      });
+
+      const fetchedSet = new Set(
+        fetchedRows
+          .map((row: any) => normalizePhotoCacheKey(row?.part_number))
+          .filter(Boolean)
+      );
+
+      missingPartNumbers.forEach((pn) => {
+        if (!fetchedSet.has(normalizePhotoCacheKey(pn))) {
+          setPhotoRowCacheEntry(pn, null);
+        }
+      });
     }
 
-    if (upsertError) {
-      console.error('Error saving photos:', upsertError);
-      return false;
-    }
-    return true;
-  } catch (e) {
-    console.error('Error saving photos:', e);
-    return false;
-  }
+    partNumbers.forEach((pn) => {
+      const cached = getPhotoRowCacheEntry(pn);
+      if (cached) {
+        photoMap[pn] = cached;
+      }
+    });
+
+    return photoMap;
+  } catch (e) { return {}; }
 };
 
-const syncBaseImageUrl = async (table: string, partNumber: string, imageUrl: string): Promise<void> => {
-  const normalizedPartNumber = normalizePartNumber(partNumber);
-  if (!table || !normalizedPartNumber) return;
-  const { error } = await supabase
-    .from(table)
-    .update({ image_url: imageUrl || '' })
-    .eq('part_number', normalizedPartNumber);
-
-  if (!error) return;
-  const errorMessage = (error.message || '').toLowerCase();
-  if (errorMessage.includes('image_url')) {
-    console.warn(`[syncBaseImageUrl] Kolom image_url tidak ditemukan di ${table}.`);
-    return;
-  }
-  console.error('[syncBaseImageUrl] Error:', error);
+const savePhotosToTable = async (partNumber: string, images: string[]) => {
+  if (!partNumber) return;
+  try {
+    if (!images || images.length === 0) {
+      await supabase.from('foto').delete().eq('part_number', partNumber);
+      setPhotoRowCacheEntry(partNumber, null);
+      return;
+    }
+    const photoPayload = mapImagesToPhotoRow(partNumber, images);
+    await supabase.from('foto').upsert(photoPayload, { onConflict: 'part_number' });
+    setPhotoRowCacheEntry(partNumber, photoPayload);
+  } catch (e) { console.error('Error saving photos:', e); }
 };
 
 // ============================================================================
@@ -1147,28 +1170,40 @@ export interface FotoLinkRow {
 // Fetch foto produk dari tabel foto
 export const fetchFotoProduk = async (searchTerm?: string): Promise<FotoProdukRow[]> => {
   try {
-    let query = supabase
-      .from('foto')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const pageSize = 1000;
+    const rows: FotoProdukRow[] = [];
+    const trimmedSearch = searchTerm?.trim() || '';
+    let from = 0;
 
-    if (searchTerm && searchTerm.trim()) {
-      query = query.ilike('part_number', `%${searchTerm}%`);
-    }
+    while (true) {
+      let query = supabase
+        .from('foto')
+        .select(`id,created_at,${FOTO_SELECT_COLUMNS}`)
+        .order('created_at', { ascending: false });
 
-    const { data, error } = await query.limit(500);
-
-    if (error) {
-      // Check if table doesn't exist
-      if (error.code === '42P01' || error.message?.includes('does not exist')) {
-        console.warn('Table foto does not exist');
-        return [];
+      if (trimmedSearch) {
+        query = query.ilike('part_number', `%${trimmedSearch}%`);
       }
-      console.error('fetchFotoProduk Error:', error);
-      return [];
+
+      const { data, error } = await query.range(from, from + pageSize - 1);
+
+      if (error) {
+        // Check if table doesn't exist
+        if (error.code === '42P01' || error.message?.includes('does not exist')) {
+          console.warn('Table foto does not exist');
+          return [];
+        }
+        console.error('fetchFotoProduk Error:', error);
+        return rows;
+      }
+
+      const page = (data || []) as FotoProdukRow[];
+      rows.push(...page);
+      if (page.length < pageSize) break;
+      from += pageSize;
     }
 
-    return data || [];
+    return rows;
   } catch (err) {
     console.error('fetchFotoProduk Exception:', err);
     return [];
@@ -1178,31 +1213,14 @@ export const fetchFotoProduk = async (searchTerm?: string): Promise<FotoProdukRo
 // Fetch all foto_link entries
 export const fetchFotoLink = async (searchTerm?: string): Promise<FotoLinkRow[]> => {
   try {
-    // Select semua kolom - sku mungkin tidak ada di tabel
-    let query = supabase
-      .from('foto_link')
-      .select('*')
-      .order('nama_csv', { ascending: true });
-
-    if (searchTerm && searchTerm.trim()) {
-      // Search in nama_csv only (sku mungkin tidak ada)
-      query = query.ilike('nama_csv', `%${searchTerm}%`);
-    }
-
-    // Fetch semua data tanpa limit (untuk 3388+ rows)
-    const { data, error } = await query;
-
-    if (error) {
-      // Check if table doesn't exist
-      if (error.code === '42P01' || error.message?.includes('does not exist')) {
-        console.warn('Table foto_link does not exist');
-        return [];
-      }
-      console.error('fetchFotoLink Error:', error);
-      return [];
-    }
-
-    return data || [];
+    const trimmedSearch = searchTerm?.trim() || '';
+    return await fetchAllRowsForModalFiltered<FotoLinkRow>(
+      'foto_link',
+      '*',
+      'nama_csv',
+      (q) => (trimmedSearch ? q.ilike('nama_csv', `%${trimmedSearch}%`) : q),
+      true
+    );
   } catch (err) {
     console.error('fetchFotoLink Exception:', err);
     return [];
@@ -1213,17 +1231,7 @@ export const fetchFotoLink = async (searchTerm?: string): Promise<FotoLinkRow[]>
 // Note: Jika kolom sku belum ada, ini akan return semua data
 export const fetchFotoLinkWithoutSku = async (): Promise<FotoLinkRow[]> => {
   try {
-    // Coba fetch semua dulu, filter di client side jika sku column tidak ada
-    const { data, error } = await supabase
-      .from('foto_link')
-      .select('*')
-      .order('nama_csv', { ascending: true })
-      .limit(500);
-
-    if (error) {
-      console.error('fetchFotoLinkWithoutSku Error:', error);
-      return [];
-    }
+    const data = await fetchAllRowsForModal<FotoLinkRow>('foto_link', '*', 'nama_csv');
 
     // Filter di client side - items tanpa sku
     const filtered = (data || []).filter(d => !d.sku || d.sku.trim() === '');
@@ -1259,16 +1267,13 @@ export const checkExistingFotoPartNumbers = async (partNumbers: string[]): Promi
 // Fetch all part numbers from MJM store (for autocomplete)
 export const fetchAllPartNumbersMJM = async (): Promise<Array<{ part_number: string; name: string }>> => {
   try {
-    const { data, error } = await supabase
-      .from('base_mjm')
-      .select('part_number, name')
-      .not('part_number', 'is', null)
-      .order('part_number', { ascending: true });
-
-    if (error) {
-      console.error('fetchAllPartNumbersMJM Error:', error);
-      return [];
-    }
+    const data = await fetchAllRowsForModalFiltered<any>(
+      'base_mjm',
+      'part_number, name',
+      'part_number',
+      (q) => q.not('part_number', 'is', null),
+      true
+    );
 
     return (data || []).map(d => ({
       part_number: d.part_number || '',
@@ -1289,37 +1294,23 @@ export const insertFotoBatch = async (
   }
 
   try {
-    // Keep original fast-path behavior (bulk upsert).
     const { data, error } = await supabase
       .from('foto')
       .upsert(rows, { onConflict: 'part_number' })
       .select();
 
-    if (!error) {
-      return { success: true, inserted: data?.length || 0 };
-    }
-
-    // Fallback only for databases that miss UNIQUE constraint on part_number.
-    if (!isMissingOnConflictConstraintError(error)) {
+    if (error) {
       console.error('insertFotoBatch Error:', error);
       return { success: false, error: error.message };
     }
 
-    let inserted = 0;
-    for (const row of rows) {
-      const normalizedPartNumber = normalizePartNumber(row.part_number);
-      if (!normalizedPartNumber) continue;
-      const { success, error } = await upsertFotoRowByPartNumber(normalizedPartNumber, {
-        ...row,
-        part_number: normalizedPartNumber
-      });
-      if (!success) {
-        console.error('insertFotoBatch Error:', error);
-        return { success: false, error: error?.message || 'Gagal simpan foto batch' };
-      }
-      inserted += 1;
-    }
-    return { success: true, inserted };
+    // Sync cache foto agar Dashboard/Beranda bisa langsung pakai data terbaru.
+    rows.forEach((row) => {
+      if (!row?.part_number) return;
+      setPhotoRowCacheEntry(row.part_number, row);
+    });
+
+    return { success: true, inserted: data?.length || 0 };
   } catch (err: any) {
     console.error('insertFotoBatch Exception:', err);
     return { success: false, error: err.message };
@@ -1515,14 +1506,24 @@ export const updateFotoLinkSku = async (
 
       // Insert/upsert to foto table
       const fotoPayload = { part_number: sku, ...fotoFields };
-      const upsertResult = await upsertFotoRowByPartNumber(sku, fotoPayload);
-      const fotoError = upsertResult.success ? null : upsertResult.error;
+      let { error: fotoError } = await supabase
+        .from('foto')
+        .upsert(fotoPayload, { onConflict: 'part_number' });
 
       if (fotoError) {
-        console.warn(`Upsert to foto failed for ${sku}:`, fotoError.message || fotoError);
+        console.warn(`Upsert to foto failed for ${sku}, trying delete+insert:`, fotoError.message);
+        await supabase.from('foto').delete().eq('part_number', sku);
+        const { error: insertError } = await supabase.from('foto').insert(fotoPayload);
+        if (insertError) {
+          console.warn(`Insert to foto also failed for ${sku}:`, insertError.message);
+        } else {
+          console.log('Successfully inserted foto for:', sku);
+        }
       } else {
         console.log('Successfully upserted foto for:', sku);
       }
+
+      setPhotoRowCacheEntry(sku, fotoPayload);
 
       // Update image_url in base_mjm/base_bjw
       if (firstFoto) {
@@ -1576,7 +1577,7 @@ export const searchInventoryWithAlias = async (
     // First search directly in inventory
     let { data: directResults } = await supabase
       .from(table)
-      .select('*')
+      .select(INVENTORY_SELECT_COLUMNS)
       .or(`part_number.ilike.%${searchLower}%,name.ilike.%${searchLower}%`)
       .limit(50);
 
@@ -1593,7 +1594,7 @@ export const searchInventoryWithAlias = async (
     if (aliasPartNumbers.length > 0) {
       const { data } = await supabase
         .from(table)
-        .select('*')
+        .select(INVENTORY_SELECT_COLUMNS)
         .in('part_number', aliasPartNumbers);
       aliasItems = data || [];
     }
@@ -1614,7 +1615,7 @@ export const searchInventoryWithAlias = async (
     const priceMap = await fetchLatestPricesForItems(allItems, store);
 
     return allItems.map(item => {
-      const mapped = mapItemFromDB(item, getPhotoRowByPartNumber(photoMap, item.part_number));
+      const mapped = mapItemFromDB(item, photoMap[item.part_number]);
       const lookupKey = (item.part_number || '').trim();
       if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga;
       return mapped;
@@ -1626,19 +1627,40 @@ export const searchInventoryWithAlias = async (
 };
 
 // --- INVENTORY FUNCTIONS ---
+interface FetchInventoryOptions {
+  includePhotos?: boolean;
+  includePrices?: boolean;
+  includeCostPrices?: boolean;
+}
 
-export const fetchInventory = async (store?: string | null): Promise<InventoryItem[]> => {
+export const fetchInventory = async (
+  store?: string | null,
+  options: FetchInventoryOptions = {}
+): Promise<InventoryItem[]> => {
+  const {
+    includePhotos = true,
+    includePrices = true,
+    includeCostPrices = true
+  } = options;
   const table = getTableName(store);
-  const { data: items, error } = await supabase.from(table).select('*').order('name', { ascending: true });
+  const items = await fetchAllRowsForModalFiltered<any>(
+    table,
+    INVENTORY_SELECT_COLUMNS,
+    'name',
+    (query) => query,
+    true
+  );
   
-  if (error || !items) return [];
+  if (!items || items.length === 0) return [];
 
-  const photoMap = await fetchPhotosForItems(items);
-  const priceMap = await fetchLatestPricesForItems(items, store);
-  const costPriceMap = await fetchLatestCostPricesForItems(items, store);
+  const [photoMap, priceMap, costPriceMap] = await Promise.all([
+    includePhotos ? fetchPhotosForItems(items) : Promise.resolve({}),
+    includePrices ? fetchLatestPricesForItems(items, store) : Promise.resolve({}),
+    includeCostPrices ? fetchLatestCostPricesForItems(items, store) : Promise.resolve({})
+  ]);
 
   return items.map(item => {
-    const mapped = mapItemFromDB(item, getPhotoRowByPartNumber(photoMap, item.part_number));
+    const mapped = mapItemFromDB(item, photoMap[item.part_number]);
     const lookupKey = (item.part_number || '').trim();
     if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga;
     if (costPriceMap[lookupKey]) mapped.costPrice = costPriceMap[lookupKey].harga_satuan;
@@ -1650,7 +1672,7 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
   const table = getTableName(store);
   const from = (page - 1) * perPage;
   const to = from + perPage - 1;
-  let query = supabase.from(table).select('*', { count: 'exact' });
+  let query = supabase.from(table).select(INVENTORY_SELECT_COLUMNS, { count: 'exact' });
 
   // Filter by part number
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
@@ -1673,7 +1695,7 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
 
   return { 
     data: items.map(item => {
-      const mapped = mapItemFromDB(item, getPhotoRowByPartNumber(photoMap, item.part_number));
+      const mapped = mapItemFromDB(item, photoMap[item.part_number]);
       const lookupKey = (item.part_number || '').trim();
       if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga;
       if (costPriceMap[lookupKey]) mapped.costPrice = costPriceMap[lookupKey].harga_satuan;
@@ -1685,14 +1707,17 @@ export const fetchInventoryPaginated = async (store: string | null, page: number
 
 export const fetchInventoryStats = async (store: string | null): Promise<any> => {
   const table = getTableName(store);
-  
-  // 1. Get total items and total stock from inventory
-  const { data: items, error } = await supabase.from(table).select('quantity, part_number');
-  if (error || !items) return { totalItems: 0, totalStock: 0, totalAsset: 0, todayIn: 0, todayOut: 0 };
-  
+
+  // Ambil semua inventory secara batch agar tidak mentok default 1000 rows.
+  const items = await fetchAllRowsForModal<ModalBaseItemRow>(
+    table,
+    'part_number,name,quantity',
+    'part_number'
+  );
+
   const totalItems = items.length;
   const totalStock = items.reduce((acc, item) => acc + (Number(item.quantity) || 0), 0);
-  
+
   // 2. Get today's start timestamp (WIB timezone)
   const now = new Date();
   const wibOffset = 7 * 60; // WIB = UTC+7
@@ -1702,37 +1727,55 @@ export const fetchInventoryStats = async (store: string | null): Promise<any> =>
   // Convert back to UTC for database query
   const startOfDayUTC = new Date(startOfDayWIB.getTime() - (localOffset + wibOffset) * 60000);
   const todayStart = startOfDayUTC.toISOString();
-  
+
+  const sumLogQtySince = async (
+    tableName: string,
+    qtyColumn: 'qty_masuk' | 'qty_keluar'
+  ): Promise<number> => {
+    const pageSize = 1000;
+    let from = 0;
+    let total = 0;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from(tableName)
+        .select(qtyColumn)
+        .gte('created_at', todayStart)
+        .order('created_at', { ascending: true })
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        console.error(`Gagal mengambil ${qtyColumn} dari ${tableName}:`, error);
+        break;
+      }
+
+      const page = (data || []) as Array<Record<string, number | null>>;
+      total += page.reduce((acc, row) => acc + (Number(row[qtyColumn]) || 0), 0);
+
+      if (page.length < pageSize) break;
+      from += pageSize;
+    }
+
+    return total;
+  };
+
   // 3. Get today's incoming qty from barang_masuk
   const inTable = getLogTableName('barang_masuk', store);
-  const { data: inData } = await supabase
-    .from(inTable)
-    .select('qty_masuk')
-    .gte('created_at', todayStart);
-  const todayIn = (inData || []).reduce((acc, row) => acc + (Number(row.qty_masuk) || 0), 0);
-  
+  const todayIn = await sumLogQtySince(inTable, 'qty_masuk');
+
   // 4. Get today's outgoing qty from barang_keluar
   const outTable = getLogTableName('barang_keluar', store);
-  const { data: outData } = await supabase
-    .from(outTable)
-    .select('qty_keluar')
-    .gte('created_at', todayStart);
-  const todayOut = (outData || []).reduce((acc, row) => acc + (Number(row.qty_keluar) || 0), 0);
-  
-  // 5. Calculate total asset (need prices)
-  const priceMap = await fetchLatestPricesForItems(items, store);
-  const totalAsset = items.reduce((acc, item) => {
-    const pk = (item.part_number || '').trim();
-    const price = priceMap[pk]?.harga || 0;
-    return acc + (price * (Number(item.quantity) || 0));
-  }, 0);
-  
+  const todayOut = await sumLogQtySince(outTable, 'qty_keluar');
+
+  // 5. Calculate total asset as total modal stock (same basis as Zakat Tahunan modal)
+  const totalAsset = await calculateModalStockTotal(items);
+
   return { totalItems, totalStock, totalAsset, todayIn, todayOut };
 };
 
 export const fetchInventoryAllFiltered = async (store: string | null, filters?: any): Promise<InventoryItem[]> => {
   const table = getTableName(store);
-  let query = supabase.from(table).select('*');
+  let query = supabase.from(table).select(INVENTORY_SELECT_COLUMNS);
 
   // Filter by part number
   if (filters?.partNumber) query = query.ilike('part_number', `%${filters.partNumber}%`);
@@ -1754,7 +1797,7 @@ export const fetchInventoryAllFiltered = async (store: string | null, filters?: 
   const costPriceMap = await fetchLatestCostPricesForItems(items, store);
 
   return items.map(item => {
-    const mapped = mapItemFromDB(item, getPhotoRowByPartNumber(photoMap, item.part_number));
+    const mapped = mapItemFromDB(item, photoMap[item.part_number]);
     const lookupKey = (item.part_number || '').trim();
     if (priceMap[lookupKey]) mapped.price = priceMap[lookupKey].harga;
     if (costPriceMap[lookupKey]) mapped.costPrice = costPriceMap[lookupKey].harga_satuan;
@@ -1774,15 +1817,158 @@ export const addInventory = async (data: InventoryFormData, store?: string | nul
     console.error(`Gagal Tambah: ${error.message}`);
     return null;
   }
-  if (data.partNumber) {
-    const primaryImage = getPrimaryImage(data);
-    const imagesToSave = sanitizeImageList(data.images);
-    await Promise.all([
-      savePhotosToTable(data.partNumber, imagesToSave.length > 0 ? imagesToSave : (primaryImage ? [primaryImage] : [])),
-      syncBaseImageUrl(table, data.partNumber, primaryImage)
-    ]);
-  }
+  if (data.partNumber) await savePhotosToTable(data.partNumber, data.images);
   return data.partNumber;
+};
+
+export interface InventoryBatchRowInput {
+  partNumber: string;
+  name: string;
+  brand?: string;
+  application?: string;
+  shelf?: string;
+}
+
+export interface InventoryBatchInsertResult {
+  inserted: number;
+  skippedExisting: number;
+  skippedInvalid: number;
+  skippedDuplicateInput: number;
+  skippedEmpty: number;
+  errors: string[];
+}
+
+const chunkArray = <T,>(arr: T[], chunkSize: number): T[][] => {
+  if (chunkSize <= 0) return [arr];
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += chunkSize) {
+    chunks.push(arr.slice(i, i + chunkSize));
+  }
+  return chunks;
+};
+
+export const addInventoryBatch = async (
+  rows: InventoryBatchRowInput[],
+  store?: string | null
+): Promise<InventoryBatchInsertResult> => {
+  const result: InventoryBatchInsertResult = {
+    inserted: 0,
+    skippedExisting: 0,
+    skippedInvalid: 0,
+    skippedDuplicateInput: 0,
+    skippedEmpty: 0,
+    errors: []
+  };
+
+  if (!Array.isArray(rows) || rows.length === 0) return result;
+
+  const table = getTableName(store);
+  const seenPartNumbers = new Set<string>();
+  const normalizedRows: InventoryBatchRowInput[] = [];
+
+  rows.forEach((row) => {
+    const partNumber = normalizePart(row.partNumber);
+    const name = (row.name || '').trim();
+    const brand = (row.brand || '').trim();
+    const application = (row.application || '').trim();
+    const shelf = (row.shelf || '').trim();
+
+    const isEmptyRow = !partNumber && !name && !brand && !application && !shelf;
+    if (isEmptyRow) {
+      result.skippedEmpty += 1;
+      return;
+    }
+
+    if (!partNumber || !name) {
+      result.skippedInvalid += 1;
+      return;
+    }
+
+    if (seenPartNumbers.has(partNumber)) {
+      result.skippedDuplicateInput += 1;
+      return;
+    }
+
+    seenPartNumbers.add(partNumber);
+    normalizedRows.push({
+      partNumber,
+      name,
+      brand,
+      application,
+      shelf
+    });
+  });
+
+  if (normalizedRows.length === 0) return result;
+
+  const existingPartNumbers = new Set<string>();
+  const partNumberChunks = chunkArray(
+    normalizedRows.map((row) => row.partNumber),
+    500
+  );
+
+  for (const chunk of partNumberChunks) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('part_number')
+      .in('part_number', chunk);
+
+    if (error) {
+      result.errors.push(`Gagal cek data existing: ${error.message}`);
+      continue;
+    }
+
+    (data || []).forEach((row: any) => {
+      const part = normalizePart(row.part_number);
+      if (part) existingPartNumbers.add(part);
+    });
+  }
+
+  const rowsToInsert = normalizedRows.filter((row) => !existingPartNumbers.has(row.partNumber));
+  result.skippedExisting = normalizedRows.length - rowsToInsert.length;
+
+  if (rowsToInsert.length === 0) return result;
+
+  const payloads = rowsToInsert.map((row) =>
+    mapItemToDB({
+      partNumber: row.partNumber,
+      name: row.name,
+      brand: row.brand || '',
+      application: row.application || '',
+      shelf: row.shelf || '',
+      quantity: 0
+    })
+  );
+
+  const payloadChunks = chunkArray(payloads, 300);
+
+  for (const payloadChunk of payloadChunks) {
+    const { error } = await supabase.from(table).insert(payloadChunk);
+    if (!error) {
+      result.inserted += payloadChunk.length;
+      continue;
+    }
+
+    // Fallback ke insert per baris agar tetap simpan sebagian jika ada konflik sebagian.
+    for (const payload of payloadChunk as any[]) {
+      const { error: singleError } = await supabase.from(table).insert([payload]);
+      if (!singleError) {
+        result.inserted += 1;
+        continue;
+      }
+
+      const message = singleError.message || 'Unknown error';
+      const isDuplicate = singleError.code === '23505' || message.toLowerCase().includes('duplicate');
+      if (isDuplicate) {
+        result.skippedExisting += 1;
+      } else {
+        const partNumber = normalizePart(payload.part_number || payload.partNumber);
+        result.errors.push(`${partNumber || '-'}: ${message}`);
+      }
+    }
+  }
+
+  return result;
 };
 
 // --- UPDATE INVENTORY (LOGIC BARANG MASUK/KELUAR) ---
@@ -1799,12 +1985,7 @@ export const updateInventory = async (arg1: any, arg2?: any, arg3?: any): Promis
   const { error } = await supabase.from(table).update(mapItemToDB(item)).eq('part_number', pk);
   if (error) { alert(`Gagal Update Stok: ${error.message}`); return null; }
 
-  const primaryImage = getPrimaryImage(item);
-  const imagesToSave = sanitizeImageList(item.images);
-  await Promise.all([
-    savePhotosToTable(pk, imagesToSave.length > 0 ? imagesToSave : (primaryImage ? [primaryImage] : [])),
-    syncBaseImageUrl(table, pk, primaryImage)
-  ]);
+  await savePhotosToTable(pk, item.images || []);
 
   // 2. Update Harga Jual di list_harga_jual (pusat)
   if (item.price !== undefined && item.price >= 0) {
@@ -1887,13 +2068,17 @@ export const deleteInventory = async (id: string, store?: string | null): Promis
 
 export const getItemByPartNumber = async (partNumber: string, store?: string | null): Promise<InventoryItem | null> => {
   const table = getTableName(store);
-  const { data, error } = await supabase.from(table).select('*').eq('part_number', partNumber).maybeSingle();
+  const { data, error } = await supabase
+    .from(table)
+    .select(INVENTORY_SELECT_COLUMNS)
+    .eq('part_number', partNumber)
+    .maybeSingle();
   if (error || !data) return null;
   
   const photoMap = await fetchPhotosForItems([data]);
   const priceMap = await fetchLatestPricesForItems([data], store);
   
-  const mapped = mapItemFromDB(data, getPhotoRowByPartNumber(photoMap, data.part_number));
+  const mapped = mapItemFromDB(data, photoMap[data.part_number]);
   const lookupKey = (data.part_number || '').trim();
   if (priceMap[lookupKey]) {
       mapped.price = priceMap[lookupKey].harga;
@@ -1915,7 +2100,12 @@ export const fetchBarangMasukLog = async (store: string | null, page = 1, limit 
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    let query = supabase.from(table).select('*', { count: 'exact' });
+    let query = supabase
+        .from(table)
+        .select(BARANG_MASUK_LOG_SELECT_COLUMNS, { count: 'exact' })
+        // Exclude rows retur from riwayat barang masuk view.
+        .not('customer', 'ilike', '%RETUR%')
+        .not('tempo', 'ilike', '%RETUR%');
 
     // Apply search filters
     if (filters.search) {
@@ -1950,35 +2140,8 @@ export const fetchBarangMasukLog = async (store: string | null, page = 1, limit 
         return { data: [], total: 0 };
     }
 
-    // Fetch current quantities from stock table
-    // Normalize part numbers to handle variations (spaces, case differences)
-    const normalizePN = (pn: string): string => pn?.trim().toUpperCase().replace(/\s+/g, ' ') || '';
     const partNumbers = [...new Set((data || []).map(row => row.part_number).filter(Boolean))];
-    const normalizedPartNumbers = partNumbers.map(normalizePN);
-    let stockMap: Record<string, number> = {};
-    
-    if (partNumbers.length > 0) {
-        // Query with both original and normalized versions to catch more matches
-        const { data: stockData } = await supabase
-            .from(stockTable)
-            .select('part_number, quantity');
-        
-        if (stockData) {
-            // Create lookup map using normalized part numbers
-            const stockByNormalized = stockData.reduce((acc, item) => {
-                const normalizedKey = normalizePN(item.part_number);
-                acc[normalizedKey] = item.quantity;
-                acc[item.part_number] = item.quantity; // Also keep original
-                return acc;
-            }, {} as Record<string, number>);
-            
-            // Build stockMap matching log part numbers to stock
-            partNumbers.forEach(pn => {
-                const normalized = normalizePN(pn);
-                stockMap[pn] = stockByNormalized[pn] ?? stockByNormalized[normalized] ?? 0;
-            });
-        }
-    }
+    const stockMap = await fetchStockQtyMapByPartNumbers(stockTable, partNumbers);
     
     const mappedData = (data || []).map(row => ({
         ...row,
@@ -2012,7 +2175,7 @@ export const fetchShopItems = async (
   const { searchTerm = '', partNumberSearch = '', nameSearch = '', brandSearch = '', applicationSearch = '' } = filters;
 
   try {
-    let query = supabase.from(table).select('*', { count: 'exact' }); 
+    let query = supabase.from(table).select(INVENTORY_SELECT_COLUMNS, { count: 'exact' }); 
 
     // Search all fields: name, part_number, brand, application
     if (searchTerm) query = query.or(`name.ilike.%${searchTerm}%,part_number.ilike.%${searchTerm}%,brand.ilike.%${searchTerm}%,application.ilike.%${searchTerm}%`);
@@ -2031,7 +2194,7 @@ export const fetchShopItems = async (
     const priceMap = await fetchLatestPricesForItems(items, store);
 
     const mappedItems = items.map(item => {
-      const baseItem = mapItemFromDB(item, getPhotoRowByPartNumber(photoMap, item.part_number));
+      const baseItem = mapItemFromDB(item, photoMap[item.part_number]);
       const lookupKey = (item.part_number || '').trim();
       const latestPrice = priceMap[lookupKey];
       return {
@@ -2100,14 +2263,26 @@ export const fetchOfflineOrders = async (store: string | null): Promise<OfflineO
   const table = store === 'mjm' ? 'orders_mjm' : (store === 'bjw' ? 'orders_bjw' : null);
   if (!table) return [];
 
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('status', 'Belum Diproses')
-    .order('tanggal', { ascending: false });
+  return await fetchAllRowsForModalFiltered<OfflineOrderRow>(
+    table,
+    '*',
+    'tanggal',
+    (q) => q.eq('status', 'Belum Diproses'),
+    false
+  );
+};
 
-  if (error) { console.error(`Fetch Offline Error:`, error); return []; }
-  return data || [];
+// 2.1 FETCH SALES (KHUSUS BJW)
+export const fetchSalesOrders = async (store: string | null): Promise<OfflineOrderRow[]> => {
+  if (store !== 'bjw') return [];
+
+  return await fetchAllRowsForModalFiltered<OfflineOrderRow>(
+    'orders_bjw',
+    '*',
+    'tanggal',
+    (q) => q.eq('status', 'Sales Pending').eq('tempo', 'SALES'),
+    false
+  );
 };
 
 // 3. FETCH ONLINE
@@ -2115,14 +2290,13 @@ export const fetchOnlineOrders = async (store: string | null): Promise<OnlineOrd
   const table = store === 'mjm' ? 'scan_resi_mjm' : (store === 'bjw' ? 'scan_resi_bjw' : null);
   if (!table) return [];
 
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .neq('status', 'Diproses') 
-    .order('tanggal', { ascending: false });
-
-  if (error) { console.error('Fetch Online Error:', error); return []; }
-  return data || [];
+  return await fetchAllRowsForModalFiltered<OnlineOrderRow>(
+    table,
+    '*',
+    'tanggal',
+    (q) => q.neq('status', 'Diproses'),
+    false
+  );
 };
 
 // 4. FETCH SOLD ITEMS (no limit, pagination handled in component)
@@ -2130,13 +2304,110 @@ export const fetchSoldItems = async (store: string | null): Promise<SoldItemRow[
   const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
   if (!table) return [];
 
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .order('created_at', { ascending: false });
+  return await fetchAllRowsForModalFiltered<SoldItemRow>(
+    table,
+    SOLD_ITEM_SELECT_COLUMNS,
+    'created_at',
+    (q) => q,
+    false
+  );
+};
 
-  if (error) { console.error('Fetch Sold Error:', error); return []; }
-  return data || [];
+export interface SoldItemsChunkPayload {
+  chunk: SoldItemRow[];
+  loaded: number;
+  total: number;
+}
+
+// Fetch sold items bertahap agar UI bisa render progresif (chunk per chunk).
+export const fetchSoldItemsProgressive = async (
+  store: string | null,
+  onChunk?: (payload: SoldItemsChunkPayload) => void
+): Promise<SoldItemRow[]> => {
+  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!table) return [];
+
+  // Bigger page size + no upfront exact count to improve first render latency
+  // and reduce total round-trips on large datasets.
+  const pageSize = 1000;
+  let from = 0;
+  const rows: SoldItemRow[] = [];
+  let snapshotMaxCreatedAt: string | null = null;
+
+  try {
+    const { data: latestRow, error: latestError } = await supabase
+      .from(table)
+      .select('created_at')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!latestError) {
+      snapshotMaxCreatedAt = (latestRow?.created_at as string | undefined) || null;
+    }
+  } catch (error) {
+    console.warn('fetchSoldItemsProgressive: gagal ambil snapshot created_at, lanjut tanpa snapshot.');
+  }
+
+  while (true) {
+    let data: SoldItemRow[] | null = null;
+    let error: any = null;
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      let query = supabase
+        .from(table)
+        .select(SOLD_ITEM_SELECT_COLUMNS)
+        .order('created_at', { ascending: false });
+
+      if (snapshotMaxCreatedAt) {
+        query = query.lte('created_at', snapshotMaxCreatedAt);
+      }
+
+      const response = await query.range(from, from + pageSize - 1);
+      data = (response.data || []) as SoldItemRow[];
+      error = response.error;
+
+      if (!error) break;
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 180 * attempt));
+      }
+    }
+
+    if (error) {
+      console.error('Fetch Sold Progressive Error:', error);
+      return rows;
+    }
+
+    const page = (data || []) as SoldItemRow[];
+    if (page.length === 0) break;
+
+    rows.push(...page);
+
+    onChunk?.({
+      chunk: page,
+      loaded: rows.length,
+      // 0 means "unknown total"; caller can show indeterminate progress.
+      total: 0
+    });
+
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
+// 4.1 FETCH SALES PAID ITEMS (KHUSUS BJW)
+export const fetchSalesPaidItems = async (store: string | null): Promise<SoldItemRow[]> => {
+  if (store !== 'bjw') return [];
+
+  return await fetchAllRowsForModalFiltered<SoldItemRow>(
+    'barang_keluar_bjw',
+    SOLD_ITEM_SELECT_COLUMNS,
+    'created_at',
+    (q) => q.ilike('ecommerce', 'SALES').ilike('tempo', 'CASH'),
+    false
+  );
 };
 
 // 4.1 UPDATE SOLD ITEM PRICE
@@ -2169,18 +2440,328 @@ export const updateSoldItemPrice = async (
   }
 };
 
+// 4.2 UPDATE SOLD ITEM DATE
+export const updateSoldItemDate = async (
+  itemId: string,
+  newDateIso: string,
+  store: string | null
+): Promise<{ success: boolean; msg: string }> => {
+  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!table) return { success: false, msg: 'Toko tidak valid' };
+
+  try {
+    const { error } = await supabase
+      .from(table)
+      .update({ created_at: newDateIso })
+      .eq('id', itemId);
+
+    if (error) {
+      console.error('Update Sold Item Date Error:', error);
+      return { success: false, msg: 'Gagal update tanggal: ' + error.message };
+    }
+
+    return { success: true, msg: 'Tanggal berhasil diupdate' };
+  } catch (err: any) {
+    console.error('Update Sold Item Date Exception:', err);
+    return { success: false, msg: 'Error: ' + (err.message || 'Unknown error') };
+  }
+};
+
+// 4.3 UPDATE SOLD ITEM QTY + ADJUST STOCK
+export const updateSoldItemQty = async (
+  itemId: string,
+  newQtyKeluar: number,
+  store: string | null
+): Promise<{ success: boolean; msg: string; delta?: number }> => {
+  const outTable = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  const stockTable = store === 'mjm' ? 'base_mjm' : (store === 'bjw' ? 'base_bjw' : null);
+  if (!outTable || !stockTable) return { success: false, msg: 'Toko tidak valid' };
+
+  const targetQty = Number(newQtyKeluar);
+  if (!Number.isInteger(targetQty) || targetQty <= 0) {
+    return { success: false, msg: 'Qty harus bilangan bulat lebih dari 0' };
+  }
+
+  try {
+    // 1) Ambil data item terjual saat ini
+    const { data: soldItem, error: soldError } = await supabase
+      .from(outTable)
+      .select('id, part_number, qty_keluar, harga_total, tempo')
+      .eq('id', itemId)
+      .single();
+
+    if (soldError || !soldItem) {
+      return { success: false, msg: 'Data item terjual tidak ditemukan' };
+    }
+
+    const partNumber = (soldItem.part_number || '').trim();
+    if (!partNumber) {
+      return { success: false, msg: 'Part number tidak valid pada item terjual' };
+    }
+
+    const currentQty = Number(soldItem.qty_keluar || 0);
+    const delta = targetQty - currentQty;
+
+    if (delta === 0) {
+      return { success: true, msg: 'Qty tidak berubah', delta: 0 };
+    }
+
+    const isKilatItem = normalizeTempo(soldItem.tempo) === 'KILAT';
+    const shouldAdjustStock = !isKilatItem;
+
+    // 2) Ambil stok saat ini di base table
+    let stockItem: { part_number: string; quantity: number } | null = null;
+    let stockPartNumber = partNumber;
+    let stockQty = 0;
+
+    if (shouldAdjustStock) {
+      const { data: stockExact, error: stockExactErr } = await supabase
+        .from(stockTable)
+        .select('part_number, quantity')
+        .eq('part_number', partNumber)
+        .maybeSingle();
+
+      if (stockExactErr) {
+        return { success: false, msg: 'Gagal mengambil data stok: ' + stockExactErr.message };
+      }
+
+      if (stockExact) {
+        stockItem = stockExact;
+      } else {
+        const { data: stockIlike, error: stockIlikeErr } = await supabase
+          .from(stockTable)
+          .select('part_number, quantity')
+          .ilike('part_number', partNumber)
+          .maybeSingle();
+
+        if (stockIlikeErr) {
+          return { success: false, msg: 'Gagal mengambil data stok: ' + stockIlikeErr.message };
+        }
+        stockItem = stockIlike || null;
+      }
+
+      if (!stockItem) {
+        return { success: false, msg: `Part number ${partNumber} tidak ditemukan di stok` };
+      }
+
+      stockPartNumber = stockItem.part_number || partNumber;
+      stockQty = Number(stockItem.quantity || 0);
+
+      // 3) Hitung stok baru berdasarkan delta qty
+      // delta > 0: qty jual naik -> stok berkurang
+      // delta < 0: qty jual turun -> stok bertambah
+      const absDelta = Math.abs(delta);
+      const newStockQty = delta > 0 ? stockQty - absDelta : stockQty + absDelta;
+
+      if (delta > 0 && stockQty < absDelta) {
+        return { success: false, msg: `Stok tidak cukup. Sisa stok ${stockQty}, butuh ${absDelta}` };
+      }
+
+      const { error: stockUpdateErr } = await supabase
+        .from(stockTable)
+        .update({ quantity: newStockQty })
+        .eq('part_number', stockPartNumber);
+
+      if (stockUpdateErr) {
+        return { success: false, msg: 'Gagal update stok: ' + stockUpdateErr.message };
+      }
+
+      stockQty = newStockQty;
+    }
+
+    // 4) Update qty pada barang_keluar
+    const hargaTotalNow = Number(soldItem.harga_total || 0);
+    const newHargaSatuan = targetQty > 0 ? Math.round(hargaTotalNow / targetQty) : 0;
+    const soldPayload: any = {
+      qty_keluar: targetQty,
+      harga_satuan: newHargaSatuan
+    };
+
+    if (shouldAdjustStock) {
+      soldPayload.stock_ahir = stockQty;
+    }
+
+    const { error: soldUpdateErr } = await supabase
+      .from(outTable)
+      .update(soldPayload)
+      .eq('id', itemId);
+
+    if (soldUpdateErr) {
+      // Rollback stok jika update barang_keluar gagal
+      if (shouldAdjustStock) {
+        const rollbackQty = Number(stockItem?.quantity || 0);
+        await supabase
+          .from(stockTable)
+          .update({ quantity: rollbackQty })
+          .eq('part_number', stockPartNumber);
+      }
+      return { success: false, msg: 'Gagal update qty terjual: ' + soldUpdateErr.message };
+    }
+
+    if (isKilatItem) {
+      return {
+        success: true,
+        msg: `Qty berhasil diupdate ke ${targetQty} (item KILAT, stok base tidak diubah)`,
+        delta
+      };
+    }
+
+    const absDelta = Math.abs(delta);
+    const stockAction = delta > 0 ? `berkurang ${absDelta}` : `bertambah ${absDelta}`;
+    return {
+      success: true,
+      msg: `Qty berhasil diupdate ke ${targetQty}, stok ${stockAction}`,
+      delta
+    };
+  } catch (err: any) {
+    console.error('Update Sold Item Qty Exception:', err);
+    return { success: false, msg: 'Error: ' + (err.message || 'Unknown error') };
+  }
+};
+
+// 4.4 UPDATE SOLD ITEM KODE TOKO
+export const updateSoldItemKodeToko = async (
+  itemId: string,
+  newKodeToko: string,
+  store: string | null
+): Promise<{ success: boolean; msg: string }> => {
+  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!table) return { success: false, msg: 'Toko tidak valid' };
+
+  const normalizedKodeToko = (newKodeToko || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!normalizedKodeToko) {
+    return { success: false, msg: 'Kode toko tidak boleh kosong' };
+  }
+
+  try {
+    const { error } = await supabase
+      .from(table)
+      .update({ kode_toko: normalizedKodeToko })
+      .eq('id', itemId);
+
+    if (error) {
+      console.error('Update Sold Item Kode Toko Error:', error);
+      return { success: false, msg: 'Gagal update kode toko: ' + error.message };
+    }
+
+    return { success: true, msg: 'Kode toko berhasil diupdate' };
+  } catch (err: any) {
+    console.error('Update Sold Item Kode Toko Exception:', err);
+    return { success: false, msg: 'Error: ' + (err.message || 'Unknown error') };
+  }
+};
+
+// 4.5 UPDATE SOLD ITEM TEMPO
+export const updateSoldItemTempo = async (
+  itemId: string,
+  newTempo: string,
+  store: string | null
+): Promise<{ success: boolean; msg: string }> => {
+  const table = store === 'mjm' ? 'barang_keluar_mjm' : (store === 'bjw' ? 'barang_keluar_bjw' : null);
+  if (!table) return { success: false, msg: 'Toko tidak valid' };
+
+  const normalizedTempo = (newTempo || '').trim().toUpperCase();
+  const allowedTempo = new Set(['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR']);
+  if (!allowedTempo.has(normalizedTempo)) {
+    return { success: false, msg: 'Tempo tidak valid' };
+  }
+
+  try {
+    const { error } = await supabase
+      .from(table)
+      .update({ tempo: normalizedTempo })
+      .eq('id', itemId);
+
+    if (error) {
+      console.error('Update Sold Item Tempo Error:', error);
+      return { success: false, msg: 'Gagal update tempo: ' + error.message };
+    }
+
+    return { success: true, msg: 'Tempo berhasil diupdate' };
+  } catch (err: any) {
+    console.error('Update Sold Item Tempo Exception:', err);
+    return { success: false, msg: 'Error: ' + (err.message || 'Unknown error') };
+  }
+};
+
 // 5. FETCH RETUR
 export const fetchReturItems = async (store: string | null): Promise<ReturRow[]> => {
   const table = store === 'mjm' ? 'retur_mjm' : (store === 'bjw' ? 'retur_bjw' : null);
   if (!table) return [];
 
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .order('tanggal_retur', { ascending: false });
+  return await fetchAllRowsForModalFiltered<ReturRow>(
+    table,
+    '*',
+    'tanggal_retur',
+    (q) => q,
+    false
+  );
+};
 
-  if (error) { console.error('Fetch Retur Error:', error); return []; }
-  return data || [];
+const normalizePartForSync = (value: string | null | undefined): string =>
+  (value || '').trim().toUpperCase().replace(/\s+/g, ' ');
+
+const getResiSyncTables = (store: string | null) => {
+  if (store === 'mjm') return { scanTable: 'scan_resi_mjm', resiItemsTable: 'resi_items_mjm' };
+  if (store === 'bjw') return { scanTable: 'scan_resi_bjw', resiItemsTable: 'resi_items_bjw' };
+  return null;
+};
+
+const syncResiToProcessed = async (
+  store: string | null,
+  resiValue: string | null | undefined,
+  partNumber: string | null | undefined
+): Promise<void> => {
+  const tables = getResiSyncTables(store);
+  const normalizedResi = String(resiValue || '').trim();
+  if (!tables || !normalizedResi || normalizedResi === '-') return;
+
+  const resiVariants = [...new Set([normalizedResi, normalizedResi.toUpperCase(), normalizedResi.toLowerCase()])];
+  const normalizedPart = normalizePartForSync(partNumber);
+
+  try {
+    await supabase
+      .from(tables.scanTable)
+      .update({ status: 'completed' })
+      .in('resi', resiVariants)
+      .neq('status', 'completed');
+  } catch (err) {
+    console.warn('syncResiToProcessed scan_resi warning:', err);
+  }
+
+  try {
+    const pendingItems = await fetchAllRowsForModalFiltered<any>(
+      tables.resiItemsTable,
+      'id, part_number',
+      'id',
+      (query) => query.eq('status', 'pending').in('resi', resiVariants),
+      true
+    );
+
+    if (!pendingItems || pendingItems.length === 0) return;
+
+    let idsToProcess = pendingItems.map((row: any) => row.id).filter(Boolean);
+    if (normalizedPart) {
+      idsToProcess = pendingItems
+        .filter((row: any) => normalizePartForSync(row.part_number) === normalizedPart)
+        .map((row: any) => row.id)
+        .filter(Boolean);
+    }
+
+    if (idsToProcess.length === 0) return;
+
+    for (let i = 0; i < idsToProcess.length; i += 500) {
+      const chunk = idsToProcess.slice(i, i + 500);
+      const { error: updateErr } = await supabase
+        .from(tables.resiItemsTable)
+        .update({ status: 'processed' })
+        .in('id', chunk as any[]);
+
+      if (updateErr) throw updateErr;
+    }
+  } catch (err) {
+    console.warn('syncResiToProcessed resi_items warning:', err);
+  }
 };
 
 // --- PROCESSING LOGIC (ACC / TOLAK) ---
@@ -2233,6 +2814,8 @@ export const processOfflineOrderItem = async (
     if (updateError) throw updateError;
 
     // 3. Masukkan ke Barang Keluar (Agar muncul di Tab Terjual)
+    const resiFromOrder = String((item as any).resi || (item as any).no_pesanan || '').trim();
+    const finalResi = resiFromOrder && resiFromOrder !== '-' ? resiFromOrder : '-';
     const logPayload = {
       tempo: item.tempo || 'CASH',
       ecommerce: 'OFFLINE',
@@ -2246,7 +2829,7 @@ export const processOfflineOrderItem = async (
       qty_keluar: item.quantity,
       harga_satuan: item.harga_satuan,
       harga_total: item.harga_total,
-      resi: '-',
+      resi: finalResi,
       created_at: getWIBDate().toISOString()
     };
     await supabase.from(outTable).insert([logPayload]);
@@ -2256,10 +2839,256 @@ export const processOfflineOrderItem = async (
     updateQuery = buildWhereQuery(updateQuery);
     await updateQuery;
 
+    // Sinkronkan scan_resi + resi_items jika order menyertakan resi/no_pesanan.
+    await syncResiToProcessed(store, finalResi, item.part_number);
+
     return { success: true, msg: 'Pesanan diproses & stok dipotong.' };
   } catch (error: any) {
     console.error('Process Error:', error);
     return { success: false, msg: `Error: ${error.message}` };
+  }
+};
+
+// --- SALES FLOW (KHUSUS BJW) ---
+export const processSalesOrderItem = async (
+  item: OfflineOrderRow,
+  store: string | null,
+  action: 'TERJUAL' | 'KEMBALIKAN',
+  qtyToProcess?: number
+): Promise<{ success: boolean; msg: string }> => {
+  if (store !== 'bjw') {
+    return { success: false, msg: 'Fitur Sales hanya untuk toko BJW.' };
+  }
+
+  const orderTable = 'orders_bjw';
+  const stockTable = 'base_bjw';
+  const outTable = 'barang_keluar_bjw';
+
+  const originalQty = Number(item.quantity || 0);
+  const processQtyRaw = qtyToProcess == null ? originalQty : Number(qtyToProcess);
+  const processQty = Number.isFinite(processQtyRaw) ? Math.floor(processQtyRaw) : 0;
+  if (processQty <= 0 || processQty > originalQty) {
+    return { success: false, msg: `Qty tidak valid (max: ${originalQty}).` };
+  }
+
+  const remainingQty = originalQty - processQty;
+  const fallbackUnitPrice = originalQty > 0 ? Math.round(Number(item.harga_total || 0) / originalQty) : 0;
+  const unitPrice = Number(item.harga_satuan || 0) > 0 ? Number(item.harga_satuan || 0) : fallbackUnitPrice;
+  const processedTotal = unitPrice * processQty;
+  const remainingTotal = unitPrice * remainingQty;
+  const hasStableId = item.id !== undefined && item.id !== null && String(item.id).trim() !== '';
+
+  // Gunakan id jika ada, fallback ke kombinasi data order
+  const buildWhereQuery = (query: any) => {
+    if (hasStableId) {
+      return query.eq('id', item.id);
+    }
+    return query
+      .eq('tanggal', item.tanggal)
+      .eq('customer', item.customer)
+      .eq('part_number', item.part_number)
+      .eq('tempo', 'SALES')
+      .eq('status', 'Sales Pending');
+  };
+
+  try {
+    if (action === 'KEMBALIKAN') {
+      // Barang dikembalikan ke base (stok tambah lagi)
+      const { data: currentItem, error: fetchError } = await supabase
+        .from(stockTable)
+        .select('quantity')
+        .eq('part_number', item.part_number)
+        .maybeSingle();
+
+      if (fetchError) throw fetchError;
+      if (!currentItem) {
+        return { success: false, msg: `Part ${item.part_number} tidak ditemukan di base BJW.` };
+      }
+
+      const restoredQty = Number(currentItem.quantity || 0) + processQty;
+      const { error: updateStockError } = await supabase
+        .from(stockTable)
+        .update({ quantity: restoredQty })
+        .eq('part_number', item.part_number);
+
+      if (updateStockError) throw updateStockError;
+
+      let updateQuery = supabase
+        .from(orderTable)
+        .update(
+          remainingQty <= 0
+            ? { status: 'Tolak' }
+            : { quantity: remainingQty, harga_total: remainingTotal, tempo: 'SALES', status: 'Sales Pending' }
+        );
+      updateQuery = buildWhereQuery(updateQuery);
+      const { error: updateOrderError } = await updateQuery;
+      if (updateOrderError) throw updateOrderError;
+
+      return { success: true, msg: `Barang dikembalikan ke base (+${processQty}).` };
+    }
+
+    // TERJUAL: stok TIDAK dikurangi lagi (sudah berkurang saat dibawa sales)
+    const { data: stockItem } = await supabase
+      .from(stockTable)
+      .select('brand, application, shelf, quantity')
+      .eq('part_number', item.part_number)
+      .maybeSingle();
+
+    const currentQty = Number(stockItem?.quantity || 0);
+    const resiFromOrder = String((item as any).resi || (item as any).no_pesanan || '').trim();
+    const finalResi = resiFromOrder && resiFromOrder !== '-' ? resiFromOrder : '-';
+    const logPayload = {
+      tempo: 'CASH', // terjual & dibayar
+      ecommerce: 'SALES',
+      customer: item.customer,
+      part_number: item.part_number,
+      name: item.nama_barang,
+      brand: stockItem?.brand || '',
+      application: stockItem?.application || '',
+      rak: stockItem?.shelf || '',
+      stock_ahir: currentQty,
+      qty_keluar: processQty,
+      harga_satuan: unitPrice,
+      harga_total: processedTotal,
+      resi: finalResi,
+      created_at: getWIBDate().toISOString()
+    };
+
+    const { error: insertOutError } = await supabase.from(outTable).insert([logPayload]);
+    if (insertOutError) throw insertOutError;
+
+    let updateQuery = supabase
+      .from(orderTable)
+      .update(
+        remainingQty <= 0
+          ? { status: 'Proses' }
+          : { quantity: remainingQty, harga_total: remainingTotal, tempo: 'SALES', status: 'Sales Pending' }
+      );
+    updateQuery = buildWhereQuery(updateQuery);
+    const { error: updateOrderError } = await updateQuery;
+    if (updateOrderError) throw updateOrderError;
+
+    // Sinkronkan scan_resi + resi_items jika order menyertakan resi/no_pesanan.
+    await syncResiToProcessed(store, finalResi, item.part_number);
+
+    return { success: true, msg: `Barang Sales ditandai terjual (${processQty}).` };
+  } catch (error: any) {
+    console.error('processSalesOrderItem Error:', error);
+    return { success: false, msg: error?.message || 'Gagal memproses data Sales.' };
+  }
+};
+
+// --- SALES CORRECTION (KHUSUS BJW): EDIT QTY TANPA MENGUBAH STOK BASE ---
+export const updateSalesPendingQty = async (
+  item: OfflineOrderRow,
+  store: string | null,
+  newQtyRaw: number
+): Promise<{ success: boolean; msg: string }> => {
+  if (store !== 'bjw') {
+    return { success: false, msg: 'Fitur edit qty Sales hanya untuk toko BJW.' };
+  }
+
+  const newQty = Number.isFinite(Number(newQtyRaw)) ? Math.floor(Number(newQtyRaw)) : 0;
+  if (newQty <= 0) {
+    return { success: false, msg: 'Qty baru harus lebih dari 0.' };
+  }
+
+  const originalQty = Number(item.quantity || 0);
+  const fallbackUnitPrice = originalQty > 0 ? Number(item.harga_total || 0) / originalQty : 0;
+  const unitPrice = Number(item.harga_satuan || 0) > 0 ? Number(item.harga_satuan || 0) : fallbackUnitPrice;
+  const newTotal = Math.round(unitPrice * newQty);
+
+  const hasStableId = item.id !== undefined && item.id !== null && String(item.id).trim() !== '';
+
+  const updatePayload = {
+    quantity: newQty,
+    harga_total: newTotal,
+    harga_satuan: Math.round(unitPrice),
+    tempo: 'SALES',
+    status: 'Sales Pending'
+  };
+
+  // Gunakan id jika ada, fallback ke kombinasi data order
+  const buildWhereQuery = (query: any) => {
+    if (hasStableId) {
+      return query.eq('id', item.id);
+    }
+    return query
+      .eq('tanggal', item.tanggal)
+      .eq('customer', item.customer)
+      .eq('part_number', item.part_number)
+      .eq('tempo', 'SALES')
+      .eq('status', 'Sales Pending');
+  };
+
+  try {
+    let updateQuery = supabase.from('orders_bjw').update(updatePayload);
+    updateQuery = buildWhereQuery(updateQuery);
+
+    const { error } = await updateQuery;
+    if (error) throw error;
+
+    return {
+      success: true,
+      msg: `Qty sales diubah ke ${newQty} (stok base tidak berubah).`
+    };
+  } catch (error: any) {
+    console.error('updateSalesPendingQty Error:', error);
+    return {
+      success: false,
+      msg: error?.message || 'Gagal update qty sales.'
+    };
+  }
+};
+
+// --- SALES CORRECTION (KHUSUS BJW): HAPUS ITEM TANPA MENGUBAH STOK BASE ---
+export const deleteSalesPendingItem = async (
+  item: OfflineOrderRow,
+  store: string | null
+): Promise<{ success: boolean; msg: string }> => {
+  if (store !== 'bjw') {
+    return { success: false, msg: 'Fitur hapus Sales hanya untuk toko BJW.' };
+  }
+
+  const hasStableId = item.id !== undefined && item.id !== null && String(item.id).trim() !== '';
+
+  // Gunakan id jika ada, fallback ke kombinasi data order
+  const buildWhereQuery = (query: any) => {
+    if (hasStableId) {
+      return query.eq('id', item.id);
+    }
+
+    let q = query
+      .eq('tanggal', item.tanggal)
+      .eq('customer', item.customer)
+      .eq('part_number', item.part_number)
+      .eq('tempo', 'SALES')
+      .eq('status', 'Sales Pending');
+
+    // Tambahan filter agar lebih spesifik saat id tidak tersedia
+    if (item.quantity != null) q = q.eq('quantity', item.quantity);
+    if (item.harga_total != null) q = q.eq('harga_total', item.harga_total);
+
+    return q;
+  };
+
+  try {
+    let deleteQuery = supabase.from('orders_bjw').delete();
+    deleteQuery = buildWhereQuery(deleteQuery);
+
+    const { error } = await deleteQuery;
+    if (error) throw error;
+
+    return {
+      success: true,
+      msg: 'Item Sales dihapus (stok base tidak berubah).'
+    };
+  } catch (error: any) {
+    console.error('deleteSalesPendingItem Error:', error);
+    return {
+      success: false,
+      msg: error?.message || 'Gagal menghapus item Sales.'
+    };
   }
 };
 
@@ -2311,18 +3140,125 @@ export const saveOfflineOrder = async (
   cart: any[], 
   customerName: string, 
   tempo: string, 
-  store: string | null
+  store: string | null,
+  orderDate?: string
 ): Promise<boolean> => {
   const tableName = store === 'mjm' ? 'orders_mjm' : (store === 'bjw' ? 'orders_bjw' : null);
   if (!tableName) { alert("Error: Toko tidak teridentifikasi"); return false; }
   if (!cart || cart.length === 0) return false;
+
+  const normalizedTempo = (tempo || 'CASH').trim().toUpperCase();
+  const resolvedOrderDate = (orderDate || '').trim();
+  const parsedOrderDate = resolvedOrderDate
+    ? new Date(
+        /^\d{4}-\d{2}-\d{2}$/.test(resolvedOrderDate)
+          ? `${resolvedOrderDate}T00:00:00+07:00`
+          : resolvedOrderDate
+      )
+    : null;
+  const orderTimestamp =
+    parsedOrderDate && !Number.isNaN(parsedOrderDate.getTime())
+      ? parsedOrderDate.toISOString()
+      : getWIBDate().toISOString();
+
+  // KHUSUS BJW + SALES:
+  // - Saat input, stok langsung dikurangi (barang dibawa sales)
+  // - Masuk ke orders dengan status "Sales Pending"
+  if (store === 'bjw' && normalizedTempo === 'SALES') {
+    const stockTable = 'base_bjw';
+    const requiredByPart = new Map<string, number>();
+
+    for (const item of cart) {
+      const partNumber = String(item.partNumber || '').trim();
+      const qty = Number(item.cartQuantity || 0);
+      if (!partNumber || qty <= 0) {
+        alert(`Data Sales tidak valid untuk part "${partNumber || '-'}".`);
+        return false;
+      }
+      requiredByPart.set(partNumber, (requiredByPart.get(partNumber) || 0) + qty);
+    }
+
+    const stockPlans: Array<{ partNumber: string; currentQty: number; newQty: number }> = [];
+
+    // Validasi stok dulu semua part
+    for (const [partNumber, requiredQty] of requiredByPart.entries()) {
+      const { data: currentStock, error: stockError } = await supabase
+        .from(stockTable)
+        .select('part_number, quantity')
+        .eq('part_number', partNumber)
+        .maybeSingle();
+
+      if (stockError || !currentStock) {
+        alert(`Part "${partNumber}" tidak ditemukan di base BJW.`);
+        return false;
+      }
+
+      const currentQty = Number(currentStock.quantity || 0);
+      if (currentQty < requiredQty) {
+        alert(`Stok "${partNumber}" tidak cukup. Sisa: ${currentQty}, dibutuhkan: ${requiredQty}.`);
+        return false;
+      }
+
+      stockPlans.push({
+        partNumber,
+        currentQty,
+        newQty: currentQty - requiredQty
+      });
+    }
+
+    const salesRows = cart.map(item => {
+      const finalPrice = item.customPrice ? Number(item.customPrice) : Number(item.price);
+      return {
+        tanggal: orderTimestamp,
+        customer: customerName,
+        part_number: item.partNumber,
+        nama_barang: item.name,
+        quantity: Number(item.cartQuantity),
+        harga_satuan: finalPrice,
+        harga_total: finalPrice * Number(item.cartQuantity),
+        status: 'Sales Pending',
+        tempo: 'SALES'
+      };
+    });
+
+    const appliedPlans: Array<{ partNumber: string; currentQty: number }> = [];
+
+    try {
+      // 1) Kurangi stok dulu
+      for (const plan of stockPlans) {
+        const { error: updateError } = await supabase
+          .from(stockTable)
+          .update({ quantity: plan.newQty })
+          .eq('part_number', plan.partNumber);
+
+        if (updateError) throw updateError;
+        appliedPlans.push({ partNumber: plan.partNumber, currentQty: plan.currentQty });
+      }
+
+      // 2) Simpan daftar barang yang dibawa sales
+      const { error: insertError } = await supabase.from(tableName).insert(salesRows);
+      if (insertError) throw insertError;
+
+      return true;
+    } catch (e: any) {
+      // Best-effort rollback stok jika insert/order gagal
+      for (const rollback of appliedPlans) {
+        await supabase
+          .from(stockTable)
+          .update({ quantity: rollback.currentQty })
+          .eq('part_number', rollback.partNumber);
+      }
+      alert(`Gagal menyimpan order SALES: ${e?.message || e}`);
+      return false;
+    }
+  }
 
   const orderRows = cart.map(item => {
     // [FIX] Gunakan customPrice jika ada, jika tidak gunakan harga asli
     const finalPrice = item.customPrice ? Number(item.customPrice) : Number(item.price);
 
     return {
-      tanggal: getWIBDate().toISOString(),
+      tanggal: orderTimestamp,
       customer: customerName,
       part_number: item.partNumber,
       nama_barang: item.name,
@@ -2344,16 +3280,47 @@ export const saveOfflineOrder = async (
   }
 };
 
-export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit = 20, search = '') => {
+interface BarangKeluarFilters {
+    search?: string;
+    partNumber?: string;
+    customer?: string;
+    dateFrom?: string;
+    dateTo?: string;
+}
+
+export const fetchBarangKeluarLog = async (
+    store: string | null,
+    page = 1,
+    limit = 20,
+    filters: BarangKeluarFilters | string | undefined = {}
+) => {
     const table = getLogTableName('barang_keluar', store);
     const stockTable = getTableName(store);
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    let query = supabase.from(table).select('*', { count: 'exact' });
+    let query = supabase.from(table).select(BARANG_KELUAR_LOG_SELECT_COLUMNS, { count: 'exact' });
 
-    if (search) {
+    if (typeof filters === 'string' && filters.trim()) {
+        const search = filters.trim();
         query = query.or(`part_number.ilike.%${search}%,name.ilike.%${search}%,customer.ilike.%${search}%`);
+    } else if (typeof filters === 'object') {
+        if (filters.search && filters.search.trim()) {
+            const search = filters.search.trim();
+            query = query.or(`part_number.ilike.%${search}%,name.ilike.%${search}%,customer.ilike.%${search}%`);
+        }
+        if (filters.partNumber && filters.partNumber.trim()) {
+            query = query.ilike('part_number', `%${filters.partNumber.trim()}%`);
+        }
+        if (filters.customer && filters.customer.trim()) {
+            query = query.ilike('customer', `%${filters.customer.trim()}%`);
+        }
+        if (filters.dateFrom) {
+            query = query.gte('created_at', `${filters.dateFrom}T00:00:00`);
+        }
+        if (filters.dateTo) {
+            query = query.lte('created_at', `${filters.dateTo}T23:59:59`);
+        }
     }
 
     // Order by id descending (newest first)
@@ -2366,34 +3333,8 @@ export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit
         return { data: [], total: 0 };
     }
 
-    // Fetch current quantities from stock table
-    // Normalize part numbers to handle variations (spaces, case differences)
-    const normalizePN = (pn: string): string => pn?.trim().toUpperCase().replace(/\s+/g, ' ') || '';
     const partNumbers = [...new Set((data || []).map(row => row.part_number).filter(Boolean))];
-    let stockMap: Record<string, number> = {};
-    
-    if (partNumbers.length > 0) {
-        // Query all stock data and match using normalized part numbers
-        const { data: stockData } = await supabase
-            .from(stockTable)
-            .select('part_number, quantity');
-        
-        if (stockData) {
-            // Create lookup map using normalized part numbers
-            const stockByNormalized = stockData.reduce((acc, item) => {
-                const normalizedKey = normalizePN(item.part_number);
-                acc[normalizedKey] = item.quantity;
-                acc[item.part_number] = item.quantity; // Also keep original
-                return acc;
-            }, {} as Record<string, number>);
-            
-            // Build stockMap matching log part numbers to stock
-            partNumbers.forEach(pn => {
-                const normalized = normalizePN(pn);
-                stockMap[pn] = stockByNormalized[pn] ?? stockByNormalized[normalized] ?? 0;
-            });
-        }
-    }
+    const stockMap = await fetchStockQtyMapByPartNumbers(stockTable, partNumbers);
     
     const mappedData = (data || []).map(row => ({
         ...row,
@@ -2408,53 +3349,80 @@ export const fetchBarangKeluarLog = async (store: string | null, page = 1, limit
 };
 
 export const deleteBarangLog = async (
-    id: number, 
+    id: number | string, 
     type: 'in' | 'out', 
     partNumber: string, 
     qty: number, 
-    store: string | null
+    store: string | null,
+    restoreStock: boolean = true
 ): Promise<boolean> => {
     const logTable = getLogTableName(type === 'in' ? 'barang_masuk' : 'barang_keluar', store);
     const stockTable = getTableName(store);
+    const normalizedId = typeof id === 'string' ? id.trim() : id;
+    const parsedNumericId = typeof normalizedId === 'string' && /^\d+$/.test(normalizedId)
+      ? Number(normalizedId)
+      : normalizedId;
 
-    console.log('deleteBarangLog called:', { id, type, partNumber, qty, store, logTable, stockTable });
+    console.log('deleteBarangLog called:', { id: normalizedId, type, partNumber, qty, store, restoreStock, logTable, stockTable });
 
     try {
-        if (!id || !partNumber || qty <= 0) {
-            console.error('Invalid params:', { id, partNumber, qty });
+        if (normalizedId === null || normalizedId === undefined || normalizedId === '' || !partNumber || qty <= 0) {
+            console.error('Invalid params:', { id: normalizedId, partNumber, qty });
             return false;
         }
 
-        const { data: currentItem, error: fetchError } = await supabase
-            .from(stockTable)
-            .select('quantity')
-            .eq('part_number', partNumber)
-            .single();
+        let newQty: number | null = null;
+        let currentQty: number | null = null;
+        let actualPartNumber = partNumber;
 
-        console.log('Current stock:', currentItem, 'Error:', fetchError);
+        if (restoreStock) {
+            let { data: currentItem, error: fetchError } = await supabase
+                .from(stockTable)
+                .select('part_number, quantity')
+                .eq('part_number', partNumber)
+                .maybeSingle();
 
-        if (fetchError || !currentItem) throw new Error("Item tidak ditemukan untuk rollback stok");
+            // Fallback case-insensitive match jika exact tidak ketemu.
+            if ((fetchError || !currentItem) && !fetchError) {
+                const fallback = await supabase
+                    .from(stockTable)
+                    .select('part_number, quantity')
+                    .ilike('part_number', partNumber)
+                    .limit(1)
+                    .maybeSingle();
+                currentItem = fallback.data || null;
+                fetchError = fallback.error || null;
+            }
 
-        let newQty = currentItem.quantity;
-        if (type === 'in') newQty = Math.max(0, newQty - qty);
-        else newQty = newQty + qty;
-        
-        console.log('Stock will be updated from', currentItem.quantity, 'to', newQty);
+            console.log('Current stock:', currentItem, 'Error:', fetchError);
 
-        const { error: deleteError } = await supabase.from(logTable).delete().eq('id', id);
+            if (fetchError || !currentItem) throw new Error("Item tidak ditemukan untuk rollback stok");
+
+            actualPartNumber = currentItem.part_number || partNumber;
+            currentQty = Number(currentItem.quantity || 0);
+            newQty = currentQty;
+            if (type === 'in') newQty = Math.max(0, newQty - qty);
+            else newQty = newQty + qty;
+            
+            console.log('Stock will be updated from', currentQty, 'to', newQty, 'for part', actualPartNumber);
+        }
+
+        const { error: deleteError } = await supabase.from(logTable).delete().eq('id', parsedNumericId as any);
         if (deleteError) throw new Error("Gagal menghapus log: " + deleteError.message);
 
-        const { error: updateError } = await supabase
-            .from(stockTable)
-            .update({ quantity: newQty })
-            .eq('part_number', partNumber);
+        if (restoreStock) {
+            const { error: updateError } = await supabase
+                .from(stockTable)
+                .update({ quantity: newQty as number })
+                .eq('part_number', actualPartNumber);
 
-        if (updateError) {
-            console.error("Stock update error:", updateError);
-            throw new Error("WARNING: Log terhapus tapi stok gagal diupdate: " + updateError.message);
+            if (updateError) {
+                console.error("Stock update error:", updateError);
+                throw new Error("WARNING: Log terhapus tapi stok gagal diupdate: " + updateError.message);
+            }
+            
+            console.log('Stock updated successfully from', currentQty, 'to', newQty);
         }
-        
-        console.log('Stock updated successfully to', newQty);
 
         return true;
     } catch (e) {
@@ -2625,7 +3593,14 @@ export const fetchHistoryLogsPaginated = async (
     // Build query
     let query = supabase
       .from(tableName)
-      .select('*', { count: 'exact' });
+      .select(type === 'in' ? BARANG_MASUK_LOG_SELECT_COLUMNS : BARANG_KELUAR_LOG_SELECT_COLUMNS, { count: 'exact' });
+
+    // Detail Barang Masuk: exclude data retur agar tidak tampil di modal riwayat.
+    if (type === 'in') {
+      query = query
+        .not('customer', 'ilike', '%RETUR%')
+        .not('tempo', 'ilike', '%RETUR%');
+    }
     
     // Handle both old string format and new object format for backwards compatibility
     if (typeof filters === 'string' && filters.trim()) {
@@ -2684,34 +3659,8 @@ export const fetchHistoryLogsPaginated = async (
       return { data: [], count: 0 };
     }
     
-    // Fetch current quantities from stock table
-    // Normalize part numbers to handle variations (spaces, case differences)
-    const normalizePN = (pn: string): string => pn?.trim().toUpperCase().replace(/\s+/g, ' ') || '';
     const partNumbers = [...new Set((data || []).map(row => row.part_number).filter(Boolean))];
-    let stockMap: Record<string, number> = {};
-    
-    if (partNumbers.length > 0) {
-      // Query all stock data and match using normalized part numbers
-      const { data: stockData } = await supabase
-        .from(stockTable)
-        .select('part_number, quantity');
-      
-      if (stockData) {
-        // Create lookup map using normalized part numbers
-        const stockByNormalized = stockData.reduce((acc, item) => {
-          const normalizedKey = normalizePN(item.part_number);
-          acc[normalizedKey] = item.quantity;
-          acc[item.part_number] = item.quantity; // Also keep original
-          return acc;
-        }, {} as Record<string, number>);
-        
-        // Build stockMap matching log part numbers to stock
-        partNumbers.forEach(pn => {
-          const normalized = normalizePN(pn);
-          stockMap[pn] = stockByNormalized[pn] ?? stockByNormalized[normalized] ?? 0;
-        });
-      }
-    }
+    const stockMap = await fetchStockQtyMapByPartNumbers(stockTable, partNumbers);
     
     // Map data ke format StockHistory yang dipakai HistoryTable
     const mappedData = (data || []).map((row: any) => {
@@ -3225,17 +4174,14 @@ export const fetchLowStockItems = async (
   try {
     // Step 1: Fetch items with low stock (10%)
     onProgress?.(5, 'Mengambil data stok...');
-    
-    const { data: items, error } = await supabase
-      .from(table)
-      .select('*')
-      .lt('quantity', threshold)
-      .order('quantity', { ascending: true });
 
-    if (error || !items) {
-      console.error('fetchLowStockItems Error:', error);
-      return [];
-    }
+    const items = await fetchAllRowsForModalFiltered<any>(
+      table,
+      '*',
+      'quantity',
+      (q) => q.lt('quantity', threshold),
+      true
+    );
 
     if (items.length === 0) {
       onProgress?.(100, 'Selesai');
@@ -3248,19 +4194,19 @@ export const fetchLowStockItems = async (
     const partNumbers = items.map(i => i.part_number);
     
     onProgress?.(20, 'Mengambil data supplier...');
-    
-    const { data: supplierData, error: supplierError } = await supabase
-      .from(logTable)
-      .select('part_number, customer, created_at, harga_satuan, qty_masuk, tempo')
-      .in('part_number', partNumbers)
-      .not('customer', 'is', null)
-      .not('customer', 'eq', '')
-      .not('customer', 'eq', '-')
-      .order('created_at', { ascending: false });
 
-    if (supplierError) {
-      console.error('fetchLowStockItems Supplier Error:', supplierError);
-    }
+    const supplierData = await fetchAllRowsForModalFiltered<any>(
+      logTable,
+      'part_number, customer, created_at, harga_satuan, qty_masuk, tempo',
+      'created_at',
+      (q) =>
+        q
+          .in('part_number', partNumbers)
+          .not('customer', 'is', null)
+          .not('customer', 'eq', '')
+          .not('customer', 'eq', '-'),
+      false
+    );
 
     onProgress?.(60, 'Memproses data supplier...');
 
@@ -3385,19 +4331,18 @@ export const fetchSupplierHistoryForItem = async (store: string | null, partNumb
   if (!logTable) return [];
 
   try {
-    const { data, error } = await supabase
-      .from(logTable)
-      .select('customer, created_at, harga_satuan, qty_masuk, tempo')
-      .eq('part_number', partNumber)
-      .not('customer', 'is', null)
-      .not('customer', 'eq', '')
-      .not('customer', 'eq', '-')
-      .order('created_at', { ascending: false });
-
-    if (error || !data) {
-      console.error('fetchSupplierHistoryForItem Error:', error);
-      return [];
-    }
+    const data = await fetchAllRowsForModalFiltered<any>(
+      logTable,
+      'customer, created_at, harga_satuan, qty_masuk, tempo',
+      'created_at',
+      (q) =>
+        q
+          .eq('part_number', partNumber)
+          .not('customer', 'is', null)
+          .not('customer', 'eq', '')
+          .not('customer', 'eq', '-'),
+      false
+    );
 
     // Group by supplier with separate CASH and TEMPO prices
     const supplierMap: Record<string, { 

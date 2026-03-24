@@ -16,14 +16,118 @@ const getBarangKeluarTable = (store: string | null) =>
 const getStockTable = (store: string | null) => 
   store === 'mjm' ? 'base_mjm' : 'base_bjw';
 
+const normalizeResiKey = (value: string | null | undefined): string =>
+  String(value || '').trim().toUpperCase();
+
+const normalizePartKey = (value: string | null | undefined): string =>
+  normalizeResiKey(value).replace(/\s+/g, ' ');
+
+const buildScanKeyVariants = (value: string | null | undefined): string[] => {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return [];
+  return [...new Set([trimmed, trimmed.toUpperCase(), trimmed.toLowerCase()])];
+};
+
+const isTrueValue = (value: unknown): boolean => {
+  if (value === true) return true;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === 'true' || normalized === '1';
+};
+
 // Helper: Konversi Database (String) ke App (Boolean)
 const mapToBoolean = (data: any[]) => {
   return data.map(item => ({
     ...item,
-    stage1_scanned: String(item.stage1_scanned) === 'true',
-    stage2_verified: String(item.stage2_verified) === 'true',
-    is_split: String(item.is_split) === 'true'
+    stage1_scanned: isTrueValue(item.stage1_scanned),
+    stage2_verified: isTrueValue(item.stage2_verified),
+    is_split: isTrueValue(item.is_split)
   }));
+};
+
+const splitIntoChunks = <T,>(items: T[], chunkSize: number): T[][] => {
+  if (items.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
+  return chunks;
+};
+
+const fetchAllRowsPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  buildQuery: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+  const pageSize = options?.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase.from(table).select(selectColumns);
+    query = buildQuery(query);
+    if (options?.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) throw error;
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
+const fetchRowsByInChunksPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  column: string,
+  values: Array<string | number>,
+  buildQuery?: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number; inChunkSize?: number }
+): Promise<T[]> => {
+  const uniqueValues = [...new Set(values.map((v) => String(v).trim()).filter(Boolean))];
+  if (uniqueValues.length === 0) return [];
+
+  const inChunkSize = options?.inChunkSize ?? 300;
+  const chunks = splitIntoChunks(uniqueValues, inChunkSize);
+  const rows: T[] = [];
+
+  for (const chunk of chunks) {
+    const chunkRows = await fetchAllRowsPaged<T>(
+      table,
+      selectColumns,
+      (query) => {
+        let next = query.in(column, chunk);
+        if (buildQuery) next = buildQuery(next);
+        return next;
+      },
+      { orderBy: options?.orderBy, ascending: options?.ascending, pageSize: options?.pageSize }
+    );
+    rows.push(...chunkRows);
+  }
+
+  return rows;
+};
+
+const updateRowsByIdsInChunks = async (
+  table: string,
+  ids: Array<string | number>,
+  patch: Record<string, any>
+): Promise<void> => {
+  const chunks = splitIntoChunks(ids.filter(Boolean), 500);
+  for (const chunk of chunks) {
+    const { error } = await supabase
+      .from(table)
+      .update(patch)
+      .in('id', chunk as any[]);
+
+    if (error) throw error;
+  }
 };
 
 // ============================================================================
@@ -118,12 +222,18 @@ export const scanResiStage1 = async (
 ): Promise<{ success: boolean; message: string; data?: ResiScanStage }> => {
   try {
     const table = getTableName(store);
+    const normalizedResi = normalizeResiKey(data.resi);
+    if (!normalizedResi) {
+      return { success: false, message: 'Resi tidak boleh kosong.' };
+    }
+
+    const resiVariants = buildScanKeyVariants(normalizedResi);
     
     // CEK DUPLIKAT: Pastikan resi belum pernah di-scan sebelumnya
     const { data: existing } = await supabase
       .from(table)
       .select('id, resi')
-      .eq('resi', data.resi)
+      .in('resi', resiVariants)
       .limit(1);
     
     if (existing && existing.length > 0) {
@@ -131,21 +241,21 @@ export const scanResiStage1 = async (
     }
     
     // CEK BARANG KELUAR: Pastikan resi belum ada di barang_keluar (sudah terjual/keluar)
-    const existingInBarangKeluar = await checkExistingInBarangKeluar([data.resi], store);
-    if (existingInBarangKeluar.has(data.resi.trim().toUpperCase())) {
+    const existingInBarangKeluar = await checkExistingInBarangKeluar([normalizedResi], store);
+    if (existingInBarangKeluar.has(normalizedResi)) {
       return { success: false, message: 'Resi sudah ada di Barang Keluar (sudah terjual/keluar)!' };
     }
     
     const insertData = {
       id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2),
-      resi: data.resi,
+      resi: normalizedResi,
       no_pesanan: null, // Tidak set default - INSTANT hanya muncul jika no_pesanan di-set dari CSV/Stage2
       ecommerce: data.ecommerce,
       sub_toko: data.sub_toko,
       negara_ekspor: data.negara_ekspor || null,
       // [UBAH] Gunakan getWIBDate()
       tanggal: getWIBDate().toISOString(),
-      stage1_scanned: 'true', 
+      stage1_scanned: true,
       stage1_scanned_at: getWIBDate().toISOString(),
       stage1_scanned_by: data.scanned_by,
       status: 'stage1'
@@ -183,28 +293,46 @@ export const scanResiStage1Bulk = async (
 ): Promise<{ success: boolean; message: string; count?: number; duplicates?: string[]; alreadySold?: string[] }> => {
   try {
     const table = getTableName(store);
+
+    const normalizedItems = items
+      .map((item) => {
+        const normalizedResi = normalizeResiKey(item.resi);
+        if (!normalizedResi) return null;
+        return { ...item, resi: normalizedResi };
+      })
+      .filter(Boolean) as Array<{
+        resi: string;
+        ecommerce: string;
+        sub_toko: string;
+        negara_ekspor?: string;
+        scanned_by: string;
+      }>;
+
+    if (normalizedItems.length === 0) {
+      return { success: false, message: 'Tidak ada resi valid untuk diproses.' };
+    }
     
     // CEK DUPLIKAT: Ambil resi yang sudah ada di database scan_resi
-    const resiList = items.map(i => i.resi);
+    const resiList = normalizedItems.map(i => i.resi);
+    const resiVariants = [...new Set(resiList.flatMap((resi) => buildScanKeyVariants(resi)))];
     const { data: existingResi } = await supabase
       .from(table)
       .select('resi')
-      .in('resi', resiList);
+      .in('resi', resiVariants);
     
-    const existingSet = new Set((existingResi || []).map(r => r.resi));
+    const existingSet = new Set((existingResi || []).map(r => normalizeResiKey(r.resi)));
     
     // CEK BARANG KELUAR: Resi yang sudah ada di barang_keluar (sudah terjual/keluar)
     const existingInBarangKeluar = await checkExistingInBarangKeluar(resiList, store);
     
-    const duplicates = items.filter(i => existingSet.has(i.resi)).map(i => i.resi);
-    const alreadySold = items
-      .filter(i => existingInBarangKeluar.has(i.resi.trim().toUpperCase()))
+    const duplicates = normalizedItems.filter(i => existingSet.has(i.resi)).map(i => i.resi);
+    const alreadySold = normalizedItems
+      .filter(i => existingInBarangKeluar.has(i.resi))
       .map(i => i.resi);
     
     // Filter: bukan duplikat DAN bukan sudah terjual
-    const newItems = items.filter(i => {
-      const resiUpper = i.resi.trim().toUpperCase();
-      return !existingSet.has(i.resi) && !existingInBarangKeluar.has(resiUpper);
+    const newItems = normalizedItems.filter(i => {
+      return !existingSet.has(i.resi) && !existingInBarangKeluar.has(i.resi);
     });
     
     if (newItems.length === 0) {
@@ -232,7 +360,7 @@ export const scanResiStage1Bulk = async (
       sub_toko: item.sub_toko,
       negara_ekspor: item.negara_ekspor || null,
       tanggal: getWIBDate().toISOString(),
-      stage1_scanned: 'true',
+      stage1_scanned: true,
       stage1_scanned_at: getWIBDate().toISOString(),
       stage1_scanned_by: item.scanned_by,
       status: 'stage1'
@@ -257,30 +385,26 @@ export const scanResiStage1Bulk = async (
 };
 
 export const getResiStage1List = async (store: string | null) => {
-  const table = getTableName(store);
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('stage1_scanned', 'true') 
-    .order('stage1_scanned_at', { ascending: false })
-    .limit(500);
-
-  if (error) return [];
-  return mapToBoolean(data || []);
+  // Samakan sumber data Stage 1 dengan Stage 3:
+  // hanya tampilkan resi yang masih pending (belum completed/sudah terjual).
+  return getAllPendingStage1Resi(store);
 };
 
 // Ambil semua resi Stage 1 yang belum completed (untuk Stage 3)
 export const getAllPendingStage1Resi = async (store: string | null) => {
   const table = getTableName(store);
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('stage1_scanned', 'true')
-    .neq('status', 'completed')
-    .order('stage1_scanned_at', { ascending: false })
-    .limit(500);
-
-  if (error) return [];
+  let data: any[] = [];
+  try {
+    data = await fetchAllRowsPaged<any>(
+      table,
+      '*',
+      (query) => query.eq('stage1_scanned', true).neq('status', 'completed'),
+      { orderBy: 'stage1_scanned_at', ascending: false }
+    );
+  } catch (error) {
+    console.error('getAllPendingStage1Resi error:', error);
+    return [];
+  }
   
   const mappedData = mapToBoolean(data || []);
   if (mappedData.length === 0) return [];
@@ -308,15 +432,11 @@ export const getAllPendingStage1Resi = async (store: string | null) => {
   // Update status resi yang sudah terjual ke 'completed' - AWAIT agar selesai
   if (soldResiIds.length > 0) {
     console.log(`[getAllPendingStage1Resi] Auto-marking ${soldResiIds.length} resi as completed (already in barang_keluar):`, soldResiIds);
-    const { error: updateErr } = await supabase
-      .from(table)
-      .update({ status: 'completed' })
-      .in('id', soldResiIds);
-    
-    if (updateErr) {
-      console.error('Error auto-updating sold resi status:', updateErr);
-    } else {
+    try {
+      await updateRowsByIdsInChunks(table, soldResiIds, { status: 'completed' });
       console.log(`[getAllPendingStage1Resi] Successfully marked ${soldResiIds.length} resi as completed`);
+    } catch (updateErr) {
+      console.error('Error auto-updating sold resi status:', updateErr);
     }
   }
   
@@ -327,7 +447,7 @@ export const deleteResiStage1 = async (id: string, store: string | null) => {
   const table = getTableName(store);
   const { data } = await supabase.from(table).select('stage2_verified').eq('id', id).single();
   
-  if (data?.stage2_verified === 'true') {
+  if (isTrueValue(data?.stage2_verified)) {
     return { success: false, message: 'Tidak bisa dihapus, sudah masuk Stage 2!' };
   }
 
@@ -348,11 +468,13 @@ export const deleteResi = async (id: string, store: string | null) => {
 export const restoreResi = async (resiData: ResiScanStage, store: string | null) => {
   const table = getTableName(store);
   
-  // Convert boolean back to string for database
+  // Keep payload boolean-safe and normalize key fields before restore.
   const insertData = {
     ...resiData,
-    stage1_scanned: resiData.stage1_scanned ? 'true' : 'false',
-    stage2_verified: resiData.stage2_verified ? 'true' : 'false'
+    resi: normalizeResiKey((resiData as any).resi),
+    no_pesanan: (resiData as any).no_pesanan ? String((resiData as any).no_pesanan).trim() : null,
+    stage1_scanned: !!resiData.stage1_scanned,
+    stage2_verified: !!resiData.stage2_verified
   };
   
   const { error } = await supabase.from(table).insert([insertData]);
@@ -457,7 +579,7 @@ export const getPendingStage2List = async (store: string | null) => {
   const { data, error } = await supabase
     .from(table)
     .select('*')
-    .eq('stage1_scanned', 'true')
+    .eq('stage1_scanned', true)
     .or('stage2_verified.is.null,stage2_verified.neq.true')
     .order('stage1_scanned_at', { ascending: false });
     
@@ -470,17 +592,27 @@ export const verifyResiStage2 = async (
   store: string | null
 ): Promise<{ success: boolean; message: string }> => {
   const table = getTableName(store);
-  const { resi, verified_by } = data;
+  const { verified_by } = data;
+  const normalizedResi = normalizeResiKey(data.resi);
+  const resiVariants = buildScanKeyVariants(normalizedResi);
+
+  if (!normalizedResi) {
+    return { success: false, message: 'Resi tidak valid.' };
+  }
 
   const { data: rows } = await supabase
     .from(table)
     .select('id')
-    .eq('resi', resi)
-    .eq('stage1_scanned', 'true')
+    .in('resi', resiVariants)
+    .eq('stage1_scanned', true)
     .or('stage2_verified.is.null,stage2_verified.neq.true');
 
   if (!rows || rows.length === 0) {
-    const { data: unscan } = await supabase.from(table).select('id').eq('resi', resi).limit(1);
+    const { data: unscan } = await supabase
+      .from(table)
+      .select('id')
+      .in('resi', resiVariants)
+      .limit(1);
     if (!unscan || unscan.length === 0) return { success: false, message: 'Resi belum discan di Stage 1!' };
     return { success: false, message: 'Resi sudah terverifikasi sebelumnya.' };
   }
@@ -489,7 +621,7 @@ export const verifyResiStage2 = async (
   const { error } = await supabase
     .from(table)
     .update({
-      stage2_verified: 'true',
+      stage2_verified: true,
       // [UBAH] Gunakan getWIBDate()
       stage2_verified_at: getWIBDate().toISOString(),
       stage2_verified_by: verified_by,
@@ -512,11 +644,15 @@ export const verifyResiStage2Bulk = async (
   const alreadyVerified: string[] = [];
 
   for (const resi of resiList) {
+    const normalizedResi = normalizeResiKey(resi);
+    if (!normalizedResi) continue;
+    const resiVariants = buildScanKeyVariants(normalizedResi);
+
     const { data: rows } = await supabase
       .from(table)
       .select('id')
-      .eq('resi', resi)
-      .eq('stage1_scanned', 'true')
+      .in('resi', resiVariants)
+      .eq('stage1_scanned', true)
       .or('stage2_verified.is.null,stage2_verified.neq.true');
 
     if (rows && rows.length > 0) {
@@ -524,7 +660,7 @@ export const verifyResiStage2Bulk = async (
       const { error } = await supabase
         .from(table)
         .update({
-          stage2_verified: 'true',
+          stage2_verified: true,
           stage2_verified_at: getWIBDate().toISOString(),
           stage2_verified_by: verified_by,
           status: 'stage2'
@@ -537,11 +673,11 @@ export const verifyResiStage2Bulk = async (
       const { data: existingResi } = await supabase
         .from(table)
         .select('id, stage2_verified')
-        .eq('resi', resi)
+        .in('resi', resiVariants)
         .limit(1);
       
-      if (existingResi && existingResi.length > 0 && existingResi[0].stage2_verified === 'true') {
-        alreadyVerified.push(resi);
+      if (existingResi && existingResi.length > 0 && isTrueValue(existingResi[0].stage2_verified)) {
+        alreadyVerified.push(normalizedResi);
       }
     }
   }
@@ -578,25 +714,30 @@ export const getResiHistory = async (store: string | null) => {
 
 export const getPendingStage3List = async (store: string | null) => {
   const table = getTableName(store);
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('stage2_verified', 'true')
-    .neq('status', 'completed')
-    .order('stage2_verified_at', { ascending: false });
-
-  if (error) return [];
-  return mapToBoolean(data || []);
+  try {
+    const data = await fetchAllRowsPaged<any>(
+      table,
+      '*',
+      (query) => query.eq('stage2_verified', true).neq('status', 'completed'),
+      { orderBy: 'stage2_verified_at', ascending: false }
+    );
+    return mapToBoolean(data || []);
+  } catch (error) {
+    console.error('getPendingStage3List error:', error);
+    return [];
+  }
 };
 
 export const checkResiStatus = async (resis: string[], store: string | null) => {
   const table = getTableName(store);
   if (resis.length === 0) return [];
+  const variants = [...new Set(resis.flatMap((r) => buildScanKeyVariants(r)))];
+  if (variants.length === 0) return [];
   
   const { data, error } = await supabase
     .from(table)
     .select('resi, stage1_scanned, stage2_verified, status, ecommerce, sub_toko, no_pesanan')
-    .in('resi', resis);
+    .in('resi', variants);
   
   if (error) return [];
   return data || [];
@@ -617,12 +758,14 @@ export const checkResiOrOrderStatus = async (
   const normalized = resiOrOrders.map(r => r.trim().toUpperCase());
   
   // Query semua resi dari Stage 1
-  const { data, error } = await supabase
-    .from(table)
-    .select('resi, no_pesanan, stage1_scanned, stage2_verified, status, ecommerce, sub_toko, negara_ekspor')
-    .eq('stage1_scanned', 'true');
-  
-  if (error) {
+  let data: any[] = [];
+  try {
+    data = await fetchAllRowsPaged<any>(
+      table,
+      'resi, no_pesanan, stage1_scanned, stage2_verified, status, ecommerce, sub_toko, negara_ekspor',
+      (query) => query.eq('stage1_scanned', true)
+    );
+  } catch (error) {
     console.error('checkResiOrOrderStatus error:', error);
     return [];
   }
@@ -642,15 +785,16 @@ export const checkResiOrOrderStatus = async (
  */
 export const getStage1ResiList = async (store: string | null): Promise<Array<{resi: string, no_pesanan?: string, ecommerce: string, sub_toko: string, stage2_verified: boolean}>> => {
   const table = getTableName(store);
-  
-  const { data, error } = await supabase
-    .from(table)
-    .select('resi, no_pesanan, ecommerce, sub_toko, stage2_verified')
-    .eq('stage1_scanned', 'true')
-    .order('stage1_scanned_at', { ascending: false })
-    .limit(500);
-  
-  if (error) {
+
+  let data: any[] = [];
+  try {
+    data = await fetchAllRowsPaged<any>(
+      table,
+      'resi, no_pesanan, ecommerce, sub_toko, stage2_verified',
+      (query) => query.eq('stage1_scanned', true),
+      { orderBy: 'stage1_scanned_at', ascending: false }
+    );
+  } catch (error) {
     console.error('getStage1ResiList error:', error);
     return [];
   }
@@ -660,7 +804,7 @@ export const getStage1ResiList = async (store: string | null): Promise<Array<{re
     no_pesanan: d.no_pesanan,
     ecommerce: d.ecommerce || '-',
     sub_toko: d.sub_toko || '-',
-    stage2_verified: String(d.stage2_verified) === 'true'
+    stage2_verified: isTrueValue(d.stage2_verified)
   }));
 };
 
@@ -694,69 +838,147 @@ export const getBulkPartNumberInfo = async (skus: string[], store: string | null
 
 export const getAvailableParts = async (store: string | null): Promise<{part_number: string, name: string}[]> => {
   const table = getStockTable(store);
-  const { data, error } = await supabase
-    .from(table)
-    .select('part_number, name')
-    .order('part_number', { ascending: true });
-
-  if (error) return [];
-  return data?.map(d => ({ part_number: d.part_number, name: d.name || '' })) || [];
+  try {
+    const data = await fetchAllRowsPaged<any>(
+      table,
+      'part_number, name',
+      (query) => query,
+      { orderBy: 'part_number', ascending: true }
+    );
+    return data.map(d => ({ part_number: d.part_number, name: d.name || '' }));
+  } catch (error) {
+    console.error('getAvailableParts error:', error);
+    return [];
+  }
 };
 
 export const fetchPendingCSVItems = async (store: string | null) => {
   const table = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
   if (!table) return [];
 
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('status', 'pending') 
-    .order('created_at', { ascending: false })
-    .limit(2000); // Ambil semua pending items (max 2000)
-
-  if (error) {
-    console.error("Gagal ambil pending CSV:", error);
+  let pendingRows: any[] = [];
+  try {
+    pendingRows = await fetchAllRowsPaged<any>(
+      table,
+      '*',
+      (query) => query.eq('status', 'pending'),
+      { orderBy: 'created_at', ascending: false }
+    );
+  } catch (error) {
+    console.error('Gagal ambil pending CSV:', error);
     return [];
   }
   
-  if (!data || data.length === 0) return [];
+  if (!pendingRows || pendingRows.length === 0) return [];
   
-  // ===== FILTER: Buang resi yang sudah ada di barang_keluar (sudah terjual) =====
-  const allResis = data.map((d: any) => d.resi).filter(Boolean);
-  const allOrderIds = data.map((d: any) => d.order_id).filter(Boolean);
-  const allToCheck = [...new Set([...allResis, ...allOrderIds])];
-  
-  const existingInBarangKeluar = await checkExistingInBarangKeluar(allToCheck, store);
-  
-  // Jika ada resi yang sudah terjual, update status menjadi 'processed' - AWAIT agar selesai
-  const soldResis: string[] = [];
-  const filteredData = data.filter((item: any) => {
-    const resiUpper = (item.resi || '').trim().toUpperCase();
-    const orderIdUpper = (item.order_id || '').trim().toUpperCase();
-    
-    if (existingInBarangKeluar.has(resiUpper) || existingInBarangKeluar.has(orderIdUpper)) {
-      soldResis.push(item.resi);
-      return false; // Exclude dari hasil
+  // ===== SYNC STATUS PER-ITEM (resi + part_number), BUKAN PER-RESI =====
+  const logTable = getBarangKeluarTable(store);
+  const allResis = [...new Set(pendingRows.map((d: any) => String(d.resi || '').trim()).filter(Boolean))];
+  if (allResis.length === 0) return pendingRows;
+  const allResiVariants = [...new Set(allResis.flatMap((resi) => {
+    const trimmed = String(resi || '').trim();
+    if (!trimmed) return [];
+    return [trimmed, trimmed.toUpperCase(), trimmed.toLowerCase()];
+  }))];
+
+  // Ambil log barang_keluar untuk resi-resi yang sedang pending
+  let soldLogs: any[] = [];
+  try {
+    soldLogs = await fetchRowsByInChunksPaged<any>(
+      logTable,
+      'resi, part_number',
+      'resi',
+      allResiVariants,
+      (query) => query.not('part_number', 'is', null)
+    );
+  } catch (error: any) {
+    console.warn('[fetchPendingCSVItems] Gagal sync dengan barang_keluar, fallback ke pending murni:', error?.message || error);
+    return pendingRows;
+  }
+
+  // Hitung jumlah terjual per key (support duplicate key di satu resi)
+  const soldCountMap = new Map<string, number>();
+  soldLogs.forEach((log: any) => {
+    const resiKey = normalizeResiKey(log.resi);
+    const partKey = normalizePartKey(log.part_number);
+    if (!resiKey || !partKey) return;
+    const key = `${resiKey}||${partKey}`;
+    soldCountMap.set(key, (soldCountMap.get(key) || 0) + 1);
+  });
+
+  // Ambil item processed pada resi yang sama untuk recovery jika dulu salah auto-mark
+  let processedRows: any[] = [];
+  try {
+    processedRows = await fetchRowsByInChunksPaged<any>(
+      table,
+      '*',
+      'resi',
+      allResis,
+      (query) => query.eq('status', 'processed')
+    );
+  } catch (error: any) {
+    console.warn('[fetchPendingCSVItems] Gagal cek processed rows untuk recovery:', error?.message || error);
+  }
+
+  const falseProcessedIds: Array<string | number> = [];
+  const recoveredRows: any[] = [];
+
+  // Alokasikan sold count ke processed rows dulu (yang valid tetap processed)
+  processedRows.forEach((row: any) => {
+    const resiKey = normalizeResiKey(row.resi);
+    const partKey = normalizePartKey(row.part_number);
+    if (!resiKey || !partKey) return;
+    const key = `${resiKey}||${partKey}`;
+    const current = soldCountMap.get(key) || 0;
+    if (current > 0) {
+      soldCountMap.set(key, current - 1);
+      return;
+    }
+
+    // Tidak ada jejak di barang_keluar => kemungkinan salah auto-mark, kembalikan ke pending
+    falseProcessedIds.push(row.id);
+    recoveredRows.push({ ...row, status: 'pending' });
+  });
+
+  if (falseProcessedIds.length > 0) {
+    try {
+      await updateRowsByIdsInChunks(table, falseProcessedIds, { status: 'pending' });
+      console.log(`[fetchPendingCSVItems] Recovered ${falseProcessedIds.length} item salah processed menjadi pending.`);
+    } catch (recoverErr) {
+      console.error('[fetchPendingCSVItems] Gagal recovery processed->pending:', recoverErr);
+    }
+  }
+
+  // Sinkron pending -> processed jika memang sudah ada log barang_keluar
+  const pendingSoldIds: Array<string | number> = [];
+  const filteredPending = pendingRows.filter((row: any) => {
+    const resiKey = normalizeResiKey(row.resi);
+    const partKey = normalizePartKey(row.part_number);
+    if (!resiKey || !partKey) return true;
+
+    const key = `${resiKey}||${partKey}`;
+    const current = soldCountMap.get(key) || 0;
+    if (current > 0) {
+      soldCountMap.set(key, current - 1);
+      pendingSoldIds.push(row.id);
+      return false;
     }
     return true;
   });
-  
-  // Update status resi yang sudah terjual ke 'processed' - AWAIT agar selesai
-  if (soldResis.length > 0) {
-    console.log(`[fetchPendingCSVItems] Auto-marking ${soldResis.length} resi as processed (already in barang_keluar):`, soldResis);
-    const { error: updateErr } = await supabase
-      .from(table)
-      .update({ status: 'processed' })
-      .in('resi', soldResis);
-    
-    if (updateErr) {
-      console.error('Error auto-updating sold resi status:', updateErr);
-    } else {
-      console.log(`[fetchPendingCSVItems] Successfully marked ${soldResis.length} resi as processed`);
+
+  if (pendingSoldIds.length > 0) {
+    try {
+      await updateRowsByIdsInChunks(table, pendingSoldIds, { status: 'processed' });
+      console.log(`[fetchPendingCSVItems] Synced ${pendingSoldIds.length} pending item menjadi processed.`);
+    } catch (markErr) {
+      console.error('[fetchPendingCSVItems] Gagal sync pending->processed:', markErr);
     }
   }
-  
-  return filteredData;
+
+  // Gabungkan pending asli + row hasil recovery
+  const merged = [...filteredPending, ...recoveredRows];
+  merged.sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  return merged;
 };
 
 // Helper: Cek apakah item ada di KILAT prestock (sudah dikirim ke gudang Shopee)
@@ -895,14 +1117,18 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
         }
       }
 
+      const normalizedResi = String(item.resi || '').trim();
+      const normalizedPart = normalizePartKey(item.part_number);
+      const normalizedOrderId = String(item.order_id || item.no_pesanan || '').trim();
+
       // 2. Simpan Log Barang Keluar
       const logPayload = {
         tanggal: item.tanggal, 
         kode_toko: item.sub_toko, 
         ecommerce: item.ecommerce,
         customer: item.customer,
-        resi: item.resi,
-        part_number: item.part_number,
+        resi: normalizedResi,
+        part_number: normalizedPart,
         name: item.nama_pesanan,
         brand: item.brand,
         application: item.application,
@@ -922,17 +1148,57 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
       }
 
       // 3. Update Status di Tabel SCAN RESI
-      const { data: pendingRows } = await supabase
-        .from(scanTable)
-        .select('id')
-        .eq('resi', item.resi)
-        .neq('status', 'completed')
-        .limit(1); 
-      
-      if (pendingRows && pendingRows.length > 0) {
+      const resiVariants = buildScanKeyVariants(normalizedResi);
+      const orderVariants = buildScanKeyVariants(normalizedOrderId);
+
+      const matchedIds = new Set<any>();
+
+      if (resiVariants.length > 0) {
+        const byResi = await fetchRowsByInChunksPaged<any>(
+          scanTable,
+          'id',
+          'resi',
+          resiVariants,
+          (query) => query.neq('status', 'completed')
+        );
+        byResi.forEach((r: any) => matchedIds.add(r.id));
+      }
+
+      if (orderVariants.length > 0) {
+        const byOrder = await fetchRowsByInChunksPaged<any>(
+          scanTable,
+          'id',
+          'no_pesanan',
+          orderVariants,
+          (query) => query.neq('status', 'completed')
+        );
+        byOrder.forEach((r: any) => matchedIds.add(r.id));
+      }
+
+      // Fallback: jika belum ketemu, scan pending rows dan match manual (case-insensitive).
+      if (matchedIds.size === 0) {
+        const fallbackRows = await fetchAllRowsPaged<any>(
+          scanTable,
+          'id, resi, no_pesanan',
+          (query) => query.neq('status', 'completed')
+        );
+
+        fallbackRows.forEach((r: any) => {
+          const resiKey = normalizeResiKey(r.resi);
+          const orderKey = normalizeResiKey(r.no_pesanan);
+          if (
+            (resiVariants.length > 0 && resiVariants.some(v => normalizeResiKey(v) === resiKey || normalizeResiKey(v) === orderKey)) ||
+            (orderVariants.length > 0 && orderVariants.some(v => normalizeResiKey(v) === resiKey || normalizeResiKey(v) === orderKey))
+          ) {
+            matchedIds.add(r.id);
+          }
+        });
+      }
+
+      if (matchedIds.size > 0) {
         const updateData: any = {
             status: 'completed',
-            part_number: item.part_number,
+            part_number: normalizedPart,
             barang: item.nama_pesanan,
             qty_out: item.qty_keluar,
             total_harga: item.harga_total,
@@ -945,7 +1211,7 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
         await supabase
           .from(scanTable)
           .update(updateData)
-          .eq('id', pendingRows[0].id);
+          .in('id', Array.from(matchedIds) as any[]);
       }
 
       // 4. Update Status di Tabel CSV
@@ -953,8 +1219,8 @@ export const processBarangKeluarBatch = async (items: any[], store: string | nul
          await supabase
            .from(csvTable)
            .update({ status: 'processed' })
-           .eq('resi', item.resi)
-           .eq('part_number', item.part_number);
+           .eq('resi', normalizedResi)
+           .eq('part_number', normalizedPart);
       }
 
       successCount++;
@@ -1345,7 +1611,7 @@ export const insertProductAlias = async (
  */
 export const deleteProcessedResiItems = async (
   store: string | null,
-  items: Array<{ resi: string; part_number: string }>
+  items: Array<{ id?: string | number; resi: string; part_number: string }>
 ): Promise<{ success: boolean; deleted: number }> => {
   const table = store === 'mjm' ? 'resi_items_mjm' : (store === 'bjw' ? 'resi_items_bjw' : null);
   if (!table || items.length === 0) return { success: false, deleted: 0 };
@@ -1354,13 +1620,70 @@ export const deleteProcessedResiItems = async (
 
   for (const item of items) {
     try {
-      const { error } = await supabase
+      const rawId = item.id == null ? '' : String(item.id);
+      const dbId = rawId.startsWith('db-') ? rawId.replace('db-', '') : rawId;
+
+      // Prioritaskan delete by ID jika tersedia agar tidak gagal karena mismatch format part/resi.
+      if (dbId) {
+        const { data: deletedById, error: deleteByIdErr } = await supabase
+          .from(table)
+          .delete()
+          .eq('id', dbId as any)
+          .select('id');
+
+        if (!deleteByIdErr && (deletedById?.length || 0) > 0) {
+          deletedCount += deletedById!.length;
+          continue;
+        }
+      }
+
+      const normalizedResi = String(item.resi || '').trim();
+      const normalizedPart = normalizePartKey(item.part_number);
+
+      // Coba exact delete dulu (paling cepat).
+      const { data: deletedExact, error: deleteExactErr } = await supabase
         .from(table)
         .delete()
-        .eq('resi', item.resi)
-        .eq('part_number', item.part_number);
+        .eq('resi', normalizedResi)
+        .eq('part_number', item.part_number)
+        .select('id');
 
-      if (!error) deletedCount++;
+      if (!deleteExactErr && (deletedExact?.length || 0) > 0) {
+        deletedCount += deletedExact!.length;
+        continue;
+      }
+
+      // Fallback: cari kandidat dengan variasi case pada resi, lalu match part_number ter-normalize.
+      const resiVariants = [...new Set(
+        [normalizedResi, normalizedResi.toUpperCase(), normalizedResi.toLowerCase()].filter(Boolean)
+      )];
+
+      if (resiVariants.length === 0) continue;
+
+      const { data: candidates, error: candidateErr } = await supabase
+        .from(table)
+        .select('id, resi, part_number')
+        .in('resi', resiVariants)
+        .limit(200);
+
+      if (candidateErr || !candidates || candidates.length === 0) continue;
+
+      const matchingIds = candidates
+        .filter((row: any) => normalizePartKey(row.part_number) === normalizedPart)
+        .map((row: any) => row.id)
+        .filter(Boolean);
+
+      if (matchingIds.length === 0) continue;
+
+      const { data: deletedFallback, error: deleteFallbackErr } = await supabase
+        .from(table)
+        .delete()
+        .in('id', matchingIds as any[])
+        .select('id');
+
+      if (!deleteFallbackErr && deletedFallback) {
+        deletedCount += deletedFallback.length;
+      }
     } catch (err) {
       console.warn('Delete resi item gagal:', err);
     }
@@ -1443,10 +1766,15 @@ export const deleteProcessedScanResi = async (
   if (!resiList || resiList.length === 0) return { success: true, deleted: 0 };
 
   try {
+    const variants = [...new Set(
+      resiList.flatMap((resi) => buildScanKeyVariants(resi))
+    )];
+    if (variants.length === 0) return { success: true, deleted: 0 };
+
     const { data, error } = await supabase
       .from(table)
       .delete()
-      .in('resi', resiList)
+      .in('resi', variants)
       .select('id');
 
     if (error) {

@@ -34,8 +34,52 @@ interface ResellerStats {
   total_nilai: number;
 }
 
+const fetchAllRowsPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  buildQuery: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+  const pageSize = options?.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase.from(table).select(selectColumns);
+    query = buildQuery(query);
+
+    if (options?.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) {
+      console.error(`Error fetching paged rows from ${table}:`, error);
+      return rows;
+    }
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
 export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTrigger }) => {
   const { selectedStore } = useStore();
+
+  const getEffectiveUnitPrice = (trx: Pick<ResellerTransaction, 'harga_satuan' | 'harga_total' | 'qty_keluar'>): number => {
+    const unitPrice = Number(trx.harga_satuan) || 0;
+    if (unitPrice > 0) return unitPrice;
+
+    const qty = Number(trx.qty_keluar) || 0;
+    const total = Number(trx.harga_total) || 0;
+    if (qty <= 0 || total <= 0) return 0;
+
+    return Math.round(total / qty);
+  };
   
   // State
   const [transactions, setTransactions] = useState<ResellerTransaction[]>([]);
@@ -82,33 +126,38 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
       
       const fetchFromTable = async (table: string, storeName: string): Promise<ResellerTransaction[]> => {
         try {
-          const { data, error } = await supabase
-            .from(table)
-            .select('id, created_at, customer, part_number, name, qty_keluar, harga_satuan, harga_total, resi, ecommerce, kode_toko')
-            .eq('ecommerce', 'RESELLER')
-            .order('created_at', { ascending: false })
-            .limit(500);
-          
-          if (error) {
-            console.error(`Error fetching from ${table}:`, error);
-            return [];
-          }
+          const data = await fetchAllRowsPaged<any>(
+            table,
+            'id, created_at, customer, part_number, name, qty_keluar, harga_satuan, harga_total, resi, ecommerce, kode_toko',
+            (q) => q.eq('ecommerce', 'RESELLER'),
+            { orderBy: 'created_at', ascending: false }
+          );
           
           // Add store indicator to each transaction with safe mapping
-          return (data || []).map(t => ({
-            id: t.id || '',
-            created_at: t.created_at || '',
-            customer: t.customer || '',
-            part_number: t.part_number || '',
-            name: t.name || '',
-            qty_keluar: t.qty_keluar || 0,
-            harga_satuan: t.harga_satuan || 0,
-            harga_total: t.harga_total || 0,
-            resi: t.resi || '',
-            ecommerce: t.ecommerce || '',
-            kode_toko: t.kode_toko || '',
-            source_store: storeName
-          }));
+          return (data || []).map(t => {
+            const qtyKeluar = Number(t.qty_keluar) || 0;
+            const hargaTotal = Number(t.harga_total) || 0;
+            const hargaSatuan = getEffectiveUnitPrice({
+              qty_keluar: qtyKeluar,
+              harga_satuan: Number(t.harga_satuan) || 0,
+              harga_total: hargaTotal
+            });
+
+            return {
+              id: t.id || '',
+              created_at: t.created_at || '',
+              customer: t.customer || '',
+              part_number: t.part_number || '',
+              name: t.name || '',
+              qty_keluar: qtyKeluar,
+              harga_satuan: hargaSatuan,
+              harga_total: hargaTotal,
+              resi: t.resi || '',
+              ecommerce: t.ecommerce || '',
+              kode_toko: t.kode_toko || '',
+              source_store: storeName
+            };
+          });
         } catch (err) {
           console.error(`Exception fetching from ${table}:`, err);
           return [];
@@ -143,25 +192,21 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
       
       const fetchFromTable = async (table: string): Promise<any[]> => {
         try {
-          let query = supabase
-            .from(table)
-            .select('kode_toko, qty_keluar, harga_total, created_at')
-            .eq('ecommerce', 'RESELLER');
-          
-          // Apply date filters
-          if (mainDateFrom) {
-            query = query.gte('created_at', `${mainDateFrom}T00:00:00`);
-          }
-          if (mainDateTo) {
-            query = query.lte('created_at', `${mainDateTo}T23:59:59`);
-          }
-          
-          const { data, error } = await query;
-          if (error) {
-            console.error(`Error fetching stats from ${table}:`, error);
-            return [];
-          }
-          return data || [];
+          return await fetchAllRowsPaged<any>(
+            table,
+            'kode_toko, qty_keluar, harga_total, created_at',
+            (q) => {
+              let filtered = q.eq('ecommerce', 'RESELLER');
+              if (mainDateFrom) {
+                filtered = filtered.gte('created_at', `${mainDateFrom}T00:00:00`);
+              }
+              if (mainDateTo) {
+                filtered = filtered.lte('created_at', `${mainDateTo}T23:59:59`);
+              }
+              return filtered;
+            },
+            { orderBy: 'created_at', ascending: false }
+          );
         } catch (err) {
           console.error(`Exception fetching stats from ${table}:`, err);
           return [];
@@ -395,7 +440,7 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
                   <td>${t.customer || '-'}</td>
                   <td>${t.part_number || '-'}</td>
                   <td class="text-center">${t.qty_keluar}</td>
-                  <td class="text-right">Rp ${(t.harga_satuan || 0).toLocaleString('id-ID')}</td>
+                  <td class="text-right">Rp ${getEffectiveUnitPrice(t).toLocaleString('id-ID')}</td>
                   <td class="text-right">Rp ${(t.harga_total || 0).toLocaleString('id-ID')}</td>
                   <td>${t.resi || '-'}</td>
                 </tr>
@@ -824,7 +869,7 @@ export const ResellerView: React.FC<ResellerViewProps> = ({ onRefresh, refreshTr
                         <td className="py-3 px-4 text-gray-300 font-mono text-xs">{trx.part_number}</td>
                         <td className="py-3 px-4 text-white max-w-[200px] truncate">{trx.name}</td>
                         <td className="py-3 px-4 text-right text-gray-300 font-medium">{trx.qty_keluar}</td>
-                        <td className="py-3 px-4 text-right text-yellow-400">{formatCompactNumber(trx.harga_satuan)}</td>
+                        <td className="py-3 px-4 text-right text-yellow-400">{formatCompactNumber(getEffectiveUnitPrice(trx))}</td>
                         <td className="py-3 px-4 text-right text-green-400 font-bold">{formatCompactNumber(trx.harga_total)}</td>
                         <td className="py-3 px-4 text-gray-400 text-xs">{trx.resi || '-'}</td>
                       </tr>

@@ -23,11 +23,12 @@ interface QuickInputTableRowProps {
     onSearchKeyDown: (e: React.KeyboardEvent, id: number) => void;
     onGridKeyDown: (e: React.KeyboardEvent, globalRefIndex: number) => void;
     mode: 'in' | 'out'; // Add mode prop
+    selectedStore: 'mjm' | 'bjw' | null;
 }
 
 export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
     row, index, globalIndex, activeSearchIndex, suggestions, supplierList, customerList, inputRefs,
-    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown, mode
+    onPartNumberChange, onSelectItem, onUpdateRow, onRemoveRow, highlightedIndex, onSearchKeyDown, onGridKeyDown, mode, selectedStore
 }) => {
     const isComplete = checkIsRowComplete(row);
     const activeItemRef = useRef<HTMLDivElement>(null);
@@ -51,7 +52,12 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
     const baseRefIndex = globalIndex * COLS;
 
     // Payment terms options
-    const tempoOptions = ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'];
+    const tempoOptions =
+        mode === 'out'
+            ? (selectedStore === 'bjw'
+                ? ['CASH', '3 BLN', '2 BLN', '1 BLN', 'SALES']
+                : ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'])
+            : ['CASH', '3 BLN', '2 BLN', '1 BLN', 'NADIR'];
 
     // --- CALCULATION LOGIC ---
     
@@ -102,10 +108,10 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
     };
 
     useEffect(() => {
-        if (activeSearchIndex === index && activeItemRef.current) {
+        if (activeSearchIndex === row.id && activeItemRef.current) {
             activeItemRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         }
-    }, [highlightedIndex, activeSearchIndex, index]);
+    }, [highlightedIndex, activeSearchIndex, row.id]);
 
     // Scroll highlighted customer item into view
     useEffect(() => {
@@ -265,7 +271,7 @@ export const QuickInputTableRow: React.FC<QuickInputTableRowProps> = ({
                                 <Info size={12} />
                             </button>
                         )}
-                        {activeSearchIndex === index && suggestions.length > 0 && (
+                        {activeSearchIndex === row.id && suggestions.length > 0 && (
                             <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 rounded-lg shadow-xl z-20 max-h-48 overflow-y-auto border border-gray-600">
                                 {suggestions.map((item, idx) => (
                                     <div

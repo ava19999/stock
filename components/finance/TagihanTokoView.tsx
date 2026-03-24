@@ -1,10 +1,10 @@
 // FILE: src/components/finance/TagihanTokoView.tsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Store, Search, Filter, Calendar, RefreshCw, 
   ChevronDown, ChevronUp, Clock, DollarSign, User,
   Plus, X, Check, History, FileText, Download, Building2, Receipt,
-  Edit2, Trash2, Save, Image as ImageIcon
+  Edit2, Trash2, Save, Image as ImageIcon, Printer
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { supabase } from '../../services/supabaseClient';
@@ -38,7 +38,8 @@ interface TagihanToko {
 
 interface TokoPiutang {
   customer: string;
-  tempo: string;
+  tempo: string; // legacy single tempo (first tempo)
+  tempos: string[]; // all tempos for this customer
   totalTagihan: number;
   totalTagihanManual: number;
   totalBayar: number;
@@ -57,7 +58,16 @@ interface Pembayaran {
   keterangan: string;
   created_at: string;
   store: string;
+  for_months?: string | null;
 }
+
+interface TagihanDraftItem {
+  key: string;
+  tanggal: string;
+  jumlah: string;
+}
+
+type TagihanPersistInput = Omit<TagihanToko, 'id' | 'created_at'>;
 
 // Utility functions
 const formatCurrency = (value: number): string => {
@@ -79,14 +89,32 @@ const formatCompactNumber = (num: number): string => {
   return num.toString();
 };
 
-const formatDate = (dateStr: string): string => {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('id-ID', { 
-    day: '2-digit', 
-    month: 'short', 
-    year: 'numeric' 
-  });
-};
+  const formatDate = (dateStr: string): string => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('id-ID', { 
+      day: '2-digit', 
+      month: 'short', 
+      year: 'numeric' 
+    });
+  };
+  
+  // Convert number to Indonesian words (simple, million-level)
+  const terbilang = (value: number): string => {
+    if (!Number.isFinite(value) || value < 0) return '';
+    const satuan = ['','satu','dua','tiga','empat','lima','enam','tujuh','delapan','sembilan','sepuluh','sebelas'];
+    const toWords = (n: number): string => {
+      if (n < 12) return satuan[n];
+      if (n < 20) return satuan[n - 10] + ' belas';
+      if (n < 100) return toWords(Math.floor(n / 10)) + ' puluh ' + toWords(n % 10);
+      if (n < 200) return 'seratus ' + toWords(n - 100);
+      if (n < 1000) return toWords(Math.floor(n / 100)) + ' ratus ' + toWords(n % 100);
+      if (n < 2000) return 'seribu ' + toWords(n - 1000);
+      if (n < 1000000) return toWords(Math.floor(n / 1000)) + ' ribu ' + toWords(n % 1000);
+      if (n < 1000000000) return toWords(Math.floor(n / 1000000)) + ' juta ' + toWords(n % 1000000);
+      return toWords(Math.floor(n / 1000000000)) + ' miliar ' + toWords(n % 1000000000);
+    };
+    return toWords(Math.floor(value)).replace(/\s+/g, ' ').trim();
+  };
 
 const formatCurrencyInput = (value: string): string => {
   const number = value.replace(/\D/g, '');
@@ -96,6 +124,246 @@ const formatCurrencyInput = (value: string): string => {
 
 const parseCurrencyInput = (value: string): string => {
   return value.replace(/\D/g, '');
+};
+
+const fetchAllRowsPaged = async <T,>(
+  table: string,
+  selectColumns: string,
+  buildQuery: (query: any) => any,
+  options?: { orderBy?: string; ascending?: boolean; pageSize?: number }
+): Promise<T[]> => {
+  const pageSize = options?.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase.from(table).select(selectColumns);
+    query = buildQuery(query);
+    if (options?.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? true });
+    }
+
+    const { data, error } = await query.range(from, from + pageSize - 1);
+    if (error) throw error;
+
+    const page = (data || []) as T[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return rows;
+};
+
+const LOCAL_TAGIHAN_STORAGE_KEY = 'tagihan_toko_local_fallback_v1';
+
+const getErrorMessage = (error: unknown): string => {
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String((error as { message?: string }).message || '');
+  }
+  return '';
+};
+
+const isMissingTableError = (error: unknown, tableName: string): boolean => {
+  const message = getErrorMessage(error).toLowerCase();
+  if (!message) return false;
+  return (
+    message.includes(`could not find the table 'public.${tableName}'`.toLowerCase()) ||
+    message.includes(`relation "${tableName}" does not exist`) ||
+    message.includes(`relation '${tableName}' does not exist`)
+  );
+};
+
+const readLocalTagihanFallback = (): TagihanToko[] => {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const raw = window.localStorage.getItem(LOCAL_TAGIHAN_STORAGE_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map((item: any) => {
+        const id = Number(item?.id);
+        const customer = typeof item?.customer === 'string' ? item.customer : '';
+        const tempo = typeof item?.tempo === 'string' ? item.tempo : '';
+        const tanggal = typeof item?.tanggal === 'string' ? item.tanggal : '';
+        const jumlah = Number(item?.jumlah);
+        const keterangan = typeof item?.keterangan === 'string' ? item.keterangan : '';
+        const createdAt = typeof item?.created_at === 'string' ? item.created_at : new Date().toISOString();
+        const store = typeof item?.store === 'string' ? item.store : 'all';
+
+        if (!Number.isFinite(id) || !customer || !tanggal || !Number.isFinite(jumlah)) {
+          return null;
+        }
+
+        return {
+          id,
+          customer,
+          tempo,
+          tanggal,
+          jumlah,
+          keterangan,
+          created_at: createdAt,
+          store,
+        } satisfies TagihanToko;
+      })
+      .filter((item): item is TagihanToko => item !== null);
+  } catch (error) {
+    console.error('Failed to read local tagihan fallback:', error);
+    return [];
+  }
+};
+
+const writeLocalTagihanFallback = (rows: TagihanToko[]) => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(LOCAL_TAGIHAN_STORAGE_KEY, JSON.stringify(rows));
+  } catch (error) {
+    console.error('Failed to write local tagihan fallback:', error);
+  }
+};
+
+const appendLocalTagihanFallback = (rows: TagihanPersistInput[]): TagihanToko[] => {
+  const existing = readLocalTagihanFallback();
+  const timestamp = Date.now();
+  const createdAt = new Date().toISOString();
+  const nextRows = rows.map((row, index) => ({
+    id: -(timestamp + index),
+    ...row,
+    created_at: createdAt,
+  }));
+
+  writeLocalTagihanFallback([...existing, ...nextRows]);
+  return nextRows;
+};
+
+const updateLocalTagihanFallback = (id: number, patch: Partial<TagihanPersistInput>): boolean => {
+  const existing = readLocalTagihanFallback();
+  let found = false;
+
+  const nextRows = existing.map(row => {
+    if (row.id !== id) return row;
+    found = true;
+    return { ...row, ...patch };
+  });
+
+  if (!found) return false;
+  writeLocalTagihanFallback(nextRows);
+  return true;
+};
+
+const deleteLocalTagihanFallback = (id: number): boolean => {
+  const existing = readLocalTagihanFallback();
+  const nextRows = existing.filter(row => row.id !== id);
+
+  if (nextRows.length === existing.length) return false;
+  writeLocalTagihanFallback(nextRows);
+  return true;
+};
+
+const renameLocalTagihanFallback = (oldName: string, newName: string): number => {
+  const existing = readLocalTagihanFallback();
+  let count = 0;
+
+  const nextRows = existing.map(row => {
+    if (row.customer?.trim().toUpperCase() !== oldName) return row;
+    count += 1;
+    return { ...row, customer: newName };
+  });
+
+  if (count > 0) {
+    writeLocalTagihanFallback(nextRows);
+  }
+
+  return count;
+};
+
+const createTagihanDraftItem = (): TagihanDraftItem => ({
+  key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  tanggal: '',
+  jumlah: '',
+});
+
+const normalizeDateForDb = (value: string, fallbackDate: string): string | null => {
+  const trimmed = (value || '').trim();
+  if (!trimmed) return fallbackDate;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const numericMatch = trimmed.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
+  if (numericMatch) {
+    const [, dayStr, monthStr, yearStr] = numericMatch;
+    const day = parseInt(dayStr, 10);
+    const month = parseInt(monthStr, 10);
+    const year = parseInt(yearStr, 10);
+    const parsed = new Date(year, month - 1, day);
+
+    if (
+      parsed.getFullYear() === year &&
+      parsed.getMonth() === month - 1 &&
+      parsed.getDate() === day
+    ) {
+      return `${yearStr}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  const monthMap: Record<string, number> = {
+    JAN: 1,
+    FEB: 2,
+    MAR: 3,
+    APR: 4,
+    MEI: 5,
+    MAY: 5,
+    JUN: 6,
+    JUL: 7,
+    AGS: 8,
+    AUG: 8,
+    SEP: 9,
+    OCT: 10,
+    OKT: 10,
+    NOV: 11,
+    DEC: 12,
+    DES: 12,
+  };
+
+  const textMonthMatch = trimmed.toUpperCase().match(/^(\d{1,2})[\-\/ ]([A-Z]{3})(?:[\-\/ ](\d{4}))?$/);
+  if (textMonthMatch) {
+    const [, dayStr, monthCode, yearStr] = textMonthMatch;
+    const day = parseInt(dayStr, 10);
+    const month = monthMap[monthCode];
+    const year = yearStr ? parseInt(yearStr, 10) : parseInt(fallbackDate.slice(0, 4), 10);
+
+    if (month) {
+      const parsed = new Date(year, month - 1, day);
+      if (
+        parsed.getFullYear() === year &&
+        parsed.getMonth() === month - 1 &&
+        parsed.getDate() === day
+      ) {
+        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      }
+    }
+  }
+
+  return null;
+};
+
+// Helper to calculate jatuh tempo month based on tempo string (e.g. "3 BLN")
+const calculateDueMonth = (transactionDate: string, tempo: string): string => {
+  const date = new Date(transactionDate);
+  if ((tempo || '').toUpperCase().includes('CASH')) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  }
+  const tempoMatch = tempo?.match(/(\d+)/);
+  const tempoMonths = tempoMatch ? parseInt(tempoMatch[1]) : 1;
+  date.setMonth(date.getMonth() + tempoMonths);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 };
 
 export const TagihanTokoView: React.FC = () => {
@@ -114,18 +382,22 @@ export const TagihanTokoView: React.FC = () => {
   // Filter states
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTempo, setFilterTempo] = useState<string>('all');
-  const [filterStore, setFilterStore] = useState<'all' | 'mjm' | 'bjw'>('all');
-  const [filterMonthFrom, setFilterMonthFrom] = useState('2025-11');
-  const [filterMonthTo, setFilterMonthTo] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
+  const [filterStore, setFilterStore] = useState<'all' | 'mjm' | 'bjw'>(
+    selectedStore === 'mjm' ? 'mjm' : selectedStore === 'bjw' ? 'bjw' : 'all'
+  );
+  const [filterMonth, setFilterMonth] = useState('');
   
   // Modal states
   const [selectedToko, setSelectedToko] = useState<TokoPiutang | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showTagihanModal, setShowTagihanModal] = useState(false);
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [printToko, setPrintToko] = useState<TokoPiutang | null>(null);
+  const [printStore, setPrintStore] = useState<'mjm' | 'bjw'>('mjm');
+  const [printDate, setPrintDate] = useState(''); // kept for compatibility, not used for printing all dates
+  const [printedInfo, setPrintedInfo] = useState<Map<string, { invoice_no: string; printed_at: string; store: string; total: number }>>(new Map());
+  const [flagModal, setFlagModal] = useState<{ customer: string; info: { invoice_no: string; printed_at: string; store: string }; toko: TokoPiutang | null } | null>(null);
   
   // Payment form states
   const [paymentAmount, setPaymentAmount] = useState('');
@@ -135,9 +407,8 @@ export const TagihanTokoView: React.FC = () => {
   // Tagihan form states
   const [tagihanCustomer, setTagihanCustomer] = useState('');
   const [tagihanTempo, setTagihanTempo] = useState('');
-  const [tagihanAmount, setTagihanAmount] = useState('');
+  const [tagihanItems, setTagihanItems] = useState<TagihanDraftItem[]>([createTagihanDraftItem()]);
   const [tagihanNote, setTagihanNote] = useState('');
-  const [tagihanDate, setTagihanDate] = useState('');
   
   // Toast
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -151,30 +422,170 @@ export const TagihanTokoView: React.FC = () => {
   const [editPaymentDate, setEditPaymentDate] = useState('');
   const [editTransactionQty, setEditTransactionQty] = useState('');
   const [editTransactionHarga, setEditTransactionHarga] = useState('');
+  const [editTransactionDate, setEditTransactionDate] = useState('');
   const [editTagihanAmount, setEditTagihanAmount] = useState('');
   const [editTagihanNote, setEditTagihanNote] = useState('');
   const [editTagihanDate, setEditTagihanDate] = useState('');
+  const [editingCustomerName, setEditingCustomerName] = useState<{ oldName: string; newName: string } | null>(null);
+  const [savingCustomerName, setSavingCustomerName] = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameOld, setRenameOld] = useState('');
+  const [renameNew, setRenameNew] = useState('');
+  const [customerOptions, setCustomerOptions] = useState<string[]>([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
   
   // Search states for history modal
   const [historySearchTerm, setHistorySearchTerm] = useState('');
   const [historyDateFilter, setHistoryDateFilter] = useState('');
+
+  // Helper: available dates for print (per customer) aggregated by date
+  const printDatesForSelected = useMemo(() => {
+    if (!printToko) return [];
+    const map = new Map<string, { amount: number; tempos: Set<string> }>();
+    printToko.transactions.forEach(t => {
+      const d = t.created_at.split('T')[0];
+      const tempo = (t.tempo || '').toUpperCase();
+      const entry = map.get(d) || { amount: 0, tempos: new Set<string>() };
+      entry.amount += t.harga_total || 0;
+      if (tempo) entry.tempos.add(tempo);
+      map.set(d, entry);
+    });
+    printToko.tagihanManual.forEach(t => {
+      const d = t.tanggal;
+      const tempo = (t.tempo || '').toUpperCase();
+      const entry = map.get(d) || { amount: 0, tempos: new Set<string>() };
+      entry.amount += t.jumlah || 0;
+      if (tempo) entry.tempos.add(tempo);
+      map.set(d, entry);
+    });
+    return Array.from(map.entries())
+      .map(([date, data]) => ({ date, amount: data.amount, tempos: Array.from(data.tempos) }))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [printToko]);
   
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
 
+  const totalTagihanDraft = useMemo(() => {
+    return tagihanItems.reduce((total, item) => {
+      const amount = parseFloat(parseCurrencyInput(item.jumlah)) || 0;
+      return total + amount;
+    }, 0);
+  }, [tagihanItems]);
+
+  const handleTagihanItemChange = (key: string, field: 'tanggal' | 'jumlah', value: string) => {
+    setTagihanItems(prev =>
+      prev.map(item =>
+        item.key === key
+          ? {
+              ...item,
+              [field]: field === 'jumlah' ? parseCurrencyInput(value) : value,
+            }
+          : item
+      )
+    );
+  };
+
+  const handleAddTagihanItem = () => {
+    setTagihanItems(prev => [...prev, createTagihanDraftItem()]);
+  };
+
+  const handleRemoveTagihanItem = (key: string) => {
+    setTagihanItems(prev => {
+      if (prev.length === 1) {
+        return [createTagihanDraftItem()];
+      }
+      return prev.filter(item => item.key !== key);
+    });
+  };
+
+  // Load printed customers marker from localStorage
+  // Load printed markers from DB
+  const loadPrintedFlags = useCallback(async (customers: string[]) => {
+    if (!filterMonth || customers.length === 0) {
+      setPrintedInfo(new Map());
+      return;
+    }
+    try {
+      const storeKey = filterStore === 'all' ? ['all', 'mjm', 'bjw'] : [filterStore];
+      const { data, error } = await supabase
+        .from('inv_tagihan')
+        // only label receipts that were printed (avoid IMG/export rows)
+        .select('customer, inv, created_at, toko, total, status')
+        .eq('jatuh_tempo_bulan', filterMonth)
+        .eq('status', 'PRINTED')
+        .ilike('inv', 'INV-%')
+        .in('toko', storeKey);
+
+      if (error) {
+        console.error('Load inv_tagihan error:', error);
+        setPrintedInfo(new Map());
+        return;
+      }
+
+      const map = new Map<string, { invoice_no: string; printed_at: string; store: string; total: number }>();
+      (data || []).forEach(row => {
+        const cust = (row.customer || row.toko || '').toUpperCase();
+        if (!cust || !customers.includes(cust)) return;
+        map.set(cust, {
+          invoice_no: row.inv || '-',
+          printed_at: row.created_at,
+          store: row.toko || 'all',
+          total: row.total || 0,
+        });
+      });
+      setPrintedInfo(map);
+    } catch (err) {
+      console.error('Exception load inv_tagihan:', err);
+      setPrintedInfo(new Map());
+    }
+  }, [filterMonth, filterStore]);
+
+  const markPrinted = async (customers: string[], invoiceNo: string, totalAmount: number) => {
+    if (!invoiceNo) return;
+    const storeVal = filterStore === 'all' ? 'all' : filterStore;
+    const dueMonth = filterMonth || new Date().toISOString().slice(0,7);
+    const rows = customers.map(c => ({
+      customer: c.toUpperCase(),
+      tempo: '',
+      jatuh_tempo_bulan: dueMonth,
+      toko: storeVal,
+      inv: invoiceNo,
+      total: totalAmount,
+      status: 'PRINTED'
+    }));
+
+    const { error } = await supabase
+      .from('inv_tagihan')
+      .upsert(rows);
+
+    if (error) {
+      console.error('Gagal menyimpan inv_tagihan:', error);
+      showToast('Gagal menyimpan status cetak', 'error');
+      return;
+    }
+
+    const next = new Map(printedInfo);
+    rows.forEach(r => {
+      next.set(r.customer.toUpperCase(), { invoice_no: r.inv, printed_at: new Date().toISOString(), store: r.toko, total: r.total });
+    });
+    setPrintedInfo(next);
+  };
+
   // Get tempo types (excluding CASH and NADIR)
   const tempoTypes = useMemo(() => {
     const types = new Set<string>();
     tokoList.forEach(t => {
-      if (t.tempo) types.add(t.tempo);
+      t.tempos.forEach(tp => types.add(tp));
     });
     return Array.from(types).sort();
   }, [tokoList]);
 
   // Load data
   const loadData = async () => {
+    if (!filterMonth) return;
     setLoading(true);
     try {
       const storesToQuery = filterStore === 'all' 
@@ -183,53 +594,95 @@ export const TagihanTokoView: React.FC = () => {
 
       const allRecords: BarangKeluarRecord[] = [];
       
-      // Calculate date range from month filters
-      const dateFrom = `${filterMonthFrom}-01`;
-      const dateTo = new Date(filterMonthTo + '-01');
+      // Calculate fetch range based on jatuh tempo (max tempo 3 bulan)
+      const selectedDate = new Date(filterMonth + '-01');
+      const fetchFromDate = new Date(selectedDate);
+      fetchFromDate.setMonth(fetchFromDate.getMonth() - 3);
+      const fetchFromStr = `${fetchFromDate.getFullYear()}-${String(fetchFromDate.getMonth() + 1).padStart(2, '0')}-01`;
+      const cutoffDate = '2025-11-01';
+      const actualFetchFrom = fetchFromStr < cutoffDate ? cutoffDate : fetchFromStr;
+      
+      const dateTo = new Date(selectedDate);
       dateTo.setMonth(dateTo.getMonth() + 1);
       dateTo.setDate(0);
       const dateToStr = dateTo.toISOString().split('T')[0];
       
       for (const store of storesToQuery) {
         const tableName = store === 'mjm' ? 'barang_keluar_mjm' : 'barang_keluar_bjw';
-        
-        const { data, error } = await supabase
-          .from(tableName)
-          .select('*')
-          .not('tempo', 'ilike', '%CASH%')
-          .not('tempo', 'ilike', '%NADIR%')
-          .not('tempo', 'ilike', '%RETUR%')
-          .not('tempo', 'ilike', '%STOK%')
-          .not('tempo', 'ilike', '%LUNAS%')
-          .not('tempo', 'is', null)
-          .not('tempo', 'eq', '')
-          .not('tempo', 'eq', '-')
-          .gte('created_at', dateFrom)
-          .lte('created_at', dateToStr + 'T23:59:59')
-          .order('created_at', { ascending: false });
 
-        if (error) {
-          console.error(`Error fetching from ${tableName}:`, error);
-        } else if (data) {
-          allRecords.push(...data);
+        const data = await fetchAllRowsPaged<BarangKeluarRecord>(
+          tableName,
+          '*',
+          (q) => q
+            .not('tempo', 'ilike', '%CASH%')
+            .not('tempo', 'ilike', '%NADIR%')
+            .not('tempo', 'ilike', '%RETUR%')
+            .not('tempo', 'ilike', '%STOK%')
+            .not('tempo', 'ilike', '%LUNAS%')
+            .not('tempo', 'is', null)
+            .not('tempo', 'eq', '')
+            .not('tempo', 'eq', '-')
+            .gte('created_at', actualFetchFrom)
+            .lte('created_at', `${dateToStr}T23:59:59`),
+          { orderBy: 'created_at', ascending: false }
+        );
+
+        const filteredData = data.filter(record => {
+          const dueMonth = calculateDueMonth(record.created_at, record.tempo || '1 BLN');
+          return dueMonth === filterMonth;
+        });
+        allRecords.push(...filteredData);
+      }
+
+      // Load pembayaran data (filtered by store only, payments reduce outstanding across months)
+      const pembayaranDataRaw = await fetchAllRowsPaged<Pembayaran>(
+        'toko_pembayaran',
+        '*',
+        (q) => q,
+        { orderBy: 'tanggal', ascending: false }
+      );
+      
+      const pembayaranData = (pembayaranDataRaw || []).filter(p => {
+        // Match store
+        if (filterStore !== 'all' && p.store && p.store !== 'all' && p.store.toLowerCase() !== filterStore) {
+          return false;
+        }
+        // Match due month if provided (backward compatible, supports DATE or YYYY-MM strings)
+        if (p.for_months) {
+          const payMonth = p.for_months.length === 7 ? p.for_months : p.for_months.slice(0, 7);
+          if (payMonth !== filterMonth) return false;
+        }
+        return true;
+      });
+      setPembayaranList(pembayaranData);
+
+      // Load tagihan manual data (filter by due month + store)
+      let tagihanDataRaw: TagihanToko[] = [];
+      try {
+        tagihanDataRaw = await fetchAllRowsPaged<TagihanToko>(
+          'toko_tagihan',
+          '*',
+          (q) => q.gte('tanggal', actualFetchFrom).lte('tanggal', dateToStr),
+          { orderBy: 'tanggal', ascending: false }
+        );
+      } catch (tagihanLoadError) {
+        if (!isMissingTableError(tagihanLoadError, 'toko_tagihan')) {
+          console.error('Load toko_tagihan error:', tagihanLoadError);
         }
       }
 
-      // Load pembayaran data
-      const { data: pembayaranData } = await supabase
-        .from('toko_pembayaran')
-        .select('*')
-        .order('tanggal', { ascending: false });
-      
-      setPembayaranList(pembayaranData || []);
+      const tagihanSource = [
+        ...((tagihanDataRaw || []) as TagihanToko[]),
+        ...readLocalTagihanFallback(),
+      ];
 
-      // Load tagihan manual data
-      const { data: tagihanData } = await supabase
-        .from('toko_tagihan')
-        .select('*')
-        .gte('tanggal', dateFrom)
-        .lte('tanggal', dateToStr)
-        .order('tanggal', { ascending: false });
+      const tagihanData = tagihanSource.filter(t => {
+        const dueMonth = calculateDueMonth(t.tanggal, t.tempo || '1 BLN');
+        if (filterStore !== 'all' && t.store && t.store.toLowerCase() !== filterStore) {
+          return false;
+        }
+        return dueMonth === filterMonth;
+      });
       
       setTagihanList(tagihanData || []);
 
@@ -237,12 +690,14 @@ export const TagihanTokoView: React.FC = () => {
       const tokoMap = new Map<string, TokoPiutang>();
       
       allRecords.forEach(record => {
-        const key = `${record.customer?.trim().toUpperCase() || 'UNKNOWN'}_${record.tempo?.trim().toUpperCase() || '-'}`;
+        const customerKey = record.customer?.trim().toUpperCase() || 'UNKNOWN';
+        const tempoNorm = record.tempo?.trim().toUpperCase() || '-';
         
-        if (!tokoMap.has(key)) {
-          tokoMap.set(key, {
-            customer: record.customer?.trim().toUpperCase() || 'UNKNOWN',
-            tempo: record.tempo?.trim().toUpperCase() || '-',
+        if (!tokoMap.has(customerKey)) {
+          tokoMap.set(customerKey, {
+            customer: customerKey,
+            tempo: tempoNorm,
+            tempos: [tempoNorm],
             totalTagihan: 0,
             totalTagihanManual: 0,
             totalBayar: 0,
@@ -253,7 +708,8 @@ export const TagihanTokoView: React.FC = () => {
           });
         }
         
-        const existing = tokoMap.get(key)!;
+        const existing = tokoMap.get(customerKey)!;
+        if (!existing.tempos.includes(tempoNorm)) existing.tempos.push(tempoNorm);
         existing.totalTagihan += record.harga_total || 0;
         existing.transactions.push(record);
         
@@ -264,12 +720,14 @@ export const TagihanTokoView: React.FC = () => {
 
       // Add tagihan manual to toko
       (tagihanData || []).forEach(t => {
-        const key = `${t.customer?.trim().toUpperCase() || 'UNKNOWN'}_${t.tempo?.trim().toUpperCase() || '-'}`;
+        const customerKey = t.customer?.trim().toUpperCase() || 'UNKNOWN';
+        const tempoNorm = t.tempo?.trim().toUpperCase() || '-';
         
-        if (!tokoMap.has(key)) {
-          tokoMap.set(key, {
-            customer: t.customer?.trim().toUpperCase() || 'UNKNOWN',
-            tempo: t.tempo?.trim().toUpperCase() || '-',
+        if (!tokoMap.has(customerKey)) {
+          tokoMap.set(customerKey, {
+            customer: customerKey,
+            tempo: tempoNorm,
+            tempos: [tempoNorm],
             totalTagihan: 0,
             totalTagihanManual: 0,
             totalBayar: 0,
@@ -280,7 +738,8 @@ export const TagihanTokoView: React.FC = () => {
           });
         }
         
-        const existing = tokoMap.get(key)!;
+        const existing = tokoMap.get(customerKey)!;
+        if (!existing.tempos.includes(tempoNorm)) existing.tempos.push(tempoNorm);
         existing.totalTagihanManual += t.jumlah || 0;
         existing.tagihanManual.push(t);
         
@@ -291,17 +750,19 @@ export const TagihanTokoView: React.FC = () => {
 
       // Calculate totalBayar from pembayaran
       (pembayaranData || []).forEach(p => {
-        const key = `${p.customer?.trim().toUpperCase() || 'UNKNOWN'}_${p.tempo || '-'}`;
+        const key = p.customer?.trim().toUpperCase() || 'UNKNOWN';
+        const tempoNorm = p.tempo?.trim().toUpperCase() || '-';
         const toko = tokoMap.get(key);
         if (toko) {
           toko.totalBayar += p.jumlah || 0;
+          if (!toko.tempos.includes(tempoNorm)) toko.tempos.push(tempoNorm);
         }
       });
 
-      // Calculate sisa tagihan
-      tokoMap.forEach((toko) => {
-        toko.sisaTagihan = toko.totalTagihan + toko.totalTagihanManual - toko.totalBayar;
-      });
+  // Calculate sisa tagihan
+  tokoMap.forEach((toko) => {
+    toko.sisaTagihan = toko.totalTagihan + toko.totalTagihanManual - toko.totalBayar;
+  });
 
       // Convert to array
       const allToko = Array.from(tokoMap.values());
@@ -318,6 +779,9 @@ export const TagihanTokoView: React.FC = () => {
 
       setTokoList(tokoArray);
       setTokoLunas(lunasArray);
+      // Load printed flags for displayed customers
+      const allCustomersUpper = [...tokoArray, ...lunasArray].map(t => t.customer.toUpperCase());
+      loadPrintedFlags(allCustomersUpper);
     } catch (err) {
       console.error('Failed to load tagihan data:', err);
       showToast('Gagal memuat data tagihan', 'error');
@@ -326,9 +790,73 @@ export const TagihanTokoView: React.FC = () => {
     }
   };
 
+  // Find earliest jatuh tempo month to prefill filter
+  const findOldestDueMonth = async () => {
+    try {
+      const storesToQuery = filterStore === 'all' ? ['mjm', 'bjw'] : [filterStore];
+      let oldestDueMonth: string | null = null;
+
+      for (const store of storesToQuery) {
+        const tableName = store === 'mjm' ? 'barang_keluar_mjm' : 'barang_keluar_bjw';
+
+        const data = await fetchAllRowsPaged<Pick<BarangKeluarRecord, 'created_at' | 'tempo'>>(
+          tableName,
+          'created_at, tempo',
+          (query) =>
+            query
+              .not('tempo', 'ilike', '%CASH%')
+              .not('tempo', 'ilike', '%NADIR%')
+              .not('tempo', 'ilike', '%RETUR%')
+              .not('tempo', 'ilike', '%STOK%')
+              .not('tempo', 'ilike', '%LUNAS%')
+              .not('tempo', 'is', null)
+              .not('tempo', 'eq', '')
+              .not('tempo', 'eq', '-')
+              .gte('created_at', '2025-11-01'),
+          { orderBy: 'created_at', ascending: true }
+        );
+
+        if (data && data.length > 0) {
+          data.forEach(record => {
+            const dueMonth = calculateDueMonth(record.created_at, record.tempo || '1 BLN');
+            if (!oldestDueMonth || dueMonth < oldestDueMonth) {
+              oldestDueMonth = dueMonth;
+            }
+          });
+        }
+      }
+
+      if (oldestDueMonth) {
+        setFilterMonth(oldestDueMonth);
+      } else {
+        const now = new Date();
+        setFilterMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+      }
+    } catch (err) {
+      console.error('Failed to find oldest due month:', err);
+      const now = new Date();
+      setFilterMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+    }
+  };
+
+  // Sync header store selection
   useEffect(() => {
-    loadData();
-  }, [filterStore, selectedStore, filterMonthFrom, filterMonthTo]);
+    if (selectedStore === 'mjm' || selectedStore === 'bjw') {
+      setFilterStore(selectedStore);
+    }
+  }, [selectedStore]);
+
+  // Initial load to set default month
+  useEffect(() => {
+    findOldestDueMonth();
+  }, []);
+
+  // Reload data when filters change
+  useEffect(() => {
+    if (filterMonth) {
+      loadData();
+    }
+  }, [filterStore, selectedStore, filterMonth]);
 
   // Filtered toko (based on active tab)
   const filteredToko = useMemo(() => {
@@ -337,8 +865,13 @@ export const TagihanTokoView: React.FC = () => {
       if (searchTerm && !t.customer.toLowerCase().includes(searchTerm.toLowerCase())) {
         return false;
       }
-      if (filterTempo !== 'all' && t.tempo !== filterTempo) {
-        return false;
+      if (filterTempo !== 'all') {
+        if (filterTempo === 'others') {
+          const has123 = t.tempos.some(tp => tp.includes('1') || tp.includes('2') || tp.includes('3'));
+          if (has123) return false;
+        } else if (!t.tempos.includes(filterTempo)) {
+          return false;
+        }
       }
       return true;
     });
@@ -347,12 +880,11 @@ export const TagihanTokoView: React.FC = () => {
   // Statistics
   const stats = useMemo(() => {
     const totalTagihan = filteredToko.reduce((sum, t) => sum + t.sisaTagihan, 0);
-    const tempo3Bln = filteredToko.filter(t => t.tempo.includes('3')).reduce((sum, t) => sum + t.sisaTagihan, 0);
-    const tempo2Bln = filteredToko.filter(t => t.tempo.includes('2')).reduce((sum, t) => sum + t.sisaTagihan, 0);
-    const tempo1Bln = filteredToko.filter(t => t.tempo.includes('1')).reduce((sum, t) => sum + t.sisaTagihan, 0);
-    const tempoLainnya = totalTagihan - tempo3Bln - tempo2Bln - tempo1Bln;
+    const tempo3Bln = filteredToko.filter(t => t.tempos.some(tp => tp.includes('3'))).reduce((sum, t) => sum + t.sisaTagihan, 0);
+    const tempo2Bln = filteredToko.filter(t => t.tempos.some(tp => tp.includes('2'))).reduce((sum, t) => sum + t.sisaTagihan, 0);
+    const tempo1Bln = filteredToko.filter(t => t.tempos.some(tp => tp.includes('1'))).reduce((sum, t) => sum + t.sisaTagihan, 0);
     
-    return { totalTagihan, tempo3Bln, tempo2Bln, tempo1Bln, tempoLainnya };
+    return { totalTagihan, tempo3Bln, tempo2Bln, tempo1Bln, tempoLainnya: 0 };
   }, [filteredToko]);
 
   // Handle payment submission
@@ -371,6 +903,8 @@ export const TagihanTokoView: React.FC = () => {
           tanggal: paymentDate || new Date().toISOString().split('T')[0],
           jumlah: parseFloat(parseCurrencyInput(paymentAmount)),
           keterangan: paymentNote || 'Pembayaran tagihan',
+          // Store due month as first day of that month to support DATE column as well
+          for_months: filterMonth ? `${filterMonth}-01` : null,
           store: filterStore === 'all' ? 'all' : filterStore,
         }]);
 
@@ -390,36 +924,72 @@ export const TagihanTokoView: React.FC = () => {
 
   // Handle tagihan submission
   const handleSubmitTagihan = async () => {
-    if (!tagihanCustomer || !tagihanAmount || parseFloat(parseCurrencyInput(tagihanAmount)) <= 0) {
-      showToast('Masukkan nama customer dan jumlah tagihan yang valid', 'error');
+    const filledTagihanItems = tagihanItems.filter(item => item.tanggal || parseCurrencyInput(item.jumlah));
+
+    if (!tagihanCustomer || filledTagihanItems.length === 0) {
+      showToast('Masukkan nama customer dan minimal 1 rincian tagihan', 'error');
+      return;
+    }
+
+    const hasInvalidAmount = filledTagihanItems.some(
+      item => parseFloat(parseCurrencyInput(item.jumlah)) <= 0
+    );
+
+    if (hasInvalidAmount) {
+      showToast('Semua rincian tagihan harus punya jumlah yang valid', 'error');
       return;
     }
 
     try {
-      const { error } = await supabase
-        .from('toko_tagihan')
-        .insert([{
+      const defaultDate = new Date().toISOString().split('T')[0];
+      const payload = [];
+
+      for (const item of filledTagihanItems) {
+        const normalizedDate = normalizeDateForDb(item.tanggal, defaultDate);
+        if (!normalizedDate) {
+          showToast('Format tanggal tidak valid. Gunakan YYYY-MM-DD, DD/MM/YYYY, atau 20-JAN', 'error');
+          return;
+        }
+
+        payload.push({
           customer: tagihanCustomer.trim().toUpperCase(),
           tempo: tagihanTempo || '1 BLN',
-          tanggal: tagihanDate || new Date().toISOString().split('T')[0],
-          jumlah: parseFloat(parseCurrencyInput(tagihanAmount)),
+          tanggal: normalizedDate,
+          jumlah: parseFloat(parseCurrencyInput(item.jumlah)),
           keterangan: tagihanNote || 'Tagihan manual',
           store: filterStore === 'all' ? 'all' : filterStore,
-        }]);
+        });
+      }
 
-      if (error) throw error;
+      const { error } = await supabase
+        .from('toko_tagihan')
+        .insert(payload);
 
-      showToast('Tagihan berhasil ditambahkan', 'success');
+      const savedToLocalFallback = !!error && isMissingTableError(error, 'toko_tagihan');
+      if (error && !savedToLocalFallback) throw error;
+      if (savedToLocalFallback) {
+        appendLocalTagihanFallback(payload);
+      }
+
+      showToast(
+        savedToLocalFallback
+          ? (payload.length > 1 ? `${payload.length} tagihan disimpan lokal` : 'Tagihan disimpan lokal')
+          : (payload.length > 1 ? `${payload.length} tagihan berhasil ditambahkan` : 'Tagihan berhasil ditambahkan'),
+        'success'
+      );
       setShowTagihanModal(false);
       setTagihanCustomer('');
       setTagihanTempo('');
-      setTagihanAmount('');
+      setTagihanItems([createTagihanDraftItem()]);
       setTagihanNote('');
-      setTagihanDate('');
       loadData();
     } catch (err) {
       console.error('Error adding tagihan:', err);
-      showToast('Gagal menambahkan tagihan', 'error');
+      const dbMessage =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message?: string }).message || '')
+          : '';
+      showToast(dbMessage ? `Gagal menambahkan tagihan: ${dbMessage}` : 'Gagal menambahkan tagihan', 'error');
     }
   };
 
@@ -428,7 +998,7 @@ export const TagihanTokoView: React.FC = () => {
     if (!selectedToko) return [];
     return pembayaranList.filter(p => 
       p.customer?.toUpperCase() === selectedToko.customer &&
-      (p.tempo === selectedToko.tempo || !p.tempo)
+      (!p.tempo || selectedToko.tempos.includes(p.tempo))
     );
   }, [selectedToko, pembayaranList]);
 
@@ -517,11 +1087,12 @@ export const TagihanTokoView: React.FC = () => {
     setEditingTransaction(transaction);
     setEditTransactionQty(transaction.qty_keluar.toString());
     setEditTransactionHarga(Math.round(transaction.harga_total / (transaction.qty_keluar || 1)).toString());
+    setEditTransactionDate(transaction.created_at.split('T')[0]);
   };
 
   // Handle save edited transaction
   const handleSaveEditTransaction = async () => {
-    if (!editingTransaction || !editTransactionQty || parseInt(editTransactionQty) <= 0) {
+    if (!editingTransaction || !editTransactionQty || parseInt(editTransactionQty) <= 0 || !editTransactionDate) {
       showToast('Masukkan qty yang valid', 'error');
       return;
     }
@@ -529,6 +1100,7 @@ export const TagihanTokoView: React.FC = () => {
     const newQty = parseInt(editTransactionQty);
     const newHargaSatuan = parseFloat(editTransactionHarga) || Math.round(editingTransaction.harga_total / (editingTransaction.qty_keluar || 1));
     const newHargaTotal = newQty * newHargaSatuan;
+    const newDateIso = `${editTransactionDate}T00:00:00Z`; // ensure UTC timestamp
 
     try {
       // Determine which table
@@ -552,6 +1124,7 @@ export const TagihanTokoView: React.FC = () => {
         .update({
           qty_keluar: newQty,
           harga_total: newHargaTotal,
+          created_at: newDateIso,
         })
         .eq('id', editingTransaction.id);
 
@@ -583,13 +1156,40 @@ export const TagihanTokoView: React.FC = () => {
       return;
     }
 
+    const normalizedDate = normalizeDateForDb(editTagihanDate, editingTagihan.tanggal);
+    if (!normalizedDate) {
+      showToast('Format tanggal tidak valid', 'error');
+      return;
+    }
+
+    if (editingTagihan.id < 0) {
+      const updated = updateLocalTagihanFallback(editingTagihan.id, {
+        jumlah: parseFloat(parseCurrencyInput(editTagihanAmount)),
+        keterangan: editTagihanNote || 'Tagihan manual',
+        tanggal: normalizedDate,
+      });
+
+      if (!updated) {
+        showToast('Tagihan lokal tidak ditemukan', 'error');
+        return;
+      }
+
+      showToast('Tagihan berhasil diupdate', 'success');
+      setEditingTagihan(null);
+      setEditTagihanAmount('');
+      setEditTagihanNote('');
+      setEditTagihanDate('');
+      loadData();
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from('toko_tagihan')
         .update({
           jumlah: parseFloat(parseCurrencyInput(editTagihanAmount)),
           keterangan: editTagihanNote || 'Tagihan manual',
-          tanggal: editTagihanDate,
+          tanggal: normalizedDate,
         })
         .eq('id', editingTagihan.id);
 
@@ -611,6 +1211,18 @@ export const TagihanTokoView: React.FC = () => {
   const handleDeleteTagihan = async (tagihanId: number) => {
     if (!confirm('Yakin ingin menghapus tagihan ini?')) return;
 
+    if (tagihanId < 0) {
+      const deleted = deleteLocalTagihanFallback(tagihanId);
+      if (!deleted) {
+        showToast('Tagihan lokal tidak ditemukan', 'error');
+        return;
+      }
+
+      showToast('Tagihan berhasil dihapus', 'success');
+      loadData();
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from('toko_tagihan')
@@ -624,6 +1236,169 @@ export const TagihanTokoView: React.FC = () => {
     } catch (err) {
       console.error('Error deleting tagihan:', err);
       showToast('Gagal menghapus tagihan', 'error');
+    }
+  };
+
+  // Load distinct customer names from all related tables
+  const loadCustomerOptions = useCallback(async () => {
+    setLoadingCustomers(true);
+    try {
+      const tables = [
+        { name: 'barang_keluar_mjm', column: 'customer' },
+        { name: 'barang_keluar_bjw', column: 'customer' },
+        { name: 'toko_pembayaran', column: 'customer' },
+        { name: 'toko_tagihan', column: 'customer' },
+        { name: 'inv_tagihan', column: 'customer' }
+      ];
+      const results = await Promise.all(
+        tables.map(t => supabase.from(t.name).select(`${t.column}`).not(t.column, 'is', null))
+      );
+      const names = new Set<string>();
+      results.forEach(res => {
+        if (res.data) {
+          res.data.forEach((row: any) => {
+            const n = (row.customer || '').trim().toUpperCase();
+            if (n) names.add(n);
+          });
+        }
+      });
+      readLocalTagihanFallback().forEach(row => {
+        const n = (row.customer || '').trim().toUpperCase();
+        if (n) names.add(n);
+      });
+      setCustomerOptions(Array.from(names).sort());
+    } catch (err) {
+      console.error('Gagal memuat daftar customer:', err);
+      showToast('Gagal memuat daftar customer', 'error');
+    } finally {
+      setLoadingCustomers(false);
+    }
+  }, [showToast]);
+
+  // Bulk rename customer everywhere
+  const handleBulkRename = async () => {
+    const oldName = renameOld.trim().toUpperCase();
+    const newName = renameNew.trim().toUpperCase();
+    if (!oldName || !newName) {
+      showToast('Nama lama dan baru wajib diisi', 'error');
+      return;
+    }
+    if (oldName === newName) {
+      showToast('Nama baru sama dengan nama lama', 'error');
+      return;
+    }
+    setSavingCustomerName(true);
+    try {
+      const updates = [
+        { table: 'barang_keluar_mjm', request: supabase.from('barang_keluar_mjm').update({ customer: newName }).eq('customer', oldName) },
+        { table: 'barang_keluar_bjw', request: supabase.from('barang_keluar_bjw').update({ customer: newName }).eq('customer', oldName) },
+        { table: 'toko_pembayaran', request: supabase.from('toko_pembayaran').update({ customer: newName }).eq('customer', oldName) },
+        { table: 'toko_tagihan', request: supabase.from('toko_tagihan').update({ customer: newName }).eq('customer', oldName) },
+        { table: 'inv_tagihan', request: supabase.from('inv_tagihan').update({ customer: newName }).eq('customer', oldName) }
+      ];
+      const results = await Promise.all(updates.map(item => item.request));
+      const failed = results.find((result, index) => {
+        const error = (result as any).error;
+        if (!error) return false;
+        return !(updates[index].table === 'toko_tagihan' && isMissingTableError(error, 'toko_tagihan'));
+      });
+      if (failed && (failed as any).error) throw (failed as any).error;
+
+      renameLocalTagihanFallback(oldName, newName);
+
+      // Update local state
+      const renamePiutang = (list: TokoPiutang[]) =>
+        list.map(t => t.customer === oldName ? { ...t, customer: newName } : t);
+      setTokoList(prev => renamePiutang(prev));
+      setTokoLunas(prev => renamePiutang(prev));
+      setPembayaranList(prev => prev.map(p => p.customer?.toUpperCase() === oldName ? { ...p, customer: newName } : p));
+      setTagihanList(prev => prev.map(t => t.customer?.toUpperCase() === oldName ? { ...t, customer: newName } : t));
+      setSelectedToko(prev => prev && prev.customer === oldName ? { ...prev, customer: newName } : prev);
+      setPrintToko(prev => prev && prev.customer === oldName ? { ...prev, customer: newName } : prev);
+      setEditingCustomerName(prev => prev && prev.oldName === oldName ? { ...prev, oldName: newName, newName } : prev);
+
+      setPrintedInfo(prev => {
+        const next = new Map(prev);
+        const existing = next.get(oldName);
+        if (existing) {
+          next.delete(oldName);
+          next.set(newName, existing);
+        }
+        return next;
+      });
+
+      showToast(`Nama "${oldName}" diganti jadi "${newName}"`, 'success');
+      setShowRenameModal(false);
+      setRenameOld('');
+      setRenameNew('');
+      loadData();
+    } catch (err) {
+      console.error('Bulk rename gagal:', err);
+      showToast('Gagal mengganti nama customer', 'error');
+    } finally {
+      setSavingCustomerName(false);
+    }
+  };
+
+  // Handle edit customer name (inline rename across tables)
+  const handleStartEditCustomer = (customer: string) => {
+    setEditingCustomerName({ oldName: customer, newName: customer });
+  };
+
+  const handleSaveCustomerName = async () => {
+    if (!editingCustomerName) return;
+    const oldName = editingCustomerName.oldName.trim().toUpperCase();
+    const newName = editingCustomerName.newName.trim().toUpperCase();
+    if (!newName) {
+      showToast('Nama customer tidak boleh kosong', 'error');
+      return;
+    }
+    if (newName === oldName) {
+      setEditingCustomerName(null);
+      return;
+    }
+    setSavingCustomerName(true);
+    try {
+      const updates = [
+        supabase.from('barang_keluar_mjm').update({ customer: newName }).eq('customer', oldName),
+        supabase.from('barang_keluar_bjw').update({ customer: newName }).eq('customer', oldName),
+        supabase.from('toko_pembayaran').update({ customer: newName }).eq('customer', oldName),
+        supabase.from('toko_tagihan').update({ customer: newName }).eq('customer', oldName),
+        supabase.from('inv_tagihan').update({ customer: newName }).eq('customer', oldName)
+      ];
+      const results = await Promise.all(updates);
+      const failed = results.find(r => (r as any).error);
+      if (failed && (failed as any).error) throw (failed as any).error;
+
+      // Update local state lists
+      const rename = (list: TokoPiutang[]) =>
+        list.map(t => t.customer === oldName ? { ...t, customer: newName } : t);
+      setTokoList(prev => rename(prev));
+      setTokoLunas(prev => rename(prev));
+      setPembayaranList(prev => prev.map(p => p.customer?.toUpperCase() === oldName ? { ...p, customer: newName } : p));
+      setTagihanList(prev => prev.map(t => t.customer?.toUpperCase() === oldName ? { ...t, customer: newName } : t));
+      setSelectedToko(prev => prev && prev.customer === oldName ? { ...prev, customer: newName } : prev);
+      setPrintToko(prev => prev && prev.customer === oldName ? { ...prev, customer: newName } : prev);
+
+      // Move printed flag
+      setPrintedInfo(prev => {
+        const next = new Map(prev);
+        const existing = next.get(oldName);
+        if (existing) {
+          next.delete(oldName);
+          next.set(newName, existing);
+        }
+        return next;
+      });
+
+      showToast('Nama customer berhasil diubah', 'success');
+      setEditingCustomerName(null);
+      loadData();
+    } catch (err) {
+      console.error('Gagal update nama customer:', err);
+      showToast('Gagal mengubah nama customer', 'error');
+    } finally {
+      setSavingCustomerName(false);
     }
   };
 
@@ -650,7 +1425,7 @@ export const TagihanTokoView: React.FC = () => {
         </head>
         <body>
           <h1>Laporan Tagihan Toko (Tempo)</h1>
-          <div class="subtitle">Toko: ${filterStore === 'all' ? 'Semua' : filterStore.toUpperCase()} | Periode: ${filterMonthFrom} s/d ${filterMonthTo} | Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}</div>
+          <div class="subtitle">Toko: ${filterStore === 'all' ? 'Semua' : filterStore.toUpperCase()} | Jatuh Tempo: ${filterMonth} | Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}</div>
           
           <div class="stats">
             <div class="stat-card">
@@ -686,22 +1461,22 @@ export const TagihanTokoView: React.FC = () => {
             <tbody>
               ${filteredToko.map((t, idx) => `
                 <tr>
-                  <td>${idx + 1}</td>
-                  <td>${t.customer}</td>
-                  <td>${t.tempo}</td>
-                  <td class="text-right">${formatCurrency(t.totalTagihan)}</td>
-                  <td class="text-right">${formatCurrency(t.totalBayar)}</td>
-                  <td class="text-right">${formatCurrency(t.sisaTagihan)}</td>
-                  <td>${formatDate(t.lastTransaction)}</td>
-                </tr>
-              `).join('')}
-              <tr class="total-row">
-                <td colspan="3">TOTAL</td>
-                <td class="text-right">${formatCurrency(filteredToko.reduce((s, t) => s + t.totalTagihan, 0))}</td>
-                <td class="text-right">${formatCurrency(filteredToko.reduce((s, t) => s + t.totalBayar, 0))}</td>
-                <td class="text-right">${formatCurrency(stats.totalTagihan)}</td>
-                <td></td>
+                <td>${idx + 1}</td>
+                <td>${t.customer}</td>
+                <td>${t.tempos.join(', ')}</td>
+                <td class="text-right">${formatCurrency(t.totalTagihan + t.totalTagihanManual)}</td>
+                <td class="text-right">${formatCurrency(t.totalBayar)}</td>
+                <td class="text-right">${formatCurrency(t.sisaTagihan)}</td>
+                <td>${formatDate(t.lastTransaction)}</td>
               </tr>
+            `).join('')}
+            <tr class="total-row">
+              <td colspan="3">TOTAL</td>
+              <td class="text-right">${formatCurrency(filteredToko.reduce((s, t) => s + t.totalTagihan + t.totalTagihanManual, 0))}</td>
+              <td class="text-right">${formatCurrency(filteredToko.reduce((s, t) => s + t.totalBayar, 0))}</td>
+              <td class="text-right">${formatCurrency(stats.totalTagihan)}</td>
+              <td></td>
+            </tr>
             </tbody>
           </table>
         </body>
@@ -738,7 +1513,7 @@ export const TagihanTokoView: React.FC = () => {
         </div>
         <div style="text-align: center; color: #6b7280; margin-bottom: 30px; font-size: 14px;">
           Toko: <strong>${filterStore === 'all' ? 'Semua' : filterStore.toUpperCase()}</strong> &nbsp;|&nbsp; 
-          Periode: <strong>${filterMonthFrom}</strong> s/d <strong>${filterMonthTo}</strong> &nbsp;|&nbsp; 
+          Jatuh Tempo: <strong>${filterMonth}</strong> &nbsp;|&nbsp; 
           Tanggal Cetak: <strong>${new Date().toLocaleDateString('id-ID')}</strong>
         </div>
         
@@ -779,9 +1554,9 @@ export const TagihanTokoView: React.FC = () => {
                 <td style="border: 1px solid #d1d5db; padding: 10px 8px; text-align: center; color: #6b7280; font-size: 12px;">${idx + 1}</td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; font-weight: 600; color: #1f2937; font-size: 13px;">${t.customer}</td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: center;">
-                  <span style="display: inline-block; background: ${t.tempo.includes('3') ? '#f3e8ff' : t.tempo.includes('2') ? '#dbeafe' : '#dcfce7'}; color: ${t.tempo.includes('3') ? '#7c3aed' : t.tempo.includes('2') ? '#2563eb' : '#16a34a'}; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;">${t.tempo}</span>
+                  <span style="display: inline-block; background: ${t.tempos.some(tp=>tp.includes('3')) ? '#f3e8ff' : t.tempos.some(tp=>tp.includes('2')) ? '#dbeafe' : '#dcfce7'}; color: ${t.tempos.some(tp=>tp.includes('3')) ? '#7c3aed' : t.tempos.some(tp=>tp.includes('2')) ? '#2563eb' : '#16a34a'}; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;">${t.tempos.join(', ')}</span>
                 </td>
-                <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; color: #374151; font-size: 13px;">${formatCurrency(t.totalTagihan)}</td>
+                <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; color: #374151; font-size: 13px;">${formatCurrency(t.totalTagihan + t.totalTagihanManual)}</td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; color: #16a34a; font-weight: 600; font-size: 13px;">${formatCurrency(t.totalBayar)}</td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; color: #ea580c; font-weight: 700; font-size: 13px;">${formatCurrency(t.sisaTagihan)}</td>
                 <td style="border: 1px solid #d1d5db; padding: 10px; text-align: center; color: #6b7280; font-size: 12px;">${formatDate(t.lastTransaction)}</td>
@@ -789,7 +1564,7 @@ export const TagihanTokoView: React.FC = () => {
             `).join('')}
             <tr style="background: linear-gradient(135deg, #e5e7eb 0%, #d1d5db 100%);">
               <td colspan="3" style="border: 1px solid #9ca3af; padding: 12px 10px; font-weight: 700; color: #1f2937; font-size: 13px;">TOTAL (${filteredToko.length} customer)</td>
-              <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #1f2937; font-size: 13px;">${formatCurrency(filteredToko.reduce((s, t) => s + t.totalTagihan, 0))}</td>
+              <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #1f2937; font-size: 13px;">${formatCurrency(filteredToko.reduce((s, t) => s + t.totalTagihan + t.totalTagihanManual, 0))}</td>
               <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #16a34a; font-size: 13px;">${formatCurrency(filteredToko.reduce((s, t) => s + t.totalBayar, 0))}</td>
               <td style="border: 1px solid #9ca3af; padding: 12px 10px; text-align: right; font-family: 'SF Mono', Consolas, monospace; font-weight: 700; color: #ea580c; font-size: 13px;">${formatCurrency(stats.totalTagihan)}</td>
               <td style="border: 1px solid #9ca3af; padding: 12px 10px;"></td>
@@ -817,7 +1592,7 @@ export const TagihanTokoView: React.FC = () => {
         if (blob) {
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
-          link.download = `tagihan-toko-${filterStore === 'all' ? 'semua' : filterStore}-${filterMonthFrom}-${filterMonthTo}.png`;
+          link.download = `tagihan-toko-${filterStore === 'all' ? 'semua' : filterStore}-${filterMonth}.png`;
           link.href = url;
           link.click();
           URL.revokeObjectURL(url);
@@ -836,6 +1611,153 @@ export const TagihanTokoView: React.FC = () => {
     const paymentValue = parseFloat(parseCurrencyInput(paymentAmount)) || 0;
     return selectedToko.sisaTagihan - paymentValue;
   }, [selectedToko, paymentAmount]);
+
+  // Tempos lain milik customer yang sama (untuk ditampilkan di header riwayat)
+  const customerTempos = useMemo(() => {
+    if (!selectedToko) return [];
+    const tempos = new Set<string>();
+    [...tokoList, ...tokoLunas]
+      .filter(t => t.customer === selectedToko.customer)
+      .forEach(t => t.tempos.forEach(tp => tempos.add(tp)));
+    return Array.from(tempos).sort();
+  }, [selectedToko, tokoList, tokoLunas]);
+
+  // Handle print receipt
+  const handlePrintReceipt = () => {
+    if (!printToko) return;
+    const entries = (printDatesForSelected.length > 0
+      ? printDatesForSelected
+      : [{ date: printDate || new Date().toISOString().split('T')[0], amount: printToko.sisaTagihan, tempos: printToko.tempos }])
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); // oldest first
+    const totalAmount = entries.reduce((s, e) => s + (e.amount || 0), 0);
+    const logoSrc = printStore === 'bjw' ? '/assets/bjw-logo.png' : '/assets/mjm-logo.png';
+    const todayStr = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+    // Invoice number berurutan per browser (localStorage); fallback ke timestamp
+    const nextCounter = () => {
+      try {
+        const key = 'receiptCounter';
+        const current = parseInt(localStorage.getItem(key) || '0', 10) || 0;
+        const next = current + 1;
+        localStorage.setItem(key, String(next));
+        return next;
+      } catch (e) {
+        return Date.now();
+      }
+    };
+    const counter = nextCounter();
+    const invoiceNo = `INV-${String(counter).padStart(5, '0')}`;
+    const terbilangStr = terbilang(totalAmount).toUpperCase() || '-';
+    const rowsAll = entries.map((e, idx) => {
+      const tempoLabel = e.tempos?.length ? ` (${e.tempos.join(' / ')})` : '';
+      return `<tr>
+        <td class="cell center">${idx + 1}</td>
+        <td class="cell">${formatDate(e.date)}${tempoLabel}</td>
+        <td class="cell right">${formatCurrency(e.amount)}</td>
+      </tr>`;
+    });
+    const maxRows = 16; // cap rows to keep within 1 page
+    const blankCount = Math.max(0, maxRows - rowsAll.length);
+    const blankRows = Array.from({ length: blankCount }, (_, i) => `<tr>
+      <td class="cell center">${rowsAll.length + i + 1}</td>
+      <td class="cell">&nbsp;</td>
+      <td class="cell right">&nbsp;</td>
+    </tr>`);
+    const rows = [...rowsAll, ...blankRows].join('');
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    @page { size: A4 portrait; margin: 8mm 10mm 8mm 10mm; }
+    body { font-family: Arial, sans-serif; color: #111; position: relative; margin: 0; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2px; }
+    .title { font-size: 22px; font-weight: 700; letter-spacing: 0.5px; }
+    .header-left { display: flex; flex-direction: column; gap: 6px; }
+    .meta { line-height: 1.5; font-size: 12px; }
+    .table { width: 100%; border-collapse: collapse; margin-top: 2px; }
+    .table th, .table td { border: 1px solid #444; padding: 6px 8px; font-size: 13px; }
+    .table th { background: #f0f0f0; font-size: 13px; }
+    .cell { font-size: 13px; }
+    .right { text-align: right; }
+    .center { text-align: center; }
+    .total-row { font-weight: 700; background: #f5f5f5; }
+    .foot { margin-top: 16px; font-size: 12px; }
+    .signature { margin-top: 36px; font-size: 12px; }
+    .logo { height: 170px; max-height: 180px; }
+    .table-wrapper { position: relative; }
+    .watermark {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-10deg);
+      width: 65%;
+      opacity: 0.18;
+      z-index: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <div class="title">TANDA TERIMA</div>
+      <div class="meta">
+        <div><strong>NO</strong>: ${invoiceNo}</div>
+        <div><strong>KEPADA</strong>: ${printToko.customer}</div>
+        <div><strong>TGL</strong>: ${todayStr}</div>
+      </div>
+    </div>
+    <img src="${logoSrc}" alt="logo" class="logo" />
+  </div>
+  <div class="table-wrapper">
+    <img class="watermark" src="${logoSrc}" alt="watermark" />
+    <table class="table">
+    <thead>
+      <tr>
+        <th style="width:40px;">NO</th>
+        <th style="width:140px;">TGL</th>
+        <th>PEMBAYARAN</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows}
+      <tr class="total-row">
+        <td colspan="2">TOTAL PEMBAYARAN</td>
+        <td class="right">${formatCurrency(totalAmount)}</td>
+      </tr>
+      <tr>
+        <td colspan="3" style="padding-top:8px; padding-bottom:8px;">
+          <strong>TERBILANG:</strong> ${terbilangStr} RUPIAH
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="foot">
+    PEMBAYARAN DILAKUKAN MELALUI<br/>
+    REK BCA<br/>
+    3701158464<br/>
+    A.N ALAN ARIF MUZAQI
+  </div>
+  <div class="signature">
+    PENERIMA<br/><br/><br/>
+    ____________________________
+  </div>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+      win.focus();
+      win.print();
+      // Tandai hanya customer yang dicetak
+      markPrinted([printToko.customer], invoiceNo, totalAmount).catch(err => console.error('markPrinted error', err));
+    }
+    setShowPrintModal(false);
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4 md:p-6">
@@ -863,30 +1785,38 @@ export const TagihanTokoView: React.FC = () => {
 
       {/* Statistics Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-        <div className="bg-gradient-to-br from-orange-900/40 to-orange-800/20 border border-orange-800/30 rounded-xl p-4">
+        <button
+          onClick={() => setFilterTempo('all')}
+          className="bg-gradient-to-br from-orange-900/40 to-orange-800/20 border border-orange-800/30 rounded-xl p-4 text-left hover:border-orange-500 transition"
+        >
           <div className="text-orange-400 text-xs font-medium mb-1">Total Tagihan</div>
           <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.totalTagihan)}</div>
           <div className="text-gray-400 text-xs mt-1">{filteredToko.length} customer</div>
-        </div>
-        <div className="bg-gradient-to-br from-purple-900/40 to-purple-800/20 border border-purple-800/30 rounded-xl p-4">
+        </button>
+        <button
+          onClick={() => setFilterTempo('3 BLN')}
+          className="bg-gradient-to-br from-purple-900/40 to-purple-800/20 border border-purple-800/30 rounded-xl p-4 text-left hover:border-purple-500 transition"
+        >
           <div className="text-purple-400 text-xs font-medium mb-1">Tempo 3 BLN</div>
           <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.tempo3Bln)}</div>
-          <div className="text-gray-400 text-xs mt-1">{filteredToko.filter(t => t.tempo.includes('3')).length} customer</div>
-        </div>
-        <div className="bg-gradient-to-br from-blue-900/40 to-blue-800/20 border border-blue-800/30 rounded-xl p-4">
+          <div className="text-gray-400 text-xs mt-1">{filteredToko.filter(t => t.tempos.some(tp => tp.includes('3'))).length} customer</div>
+        </button>
+        <button
+          onClick={() => setFilterTempo('2 BLN')}
+          className="bg-gradient-to-br from-blue-900/40 to-blue-800/20 border border-blue-800/30 rounded-xl p-4 text-left hover:border-blue-500 transition"
+        >
           <div className="text-blue-400 text-xs font-medium mb-1">Tempo 2 BLN</div>
           <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.tempo2Bln)}</div>
-          <div className="text-gray-400 text-xs mt-1">{filteredToko.filter(t => t.tempo.includes('2')).length} customer</div>
-        </div>
-        <div className="bg-gradient-to-br from-green-900/40 to-green-800/20 border border-green-800/30 rounded-xl p-4">
+          <div className="text-gray-400 text-xs mt-1">{filteredToko.filter(t => t.tempos.some(tp => tp.includes('2'))).length} customer</div>
+        </button>
+        <button
+          onClick={() => setFilterTempo('1 BLN')}
+          className="bg-gradient-to-br from-green-900/40 to-green-800/20 border border-green-800/30 rounded-xl p-4 text-left hover:border-green-500 transition"
+        >
           <div className="text-green-400 text-xs font-medium mb-1">Tempo 1 BLN</div>
           <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.tempo1Bln)}</div>
-          <div className="text-gray-400 text-xs mt-1">{filteredToko.filter(t => t.tempo.includes('1')).length} customer</div>
-        </div>
-        <div className="bg-gradient-to-br from-yellow-900/40 to-yellow-800/20 border border-yellow-800/30 rounded-xl p-4">
-          <div className="text-yellow-400 text-xs font-medium mb-1">Tempo Lainnya</div>
-          <div className="text-xl md:text-2xl font-bold text-white">{formatCompactNumber(stats.tempoLainnya)}</div>
-        </div>
+          <div className="text-gray-400 text-xs mt-1">{filteredToko.filter(t => t.tempos.some(tp => tp.includes('1'))).length} customer</div>
+        </button>
       </div>
 
       {/* Tabs */}
@@ -966,29 +1896,26 @@ export const TagihanTokoView: React.FC = () => {
         </div>
       </div>
 
-      {/* Month Range Filter */}
+      {/* Jatuh Tempo Filter */}
       <div className="flex flex-col md:flex-row gap-3 mb-4 items-center">
         <div className="flex items-center gap-2">
           <Calendar className="w-4 h-4 text-gray-400" />
-          <span className="text-sm text-gray-400">Periode:</span>
+          <span className="text-sm text-gray-400">Jatuh Tempo:</span>
         </div>
         <div className="flex items-center gap-2">
           <input
             type="month"
-            value={filterMonthFrom}
-            onChange={(e) => setFilterMonthFrom(e.target.value)}
-            className="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white focus:border-orange-500 transition-colors"
-          />
-          <span className="text-gray-400">s/d</span>
-          <input
-            type="month"
-            value={filterMonthTo}
-            onChange={(e) => setFilterMonthTo(e.target.value)}
-            className="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white focus:border-orange-500 transition-colors"
+            min="2025-11"
+            value={filterMonth}
+            onChange={(e) => setFilterMonth(e.target.value)}
+            className="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-colors"
           />
         </div>
+        <div className="text-xs text-gray-500 bg-gray-800/50 px-2 py-1 rounded-lg">
+          Info: Tagihan jatuh tempo bulan ini (transaksi + tempo)
+        </div>
 
-        <div className="flex gap-2 ml-auto">
+        <div className="flex gap-2 md:ml-auto">
           <button
             onClick={() => setShowTagihanModal(true)}
             className="flex items-center gap-2 px-4 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-medium transition-colors"
@@ -1016,6 +1943,13 @@ export const TagihanTokoView: React.FC = () => {
           >
             <ImageIcon className="w-4 h-4" />
             <span className="hidden md:inline">Image</span>
+          </button>
+          <button
+            onClick={() => { setShowRenameModal(true); loadCustomerOptions(); }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
+          >
+            <Edit2 className="w-4 h-4" />
+            <span className="hidden md:inline">Ganti Nama</span>
           </button>
         </div>
       </div>
@@ -1048,24 +1982,49 @@ export const TagihanTokoView: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-gray-700">
                 {filteredToko.map((toko) => (
-                  <tr key={`${toko.customer}_${toko.tempo}`} className="hover:bg-gray-700/30 transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="p-1.5 bg-gray-700 rounded-lg">
-                          <Store className="w-4 h-4 text-orange-400" />
-                        </div>
-                        <span className="font-medium text-white">{toko.customer}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                        toko.tempo.includes('3') ? 'bg-purple-900/50 text-purple-300' :
-                        toko.tempo.includes('2') ? 'bg-blue-900/50 text-blue-300' :
-                        'bg-green-900/50 text-green-300'
-                      }`}>
-                        {toko.tempo}
-                      </span>
-                    </td>
+                  <tr key={`${toko.customer}_${toko.tempos.join('-')}`} className="hover:bg-gray-700/30 transition-colors">
+                  <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-gray-700 rounded-lg">
+                      <Store className="w-4 h-4 text-orange-400" />
+                    </div>
+                    <span className="font-medium text-white">{toko.customer}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleStartEditCustomer(toko.customer); }}
+                      className="p-1 hover:bg-gray-700 rounded transition-colors"
+                      title="Edit nama customer"
+                    >
+                      <Edit2 className="w-4 h-4 text-gray-400" />
+                    </button>
+                    {printedInfo.has(toko.customer.toUpperCase()) && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const info = printedInfo.get(toko.customer.toUpperCase())!;
+                          setFlagModal({ customer: toko.customer, info, toko });
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-full bg-green-900/40 text-green-200 border border-green-700/50 hover:bg-green-800/60"
+                        title="Klik untuk melihat detail invoice cetak"
+                      >
+                        <Check className="w-3 h-3" />
+                        Sudah Cetak
+                      </button>
+                    )}
+                  </div>
+                </td>
+              <td className="px-4 py-3">
+                <div className="flex flex-wrap gap-1">
+                  {toko.tempos.map(tp => (
+                    <span key={tp} className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                      tp.includes('3') ? 'bg-purple-900/50 text-purple-300' :
+                      tp.includes('2') ? 'bg-blue-900/50 text-blue-300' :
+                      'bg-green-900/50 text-green-300'
+                    }`}>
+                      {tp}
+                    </span>
+                  ))}
+                </div>
+              </td>
                     <td className="px-4 py-3 text-right">
                       <span className="font-medium text-white">{formatCurrency(toko.totalTagihan + toko.totalTagihanManual)}</span>
                     </td>
@@ -1107,6 +2066,19 @@ export const TagihanTokoView: React.FC = () => {
                         >
                           <DollarSign className="w-4 h-4 text-green-400" />
                         </button>
+                        <button
+                          onClick={() => {
+                            setPrintToko(toko);
+                            setPrintStore(filterStore === 'all' ? 'mjm' : filterStore);
+                            const firstDate = toko.transactions[0]?.created_at?.split('T')[0] || new Date().toISOString().split('T')[0];
+                            setPrintDate(firstDate);
+                            setShowPrintModal(true);
+                          }}
+                          className="p-2 hover:bg-gray-600 rounded-lg transition-colors"
+                          title="Cetak tanda terima"
+                        >
+                          <Printer className="w-4 h-4 text-gray-400" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1138,7 +2110,9 @@ export const TagihanTokoView: React.FC = () => {
               <div className="bg-gray-700/50 rounded-xl p-3">
                 <div className="text-sm text-gray-400">Customer</div>
                 <div className="text-lg font-semibold text-white">{selectedToko.customer}</div>
-                <div className="text-xs text-gray-500 mt-1">Tempo: {selectedToko.tempo}</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Tempo: {selectedToko.tempos.join(', ')}
+                </div>
               </div>
               
               <div className="bg-orange-900/30 border border-orange-800/50 rounded-xl p-3">
@@ -1215,7 +2189,18 @@ export const TagihanTokoView: React.FC = () => {
               <div className="flex items-center gap-2">
                 <History className="w-5 h-5 text-blue-400" />
                 <h3 className="text-lg font-semibold text-white">Riwayat - {selectedToko.customer}</h3>
-                <span className="px-2 py-0.5 bg-gray-700 rounded-full text-xs text-gray-400">{selectedToko.tempo}</span>
+                <div className="flex items-center gap-1">
+                  {customerTempos.map(t => (
+                    <span key={t} className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                      t.includes('3') ? 'bg-purple-900/40 text-purple-200' :
+                      t.includes('2') ? 'bg-blue-900/40 text-blue-200' :
+                      t.includes('1') ? 'bg-green-900/40 text-green-200' :
+                      'bg-gray-700 text-gray-200'
+                    }`}>
+                      {t}
+                    </span>
+                  ))}
+                </div>
               </div>
               <button
                 onClick={() => {
@@ -1304,7 +2289,18 @@ export const TagihanTokoView: React.FC = () => {
                     <tbody className="divide-y divide-gray-700/50">
                       {filteredTransactions.map((t) => (
                         <tr key={t.id} className="hover:bg-gray-700/30">
-                          <td className="px-3 py-2 text-gray-300">{formatDate(t.created_at)}</td>
+                          <td className="px-3 py-2 text-gray-300">
+                            {editingTransaction?.id === t.id ? (
+                              <input
+                                type="date"
+                                value={editTransactionDate}
+                                onChange={(e) => setEditTransactionDate(e.target.value)}
+                                className="px-2 py-1 bg-gray-600 border border-gray-500 rounded text-white"
+                              />
+                            ) : (
+                              formatDate(t.created_at)
+                            )}
+                          </td>
                           <td className="px-3 py-2 text-white">{t.name || t.part_number}</td>
                           <td className="px-3 py-2 text-right text-gray-300">
                             {editingTransaction?.id === t.id ? (
@@ -1604,6 +2600,7 @@ export const TagihanTokoView: React.FC = () => {
                   className="w-full px-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
                 >
                   <option value="">Pilih Tempo</option>
+                  <option value="CASH">CASH</option>
                   <option value="1 BLN">1 BLN</option>
                   <option value="2 BLN">2 BLN</option>
                   <option value="3 BLN">3 BLN</option>
@@ -1611,27 +2608,58 @@ export const TagihanTokoView: React.FC = () => {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Jumlah Tagihan</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">Rp.</span>
-                  <input
-                    type="text"
-                    value={formatCurrencyInput(tagihanAmount)}
-                    onChange={(e) => setTagihanAmount(parseCurrencyInput(e.target.value))}
-                    className="w-full pl-12 pr-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
-                    placeholder="0"
-                  />
+                <div className="flex items-center justify-between mb-2 gap-3">
+                  <label className="block text-sm font-medium text-gray-300">Rincian Tagihan</label>
+                  <button
+                    type="button"
+                    onClick={handleAddTagihanItem}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-orange-600/20 hover:bg-orange-600/30 text-orange-300 rounded-lg border border-orange-500/30 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Tambah Baris
+                  </button>
                 </div>
+                <div className="space-y-2">
+                  {tagihanItems.map((item, index) => (
+                    <div key={item.key} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
+                      <input
+                        type="date"
+                        value={item.tanggal}
+                        onChange={(e) => handleTagihanItemChange(item.key, 'tanggal', e.target.value)}
+                        className="w-full px-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                      />
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">Rp.</span>
+                        <input
+                          type="text"
+                          value={formatCurrencyInput(item.jumlah)}
+                          onChange={(e) => handleTagihanItemChange(item.key, 'jumlah', e.target.value)}
+                          className="w-full pl-12 pr-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                          placeholder={`Tagihan ${index + 1}`}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTagihanItem(item.key)}
+                        className="h-11 px-3 bg-gray-700 hover:bg-red-900/40 border border-gray-600 hover:border-red-500/40 rounded-xl text-gray-300 hover:text-red-300 transition-colors"
+                        aria-label={`Hapus baris tagihan ${index + 1}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-gray-400">
+                  Isi beberapa tanggal dan nominal. Total dihitung otomatis dari semua baris.
+                </p>
               </div>
-              
+
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Tanggal</label>
-                <input
-                  type="date"
-                  value={tagihanDate}
-                  onChange={(e) => setTagihanDate(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
-                />
+                <label className="block text-sm font-medium text-gray-300 mb-1">Total Tagihan</label>
+                <div className="px-4 py-3 bg-orange-900/20 border border-orange-800/40 rounded-xl flex items-center justify-between gap-3">
+                  <span className="text-sm text-orange-300">Total {tagihanItems.length} baris</span>
+                  <span className="text-lg font-semibold text-white">{formatCurrency(totalTagihanDraft)}</span>
+                </div>
               </div>
               
               <div>
@@ -1659,6 +2687,264 @@ export const TagihanTokoView: React.FC = () => {
               >
                 <Check className="w-4 h-4" />
                 Simpan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Print Receipt Modal */}
+      {showPrintModal && printToko && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-800 rounded-2xl w-full max-w-md shadow-2xl border border-gray-700">
+            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+              <div className="flex items-center gap-2">
+                <Printer className="w-5 h-5 text-gray-300" />
+                <h3 className="text-lg font-semibold text-white">Cetak Tanda Terima</h3>
+              </div>
+              <button
+                onClick={() => setShowPrintModal(false)}
+                className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <div className="text-sm text-gray-300">
+                Customer: <span className="font-semibold text-white">{printToko.customer}</span>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Tagih sebagai</label>
+                <div className="flex gap-3">
+                  <label className="flex items-center gap-2 text-gray-200 text-sm">
+                    <input
+                      type="radio"
+                      checked={printStore === 'mjm'}
+                      onChange={() => setPrintStore('mjm')}
+                    />
+                    MJM (logo MJM)
+                  </label>
+                  <label className="flex items-center gap-2 text-gray-200 text-sm">
+                    <input
+                      type="radio"
+                      checked={printStore === 'bjw'}
+                      onChange={() => setPrintStore('bjw')}
+                    />
+                    BJW (logo BJW)
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Tanggal transaksi</label>
+                <div className="bg-gray-700 border border-gray-600 rounded-xl p-3 text-sm text-gray-200 max-h-48 overflow-y-auto">
+                  {printDatesForSelected.length === 0 ? (
+                    <div>{formatDate(new Date().toISOString().split('T')[0])} ({formatCurrency(printToko.sisaTagihan)})</div>
+                  ) : (
+                    printDatesForSelected.map(d => (
+                      <div key={d.date} className="flex justify-between gap-2 py-1 border-b border-gray-600/50 last:border-b-0">
+                        <span>{formatDate(d.date)}{d.tempos.length ? ` (${d.tempos.join(' / ')})` : ''}</span>
+                        <span className="text-gray-100">{formatCurrency(d.amount)}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Semua transaksi di atas akan dicetak.</p>
+              </div>
+            </div>
+
+            <div className="flex gap-2 p-4 border-t border-gray-700">
+              <button
+                onClick={() => setShowPrintModal(false)}
+                className="flex-1 px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handlePrintReceipt}
+                className="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                <Check className="w-4 h-4" />
+                Cetak
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Customer Name Modal */}
+      {editingCustomerName && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-800 rounded-2xl w-full max-w-md shadow-2xl border border-gray-700">
+            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+              <div className="flex items-center gap-2 text-white font-semibold">
+                <Edit2 className="w-5 h-5 text-orange-400" />
+                <span>Edit Nama Customer</span>
+              </div>
+              <button
+                onClick={() => setEditingCustomerName(null)}
+                className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <div className="text-xs text-gray-400 mb-1">Nama Lama</div>
+                <div className="px-3 py-2 rounded-lg bg-gray-900 text-gray-200 border border-gray-700 font-semibold">
+                  {editingCustomerName.oldName}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Nama Baru</label>
+                <input
+                  type="text"
+                  value={editingCustomerName.newName}
+                  onChange={(e) => setEditingCustomerName(prev => prev ? { ...prev, newName: e.target.value.toUpperCase() } : null)}
+                  className="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  placeholder="Masukkan nama customer baru"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 p-4 border-t border-gray-700">
+              <button
+                onClick={() => setEditingCustomerName(null)}
+                className="flex-1 px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleSaveCustomerName}
+                disabled={savingCustomerName}
+                className={`flex-1 px-4 py-2.5 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 ${
+                  savingCustomerName ? 'bg-orange-700 cursor-wait' : 'bg-orange-600 hover:bg-orange-700'
+                }`}
+              >
+                {savingCustomerName ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Menyimpan...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    Simpan
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Flag Detail Modal */}
+      {flagModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-800 rounded-2xl w-full max-w-md shadow-2xl border border-gray-700">
+            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+              <div className="flex items-center gap-2 text-white font-semibold">Invoice Cetak</div>
+              <button
+                onClick={() => setFlagModal(null)}
+                className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="p-4 space-y-3 text-sm text-gray-200">
+              <div><span className="text-gray-400">Customer:</span> <span className="font-semibold">{flagModal.customer}</span></div>
+              <div><span className="text-gray-400">Invoice No:</span> <span className="font-semibold">{flagModal.info.invoice_no}</span></div>
+              <div><span className="text-gray-400">Printed At:</span> {formatDate(flagModal.info.printed_at)}</div>
+              {flagModal.toko && (
+                <>
+                  <div><span className="text-gray-400">Tempo:</span> {flagModal.toko.tempos.join(', ')}</div>
+                  <div><span className="text-gray-400">Total Tagihan:</span> {formatCurrency(flagModal.toko.totalTagihan + flagModal.toko.totalTagihanManual)}</div>
+                  <div><span className="text-gray-400">Sisa:</span> {formatCurrency(flagModal.toko.sisaTagihan)}</div>
+                </>
+              )}
+            </div>
+            <div className="p-4 border-t border-gray-700 text-right">
+              <button
+                onClick={() => setFlagModal(null)}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Customer Modal (global) */}
+      {showRenameModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-800 rounded-2xl w-full max-w-md shadow-2xl border border-gray-700">
+            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+              <div className="flex items-center gap-2 text-white font-semibold">
+                <Edit2 className="w-5 h-5 text-orange-400" />
+                <span>Ganti Nama Customer</span>
+              </div>
+              <button
+                onClick={() => setShowRenameModal(false)}
+                className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Nama Lama</label>
+                <input
+                  list="customer-options"
+                  value={renameOld}
+                  onChange={(e) => setRenameOld(e.target.value.toUpperCase())}
+                  className="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  placeholder="Contoh: BOS RONI"
+                />
+                <datalist id="customer-options">
+                  {customerOptions.map(c => <option key={c} value={c} />)}
+                </datalist>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Nama Baru</label>
+                <input
+                  type="text"
+                  value={renameNew}
+                  onChange={(e) => setRenameNew(e.target.value.toUpperCase())}
+                  className="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  placeholder="Contoh: BOS RONI MGK"
+                />
+              </div>
+              <div className="text-xs text-gray-500 bg-gray-800/60 px-3 py-2 rounded-lg border border-gray-700">
+                Sistem akan mengganti semua kemunculan nama lama di tabel barang_keluar (MJM/BJW), pembayaran, tagihan manual, dan inv_tagihan.
+              </div>
+            </div>
+            <div className="flex gap-2 p-4 border-t border-gray-700">
+              <button
+                onClick={() => setShowRenameModal(false)}
+                className="flex-1 px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-medium transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleBulkRename}
+                disabled={savingCustomerName}
+                className={`flex-1 px-4 py-2.5 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 ${
+                  savingCustomerName ? 'bg-orange-700 cursor-wait' : 'bg-orange-600 hover:bg-orange-700'
+                }`}
+              >
+                {savingCustomerName || loadingCustomers ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Memproses...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    Simpan
+                  </>
+                )}
               </button>
             </div>
           </div>

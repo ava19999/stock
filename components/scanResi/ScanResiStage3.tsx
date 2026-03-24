@@ -1132,7 +1132,7 @@ const SkippedItemsModal = ({
 };
 
 export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
-  const { selectedStore } = useStore();
+  const { selectedStore, userName: loginUserName } = useStore();
   const [rows, setRows] = useState<Stage3Row[]>([]);
   const rowsRef = useRef<Stage3Row[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1199,6 +1199,16 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const [isProcessingUpload, setIsProcessingUpload] = useState(false);
   const [processLogs, setProcessLogs] = useState<ProcessLog[]>([]);
 
+  // Helper untuk status-stage dan validasi harga
+  const isStage1or2Pending = (row: Stage3Row) => row.status_message === 'Belum Scan S1' || row.status_message === 'Pending S2';
+  const isHargaKosong = (row: Stage3Row) => (row.qty_keluar || 0) > 0 && (row.harga_total || 0) <= 0;
+  const isRowReadyToProcess = (row: Stage3Row) => {
+    const hasPartNumber = Boolean(row.part_number && row.part_number.trim() !== '');
+    const normalValid = row.is_db_verified && row.is_stock_valid && hasPartNumber;
+    const doubleOverridden = row.status_message === 'Double' && row.force_override_double && row.is_stock_valid && hasPartNumber;
+    return normalValid || doubleOverridden;
+  };
+
   // REALTIME COLLABORATION STATE
   const [activeUsers, setActiveUsers] = useState<{userId: string, userName: string, color: string}[]>([]);
   const [editingCells, setEditingCells] = useState<Record<string, {userId: string, userName: string, color: string}>>({});
@@ -1212,6 +1222,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const [userCursors, setUserCursors] = useState<Record<string, {x: number, y: number, userName: string, color: string}>>({});
   const presenceChannelRef = useRef<RealtimeChannel | null>(null);
   const resiItemsChannelRef = useRef<RealtimeChannel | null>(null);
+  const scanResiChannelRef = useRef<RealtimeChannel | null>(null);
   const broadcastChannelRef = useRef<RealtimeChannel | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -1225,9 +1236,26 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     return userColors[hash % userColors.length];
   }, []);
   
-  // Generate unique user ID (persistent per session)
+  // Generate unique user ID (persistent per session) & use login name if available
   const userIdRef = useRef<string>(Math.random().toString(36).substring(2, 15));
-  const userNameRef = useRef<string>(`User-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
+  const userNameRef = useRef<string>(loginUserName?.trim() || `User-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
+  useEffect(() => {
+    if (loginUserName && loginUserName.trim()) {
+      userNameRef.current = loginUserName.trim();
+      // refresh presence with updated name
+      if (presenceChannelRef.current) {
+        presenceChannelRef.current.track({
+          online_at: new Date().toISOString(),
+          userId: userIdRef.current,
+          userName: userNameRef.current,
+          color: getUserColor(userIdRef.current),
+          editingCell: null,
+          cursorX: 0,
+          cursorY: 0
+        });
+      }
+    }
+  }, [loginUserName, getUserColor]);
   
   // Throttle untuk cursor update (hanya kirim setiap 50ms)
   const lastCursorUpdate = useRef<number>(0);
@@ -1269,6 +1297,103 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   useEffect(() => {
     rowsRef.current = rows;
   }, [rows]);
+
+  // Auto-sync: jika Stage 2 diverifikasi oleh user lain, ubah Pending S2 -> status lanjutan.
+  const syncPendingS2Rows = useCallback(async () => {
+    const currentRows = rowsRef.current;
+    const pendingRows = currentRows.filter(r => r.status_message === 'Pending S2');
+    if (pendingRows.length === 0) return;
+
+    const allResiOrOrders = [...new Set(
+      pendingRows
+        .flatMap(r => [String(r.resi || '').trim(), String(r.no_pesanan || '').trim()])
+        .filter(Boolean)
+    )];
+    if (allResiOrOrders.length === 0) return;
+
+    try {
+      const dbStatus = await checkResiOrOrderStatus(allResiOrOrders, selectedStore);
+      if (!dbStatus || dbStatus.length === 0) return;
+
+      const statusMapByResi = new Map<string, any>();
+      const statusMapByOrder = new Map<string, any>();
+      dbStatus.forEach((d: any) => {
+        if (d.resi) statusMapByResi.set(String(d.resi).trim().toUpperCase(), d);
+        if (d.no_pesanan) statusMapByOrder.set(String(d.no_pesanan).trim().toUpperCase(), d);
+      });
+
+      const stage2VerifiedSet = new Set<string>();
+
+      setRows(prevRows => prevRows.map(row => {
+        if (row.status_message !== 'Pending S2') return row;
+
+        const resiUpper = String(row.resi || '').trim().toUpperCase();
+        const orderUpper = String(row.no_pesanan || '').trim().toUpperCase();
+        const dbRow = statusMapByResi.get(resiUpper) || statusMapByOrder.get(orderUpper);
+        if (!dbRow) return row;
+
+        const isS2Verified = dbRow.stage2_verified === true ||
+          dbRow.stage2_verified === 'true' ||
+          String(dbRow.stage2_verified).toLowerCase() === 'true';
+        if (!isS2Verified) return row;
+
+        // Tandai untuk update badge dropdown Stage 1.
+        if (dbRow.resi) stage2VerifiedSet.add(String(dbRow.resi).trim().toUpperCase());
+        if (dbRow.no_pesanan) stage2VerifiedSet.add(String(dbRow.no_pesanan).trim().toUpperCase());
+        if (resiUpper) stage2VerifiedSet.add(resiUpper);
+        if (orderUpper) stage2VerifiedSet.add(orderUpper);
+
+        const hasPartNumber = Boolean(String(row.part_number || '').trim());
+        const hargaKosong = (row.qty_keluar || 0) > 0 && (row.harga_total || 0) <= 0;
+        const stockValid = (row.qty_keluar || 0) > 0 ? (row.stock_saat_ini || 0) >= row.qty_keluar : true;
+        const hasBaseName = Boolean(String(row.nama_barang_base || '').trim());
+
+        let statusMsg = 'Butuh Input';
+        let isDbVerified = false;
+        let isStockValid = stockValid;
+
+        if (hasPartNumber) {
+          if (hargaKosong) {
+            statusMsg = 'Harga Kosong';
+            isDbVerified = false;
+            isStockValid = false;
+          } else if (!hasBaseName) {
+            statusMsg = 'Base Kosong';
+            isDbVerified = false;
+            isStockValid = stockValid;
+          } else if (!stockValid) {
+            statusMsg = 'Stok Kurang';
+            isDbVerified = false;
+            isStockValid = false;
+          } else {
+            statusMsg = 'Ready';
+            isDbVerified = true;
+            isStockValid = true;
+          }
+        }
+
+        return {
+          ...row,
+          status_message: statusMsg,
+          is_db_verified: isDbVerified,
+          is_stock_valid: isStockValid
+        };
+      }));
+
+      if (stage2VerifiedSet.size > 0) {
+        setStage1ResiList(prev => prev.map(item => {
+          const resiUpper = String(item.resi || '').trim().toUpperCase();
+          const orderUpper = String(item.no_pesanan || '').trim().toUpperCase();
+          if (stage2VerifiedSet.has(resiUpper) || stage2VerifiedSet.has(orderUpper)) {
+            return { ...item, stage2_verified: true };
+          }
+          return item;
+        }));
+      }
+    } catch (err) {
+      console.error('[Stage3] syncPendingS2Rows error:', err);
+    }
+  }, [selectedStore]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -1331,6 +1456,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   // REALTIME SUBSCRIPTION untuk kolaborasi multi-user
   useEffect(() => {
     const tableName = selectedStore === 'bjw' ? 'resi_items_bjw' : 'resi_items_mjm';
+    const scanTableName = selectedStore === 'bjw' ? 'scan_resi_bjw' : 'scan_resi_mjm';
     const userId = userIdRef.current;
     const userName = userNameRef.current;
     const userColor = getUserColor(userId);
@@ -1365,6 +1491,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           setRows(prevRows => 
             prevRows.map(row => {
               if (row.id !== rowId && row.id !== legacyRowId) return row;
+              // Jangan timpa baris yang sedang difokuskan user ini (hindari kehilangan input)
+              const focusedRowId = focusedCell && rowsRef.current[focusedCell.rowIndex]?.id;
+              if (focusedRowId && (focusedRowId === rowId || focusedRowId === legacyRowId)) {
+                return row;
+              }
               return { 
                 ...row, 
                 part_number: newData.part_number ?? row.part_number,
@@ -1386,15 +1517,49 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 setRows(prevRows => 
                   prevRows.map(row => {
                     if (row.id !== rowId && row.id !== legacyRowId) return row;
+                    const keepPending = isStage1or2Pending(row);
+                    const qtyNow = newData.qty ?? row.qty_keluar;
+                    const hargaTotalNow = newData.harga_total ?? row.harga_total;
+                    const hargaKosong = (qtyNow || 0) > 0 && (hargaTotalNow || 0) <= 0;
+                    const stockValidNow = (partInfo.quantity || 0) >= qtyNow;
+                    let status_message = row.status_message;
+                    let is_db_verified = row.is_db_verified;
+                    let is_stock_valid = row.is_stock_valid;
+
+                    if (keepPending) {
+                      // Jangan ubah status Ready; tetap Pending S2/Belum Scan S1
+                      status_message = row.status_message;
+                      is_db_verified = false;
+                      is_stock_valid = stockValidNow;
+                    } else if (hargaKosong) {
+                      status_message = 'Harga Kosong';
+                      is_db_verified = false;
+                      is_stock_valid = false;
+                    } else if (!partInfo.name) {
+                      status_message = 'Base Kosong';
+                      is_db_verified = false;
+                      is_stock_valid = stockValidNow;
+                    } else if (!stockValidNow) {
+                      status_message = 'Stok Kurang';
+                      is_db_verified = false;
+                      is_stock_valid = false;
+                    } else {
+                      status_message = 'Ready';
+                      is_db_verified = true;
+                      is_stock_valid = true;
+                    }
                     return {
                       ...row,
+                      qty_keluar: qtyNow,
+                      harga_total: hargaTotalNow,
+                      harga_satuan: qtyNow > 0 ? (hargaTotalNow || 0) / qtyNow : row.harga_satuan,
                       nama_barang_base: partInfo.name || '',
                       brand: partInfo.brand || '',
                       application: partInfo.application || '',
                       stock_saat_ini: partInfo.quantity || 0,
-                      is_db_verified: true,
-                      is_stock_valid: (partInfo.quantity || 0) >= row.qty_keluar,
-                      status_message: (partInfo.quantity || 0) >= row.qty_keluar ? 'Ready' : 'Stok Kurang',
+                      is_db_verified,
+                      is_stock_valid,
+                      status_message,
                     };
                   })
                 );
@@ -1431,29 +1596,34 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             }
             
             // Buat row baru dari data yang diterima
-            const newRow: Stage3Row = {
-              id: newRowId,
-              tanggal: newData.tanggal || new Date().toISOString().split('T')[0],
-              resi: newData.resi || '',
-              ecommerce: newData.ecommerce || '-',
-              sub_toko: newData.toko || (selectedStore === 'bjw' ? 'BJW' : 'MJM'),
-              part_number: newData.part_number || '',
-              nama_barang_csv: newData.nama_barang || '',
-              nama_barang_base: '',
-              brand: '',
-              application: '',
-              stock_saat_ini: 0,
-              qty_keluar: newData.qty || 0,
-              harga_total: newData.harga_total || 0,
-              harga_satuan: newData.harga_satuan || 0,
-              mata_uang: 'IDR',
-              no_pesanan: newData.order_id || '',
-              customer: newData.customer || '',
-              is_db_verified: false,
-              is_stock_valid: true,
-              status_message: 'Baru',
-              force_override_double: false
-            };
+        const newRow: Stage3Row = {
+          id: newRowId,
+          tanggal: newData.tanggal || new Date().toISOString().split('T')[0],
+          resi: newData.resi || '',
+          ecommerce: newData.ecommerce || '-',
+          sub_toko: newData.toko || (selectedStore === 'bjw' ? 'BJW' : 'MJM'),
+          part_number: newData.part_number || '',
+          nama_barang_csv: newData.nama_barang || '',
+          nama_barang_base: '',
+          brand: '',
+          application: '',
+          stock_saat_ini: 0,
+          qty_keluar: newData.qty || 0,
+          harga_total: newData.harga_total || 0,
+          harga_satuan: newData.harga_satuan || 0,
+          mata_uang: 'IDR',
+          no_pesanan: newData.order_id || '',
+          customer: newData.customer || '',
+          is_db_verified: false,
+          is_stock_valid: true,
+          status_message: 'Baru',
+          force_override_double: false
+        };
+        const hargaKosongNew = (newRow.qty_keluar || 0) > 0 && (newRow.harga_total || 0) <= 0;
+        if (hargaKosongNew) {
+          newRow.status_message = 'Harga Kosong';
+          newRow.is_stock_valid = false;
+        }
             
             // Cari row lokal yang ekuivalen (apapun prefix id-nya, bukan hanya s1-)
             const matchingIdx = prevRows.findIndex(row => {
@@ -1471,10 +1641,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
             if (matchingIdx >= 0) {
               const nextRows = [...prevRows];
+              const keepPending = isStage1or2Pending(nextRows[matchingIdx]);
               nextRows[matchingIdx] = {
                 ...nextRows[matchingIdx],
                 ...newRow,
-                id: newRowId
+                id: newRowId,
+                status_message: keepPending ? nextRows[matchingIdx].status_message : newRow.status_message,
+                is_db_verified: keepPending ? false : newRow.is_db_verified,
+                is_stock_valid: keepPending ? nextRows[matchingIdx].is_stock_valid : newRow.is_stock_valid
               };
               console.log('[Realtime] INSERT merged into existing local row:', newRowId);
               return nextRows;
@@ -1492,15 +1666,48 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 setRows(prevRows => 
                   prevRows.map(row => {
                     if (row.id !== newRowId) return row;
+                    const keepPending = isStage1or2Pending(row);
+                    const qtyNow = newData.qty ?? row.qty_keluar;
+                    const hargaTotalNow = newData.harga_total ?? row.harga_total;
+                    const hargaKosong = (qtyNow || 0) > 0 && (hargaTotalNow || 0) <= 0;
+                    const stockValidNow = (partInfo.quantity || 0) >= qtyNow;
+                    let status_message = row.status_message;
+                    let is_db_verified = row.is_db_verified;
+                    let is_stock_valid = row.is_stock_valid;
+
+                    if (keepPending) {
+                      status_message = row.status_message;
+                      is_db_verified = false;
+                      is_stock_valid = stockValidNow;
+                    } else if (hargaKosong) {
+                      status_message = 'Harga Kosong';
+                      is_db_verified = false;
+                      is_stock_valid = false;
+                    } else if (!partInfo.name) {
+                      status_message = 'Base Kosong';
+                      is_db_verified = false;
+                      is_stock_valid = stockValidNow;
+                    } else if (!stockValidNow) {
+                      status_message = 'Stok Kurang';
+                      is_db_verified = false;
+                      is_stock_valid = false;
+                    } else {
+                      status_message = 'Ready';
+                      is_db_verified = true;
+                      is_stock_valid = true;
+                    }
                     return {
                       ...row,
+                      qty_keluar: qtyNow,
+                      harga_total: hargaTotalNow,
+                      harga_satuan: qtyNow > 0 ? (hargaTotalNow || 0) / qtyNow : row.harga_satuan,
                       nama_barang_base: partInfo.name || '',
                       brand: partInfo.brand || '',
                       application: partInfo.application || '',
                       stock_saat_ini: partInfo.quantity || 0,
-                      is_db_verified: true,
-                      is_stock_valid: (partInfo.quantity || 0) >= row.qty_keluar,
-                      status_message: (partInfo.quantity || 0) >= row.qty_keluar ? 'Ready' : 'Stok Kurang',
+                      is_db_verified,
+                      is_stock_valid,
+                      status_message,
                     };
                   })
                 );
@@ -1528,6 +1735,36 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       )
       .subscribe((status) => {
         console.log(`[Realtime] ${tableName} subscription status:`, status);
+      });
+
+    // Channel scan_resi: saat Stage 2 diverifikasi, update otomatis status baris Pending S2.
+    scanResiChannelRef.current = supabase
+      .channel(`${scanTableName}-stage3-sync`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: scanTableName
+        },
+        async (payload) => {
+          const nextData = payload.new as any;
+          const prevData = payload.old as any;
+          const nextVerified = nextData?.stage2_verified === true ||
+            nextData?.stage2_verified === 'true' ||
+            String(nextData?.stage2_verified).toLowerCase() === 'true';
+          const prevVerified = prevData?.stage2_verified === true ||
+            prevData?.stage2_verified === 'true' ||
+            String(prevData?.stage2_verified).toLowerCase() === 'true';
+
+          // Hanya sync saat transisi false -> true untuk mengurangi query.
+          if (nextVerified && !prevVerified) {
+            await syncPendingS2Rows();
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log(`[Realtime] ${scanTableName} subscription status:`, status);
       });
 
     // Channel untuk INSTANT broadcast perubahan data (tanpa menunggu database)
@@ -1587,9 +1824,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         const users: {userId: string, userName: string, color: string}[] = [];
         const cells: Record<string, {userId: string, userName: string, color: string}> = {};
         
-        Object.entries(state).forEach(([oderId, presences]) => {
+        Object.entries(state).forEach(([_, presences]) => {
           const presence = (presences as any[])[0];
-          if (presence && presence.oderId !== oderId) {
+          if (presence && presence.userId !== userId) {
             users.push({
               userId: presence.userId,
               userName: presence.userName,
@@ -1610,7 +1847,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         
         // Update cursor positions
         const cursors: Record<string, {x: number, y: number, userName: string, color: string}> = {};
-        Object.entries(state).forEach(([oderId, presences]) => {
+        Object.entries(state).forEach(([_, presences]) => {
           const presence = (presences as any[])[0];
           if (presence && presence.userId !== userId && presence.cursorX !== undefined && presence.cursorY !== undefined) {
             cursors[presence.userId] = {
@@ -1676,8 +1913,20 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       if (broadcastChannelRef.current) {
         supabase.removeChannel(broadcastChannelRef.current);
       }
+      if (scanResiChannelRef.current) {
+        supabase.removeChannel(scanResiChannelRef.current);
+      }
     };
-  }, [selectedStore, getUserColor, flashCell]);
+  }, [selectedStore, getUserColor, flashCell, syncPendingS2Rows]);
+
+  // Polling fallback kalau event realtime terlewat (network unstable).
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      void syncPendingS2Rows();
+    }, 7000);
+
+    return () => clearInterval(intervalId);
+  }, [syncPendingS2Rows]);
 
   // Function untuk broadcast cell yang sedang diedit
   const broadcastEditingCell = useCallback(async (cellKey: string | null) => {
@@ -1803,9 +2052,16 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
            // Tidak perlu set ke 0 meskipun part_number kosong
            const rawQty = Number(item.jumlah || item.quantity || 0);
            const qty = rawQty; // Gunakan qty asli dari CSV/database
-           const stockValid = (qty > 0 && item.part_number) ? stock >= qty : true; // Hanya cek stok jika ada part_number
+           let stockValid = (qty > 0 && item.part_number) ? stock >= qty : true; // Hanya cek stok jika ada part_number
+           const priceZero = qty > 0 && Number(item.total_harga_produk || 0) <= 0;
            
            // CHECK 3: Part number belum diisi - CEK INI DULU sebelum stok
+           if (verified && priceZero) {
+               statusMsg = 'Harga Kosong';
+               verified = false;
+               stockValid = false;
+           }
+           
            if (verified && !item.part_number) {
                statusMsg = 'Butuh Input';
                verified = false;
@@ -2019,7 +2275,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             ecommerce: row.ecommerce,
             toko: row.sub_toko
          };
-         await updateResiItem(selectedStore, dbId, payload);
+         const res = await updateResiItem(selectedStore, dbId, payload);
+         if (!res.success) {
+           alert(res.message || 'Gagal update data (Toko/E-Comm).');
+           throw new Error(res.message || 'Gagal update resi item');
+         }
       } 
       else {
          const payload = {
@@ -2066,60 +2326,16 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
   }, [selectedStore]);
 
-  const flushPendingUpdates = useCallback(async (reason: string = 'manual') => {
-    if (isFlushingPendingRef.current) return;
-    if (pendingUpdates.current.size === 0) return;
+  const flushPendingUpdates = useCallback(async (_reason: string = 'manual') => {
+    // Autosave dimatikan; tidak ada yang perlu diflush.
+    pendingUpdates.current.clear();
+    autoSaveTimers.current.forEach(timer => clearTimeout(timer));
+    autoSaveTimers.current.clear();
+  }, []);
 
-    isFlushingPendingRef.current = true;
-    try {
-      // Stop all debounce timers, then flush latest pending snapshots.
-      autoSaveTimers.current.forEach(timer => clearTimeout(timer));
-      autoSaveTimers.current.clear();
-
-      const pendingRows = Array.from(pendingUpdates.current.values());
-      const uniqueRows = Array.from(
-        new Map(pendingRows.map(row => [row.id, row])).values()
-      );
-
-      for (const row of uniqueRows) {
-        await handleSaveRow(row);
-      }
-
-      pendingUpdates.current.clear();
-      console.log(`[AutoSave] Flushed ${uniqueRows.length} pending row(s) (${reason})`);
-    } catch (error) {
-      console.error(`[AutoSave] Failed to flush pending updates (${reason}):`, error);
-    } finally {
-      isFlushingPendingRef.current = false;
-    }
-  }, [handleSaveRow]);
-
-  // Flush pending edits when page/tab state changes or component unmounts.
+  // Autosave dimatikan: tidak perlu flush saat tab berubah/keluar
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        void flushPendingUpdates('visibilitychange');
-      }
-    };
-
-    const handlePageHide = () => {
-      void flushPendingUpdates('pagehide');
-    };
-
-    const handleBeforeUnload = () => {
-      if (pendingUpdates.current.size > 0) {
-        void flushPendingUpdates('beforeunload');
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('pagehide', handlePageHide);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('pagehide', handlePageHide);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
       void flushPendingUpdates('unmount');
     };
   }, [flushPendingUpdates]);
@@ -2761,30 +2977,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     return '';
   };
 
-  // Auto-save function with debounce
-  const autoSaveRow = (updatedRow: Stage3Row) => {
-    // Cancel previous timer for this row
-    const existingTimer = autoSaveTimers.current.get(updatedRow.id);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-    }
-    
-    // Store the updated row in pending updates
-    pendingUpdates.current.set(updatedRow.id, updatedRow);
-    
-    // Set new timer for faster autosave.
-    const timer = setTimeout(async () => {
-      const rowToSave = pendingUpdates.current.get(updatedRow.id);
-      if (rowToSave) {
-        await handleSaveRow(rowToSave);
-        pendingUpdates.current.delete(updatedRow.id);
-        autoSaveTimers.current.delete(updatedRow.id);
-      }
-    }, 600);
-    
-    autoSaveTimers.current.set(updatedRow.id, timer);
-  };
-
   const updateRow = (id: string, field: keyof Stage3Row, value: any) => {
     const editableFields: Array<keyof Stage3Row> = [
       'part_number',
@@ -2817,18 +3009,28 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
 
     // Update status_message secara real-time berdasarkan kondisi saat ini
-    if (field === 'part_number' || field === 'qty_keluar') {
-      // Recalculate status
-      if (!updatedRow.is_db_verified) {
-        // Masih belum verifikasi Stage 1/2
-        if (updatedRow.status_message === 'Belum Scan S1' || updatedRow.status_message === 'Pending S2') {
-          // Keep status as is
-        }
+    const shouldRecalcStatus = ['part_number', 'qty_keluar', 'harga_total', 'harga_satuan'].includes(field as string);
+    if (shouldRecalcStatus) {
+      const stagePending = isStage1or2Pending(updatedRow);
+      const hargaKosong = isHargaKosong(updatedRow);
+      
+      if (stagePending) {
+        // Biarkan tetap pending Stage 1/2
+      } else if (hargaKosong) {
+        updatedRow.status_message = 'Harga Kosong';
+        updatedRow.is_db_verified = false;
+        updatedRow.is_stock_valid = false;
       } else if (!updatedRow.part_number) {
         updatedRow.status_message = 'Butuh Input';
         updatedRow.is_db_verified = false;
+        updatedRow.is_stock_valid = false;
+      } else if (updatedRow.status_message === 'Double' && !updatedRow.force_override_double) {
+        // Tetap double sampai user override
+        updatedRow.is_db_verified = false;
       } else if (updatedRow.stock_saat_ini < updatedRow.qty_keluar && updatedRow.qty_keluar > 0) {
         updatedRow.status_message = 'Stok Kurang';
+        updatedRow.is_stock_valid = false;
+      } else if (updatedRow.status_message === 'Stok Total Kurang') {
         updatedRow.is_stock_valid = false;
       } else if (!updatedRow.nama_barang_base && updatedRow.part_number) {
         updatedRow.status_message = 'Base Kosong';
@@ -2851,13 +3053,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       // INSTANT: Broadcast perubahan ke user lain (tanpa menunggu database)
       broadcastDataChange(id, field, value);
       
-      // Broadcast editing status
+      // Broadcast editing status (hanya indikasi, tidak auto-save)
       broadcastEditingCell(`${id}-${field}`);
-
-      // Schedule debounced autosave immediately from the updated snapshot.
-      autoSaveRow(updatedRow);
-
-      // Clear editing status after save
       setTimeout(() => broadcastEditingCell(null), 500);
     }
   };
@@ -3014,10 +3211,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         return newRows;
       });
       
-      if (rowToSave) {
-        // Pakai jalur autosave debounce supaya tidak double insert
-        autoSaveRow(rowToSave);
-      }
+      // Tidak auto-simpan; simpan manual lewat tombol
       return;
     }
     
@@ -3029,6 +3223,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             const stock = info?.quantity || 0;
             const qty = r.qty_keluar || 1;
             const stockValid = stock >= qty;
+            const hargaKosong = isHargaKosong(r);
             
             // Tentukan status berdasarkan kondisi
             // PERBAIKAN: Selalu update status jika bukan "Belum Scan S1" atau "Pending S2"
@@ -3037,7 +3232,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             
             if (!isStage1or2Pending) {
               // Part number sudah diinput, update status berdasarkan validasi
-              if (!info?.name) {
+              if (hargaKosong) {
+                newStatus = 'Harga Kosong';
+              } else if (!info?.name) {
                 newStatus = 'Base Kosong'; // Part number tidak ditemukan di database
               } else if (!stockValid) {
                 newStatus = 'Stok Kurang';
@@ -3051,8 +3248,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 brand: info?.brand || '-',
                 application: info?.application || '-',
                 stock_saat_ini: stock,
-                is_stock_valid: stockValid,
-                is_db_verified: !isStage1or2Pending && info?.name ? true : r.is_db_verified,
+                is_stock_valid: hargaKosong ? false : stockValid,
+                is_db_verified: !isStage1or2Pending && info?.name && !hargaKosong ? true : r.is_db_verified,
                 nama_barang_base: info?.name || '',
                 status_message: newStatus
             };
@@ -3062,28 +3259,18 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         return newRows;
     });
 
-    if (rowToSave) {
-      // Hindari double insert: cukup jadwalkan autosave (akan merge dengan pending timer sebelumnya)
-      autoSaveRow(rowToSave);
-    }
+    // Tidak auto-simpan; simpan manual lewat tombol
   };
 
-  const handleProcess = async () => {
-    // FITUR 1: Item Double dengan force_override_double = true tetap bisa diproses
-    const validRows = rows.filter(r => {
-      // Kondisi normal: verified, stock valid, dan ada part_number
-      const normalValid = r.is_db_verified && r.is_stock_valid && r.part_number;
-      
-      // ATAU: Status Double tapi user sudah force override
-      const doubleOverridden = r.status_message === 'Double' && r.force_override_double && r.is_stock_valid && r.part_number;
-      
-      return normalValid || doubleOverridden;
-    });
-    if (validRows.length === 0) { alert("Tidak ada item siap proses (Pastikan Status Hijau atau centang Override untuk Double)."); return; }
-    if (!confirm(`Proses ${validRows.length} item ke Barang Keluar?`)) return;
-    
-    // PROCESSING MODAL: Initialize
-    const initialItems: ProcessingItem[] = validRows.map(r => ({
+  const PROCESS_CONCURRENCY = 4;
+
+  const processRowsToBarangKeluar = async (
+    targetRows: Stage3Row[],
+    options?: { clearSelection?: boolean }
+  ) => {
+    if (targetRows.length === 0) return;
+
+    const initialItems: ProcessingItem[] = targetRows.map(r => ({
       id: r.id,
       resi: r.resi,
       part_number: r.part_number,
@@ -3092,7 +3279,16 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       customer: r.customer || '',
       status: 'pending' as const
     }));
-    
+
+    const itemIndexMap = new Map(initialItems.map((item, idx) => [item.id, idx]));
+    const itemSnapshot = [...initialItems];
+    const updateItemStatus = (rowId: string, patch: Partial<ProcessingItem>) => {
+      const idx = itemIndexMap.get(rowId);
+      if (idx === undefined) return;
+      itemSnapshot[idx] = { ...itemSnapshot[idx], ...patch };
+      setProcessingItems([...itemSnapshot]);
+    };
+
     setProcessingItems(initialItems);
     setProcessingProgress(0);
     setProcessingCurrentItem('');
@@ -3101,85 +3297,150 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     setProcessingErrorCount(0);
     setShowProcessingModal(true);
     setLoading(true);
-    
+
     let successCount = 0;
     let errorCount = 0;
-    
-    // Process one by one untuk visual feedback
-    for (let i = 0; i < validRows.length; i++) {
-      const row = validRows[i];
-      const progress = Math.round(((i + 1) / validRows.length) * 100);
-      
-      // Update current item being processed
-      setProcessingCurrentItem(`${row.part_number} - ${row.nama_barang_csv || row.nama_barang_base}`);
-      setProcessingProgress(progress);
-      
-      // Update item status to processing
-      setProcessingItems(prev => prev.map(item => 
-        item.id === row.id ? { ...item, status: 'processing' } : item
-      ));
-      
+    let completedCount = 0;
+    const successfulResis = new Set<string>();
+    const aliasInsertedSet = new Set<string>();
+
+    const rowsByPart = targetRows.reduce((acc, row) => {
+      const partKey = (row.part_number || '').trim().toUpperCase() || `__EMPTY__${row.id}`;
+      if (!acc[partKey]) acc[partKey] = [];
+      acc[partKey].push(row);
+      return acc;
+    }, {} as Record<string, Stage3Row[]>);
+
+    const groups = Object.values(rowsByPart);
+    let groupCursor = 0;
+    const workerCount = Math.max(1, Math.min(PROCESS_CONCURRENCY, groups.length));
+
+    const processOneRow = async (row: Stage3Row) => {
+      const itemLabel = `${row.part_number} - ${row.nama_barang_csv || row.nama_barang_base || '-'}`;
+      setProcessingCurrentItem(itemLabel);
+      updateItemStatus(row.id, { status: 'processing', errorMessage: undefined });
+
       try {
-        // Prepare single item untuk proses
         const itemToProcess = [{
           ...row,
           nama_pesanan: row.nama_barang_base || row.nama_barang_csv
         }];
-        
+
         const result = await processBarangKeluarBatch(itemToProcess, selectedStore);
-        
+
         if (result.success || result.processed > 0) {
-          // Insert alias
+          const followUps: Promise<any>[] = [
+            deleteProcessedResiItems(selectedStore, [{ id: row.id, resi: row.resi, part_number: row.part_number }])
+          ];
+
           if (row.part_number && row.nama_barang_csv) {
-            await insertProductAlias(row.part_number, row.nama_barang_csv);
+            const aliasKey = `${row.part_number}::${row.nama_barang_csv}`.toUpperCase();
+            if (!aliasInsertedSet.has(aliasKey)) {
+              aliasInsertedSet.add(aliasKey);
+              followUps.push(insertProductAlias(row.part_number, row.nama_barang_csv));
+            }
           }
-          
-          // Delete from resi_items
-          await deleteProcessedResiItems(selectedStore, [{ resi: row.resi, part_number: row.part_number }]);
-          
-          // Update item status to success
-          setProcessingItems(prev => prev.map(item => 
-            item.id === row.id ? { ...item, status: 'success' } : item
-          ));
+
+          await Promise.all(followUps);
+
+          updateItemStatus(row.id, { status: 'success', errorMessage: undefined });
           successCount++;
           setProcessingSuccessCount(successCount);
+          if (row.resi) successfulResis.add(row.resi);
         } else {
-          // Update item status to error
-          setProcessingItems(prev => prev.map(item => 
-            item.id === row.id ? { ...item, status: 'error', errorMessage: result.errors.join(', ') } : item
-          ));
+          const errorMessage = result.errors?.join(', ') || 'Gagal memproses item.';
+          updateItemStatus(row.id, { status: 'error', errorMessage });
           errorCount++;
           setProcessingErrorCount(errorCount);
         }
       } catch (err: any) {
-        setProcessingItems(prev => prev.map(item => 
-          item.id === row.id ? { ...item, status: 'error', errorMessage: err.message } : item
-        ));
+        updateItemStatus(row.id, {
+          status: 'error',
+          errorMessage: err?.message || 'Terjadi error saat memproses item.'
+        });
         errorCount++;
         setProcessingErrorCount(errorCount);
+      } finally {
+        completedCount++;
+        setProcessingProgress(Math.round((completedCount / targetRows.length) * 100));
       }
-      
-      // Small delay untuk visual effect
-      await new Promise(resolve => setTimeout(resolve, 100));
+    };
+
+    const worker = async () => {
+      while (true) {
+        const currentIndex = groupCursor;
+        groupCursor += 1;
+        const currentGroup = groups[currentIndex];
+        if (!currentGroup) break;
+
+        for (const row of currentGroup) {
+          await processOneRow(row);
+        }
+      }
+    };
+
+    try {
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+      if (successfulResis.size > 0) {
+        await deleteProcessedScanResi(selectedStore, Array.from(successfulResis));
+      }
+    } catch (err) {
+      console.error('Process barang keluar batch error:', err);
+    } finally {
+      setProcessingProgress(100);
+      setProcessingComplete(true);
+      setProcessingCurrentItem('');
+      setLoading(false);
+      if (options?.clearSelection) {
+        setSelectedResis(new Set());
+      }
     }
-    
-    // Delete dari scan_resi setelah semua item selesai
-    const successfulResis = [...new Set(validRows.filter(r => 
-      initialItems.find(i => i.id === r.id)?.status !== 'error'
-    ).map(r => r.resi).filter(Boolean))];
-    if (successfulResis.length > 0) {
-      await deleteProcessedScanResi(selectedStore, successfulResis);
+
+    try {
+      await loadSavedDataFromDB();
+      onRefresh?.();
+    } catch (refreshErr) {
+      console.error('Refresh Stage 3 setelah proses gagal:', refreshErr);
     }
+  };
+
+  const handleProcess = async () => {
+    // FITUR 1: Item Double dengan force_override_double = true tetap bisa diproses
+    const hargaKosongRows = rows.filter(r => isHargaKosong(r));
+    if (hargaKosongRows.length > 0) {
+      const sample = hargaKosongRows.slice(0, 3).map(r => r.resi || r.no_pesanan || r.part_number || '-').join(', ');
+      alert(`Tidak bisa input ke Barang Keluar karena masih ada harga 0 (${hargaKosongRows.length} item).\nIsi harga terlebih dulu. Contoh resi: ${sample}`);
+      return;
+    }
+
+    // ALL-OR-NOTHING PER RESI: hanya proses resi yang SEMUA item-nya ready
+    const groupedByResi = rows.reduce((acc, row) => {
+      const key = row.resi || 'NO_RESI';
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(row);
+      return acc;
+    }, {} as Record<string, Stage3Row[]>);
+
+    const readyResiEntries = Object.entries(groupedByResi).filter(([, resiItems]) =>
+      resiItems.length > 0 && resiItems.every(isRowReadyToProcess)
+    );
+    const blockedResis = Object.entries(groupedByResi)
+      .filter(([, resiItems]) => resiItems.some(r => !isRowReadyToProcess(r)))
+      .map(([resi]) => resi);
+
+    const validRows = readyResiEntries.flatMap(([, resiItems]) => resiItems);
+    if (validRows.length === 0) {
+      alert("Tidak ada resi yang siap diproses penuh. Pastikan setiap item dalam satu resi berstatus Ready.");
+      return;
+    }
+
+    const blockedInfo = blockedResis.length > 0
+      ? `\n\nCatatan: ${blockedResis.length} resi belum ready dan tidak diproses.`
+      : '';
+    if (!confirm(`Proses ${validRows.length} item dari ${readyResiEntries.length} resi ke Barang Keluar?${blockedInfo}`)) return;
     
-    setProcessingComplete(true);
-    setProcessingCurrentItem('');
-    setLoading(false);
-    
-    // Refresh data
-    setRows(prev => prev.filter(r => !validRows.find(v => v.id === r.id && 
-      processingItems.find(p => p.id === v.id)?.status !== 'error'
-    )));
-    if (onRefresh) onRefresh();
+    await processRowsToBarangKeluar(validRows);
   };
 
   const isKilatRow = (row: Stage3Row) => row.ecommerce?.toUpperCase().includes('KILAT');
@@ -3264,16 +3525,31 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   // VISUAL ROWS - array rows sesuai urutan visual di tabel (setelah grouping)
   // Ini penting untuk navigasi keyboard yang benar
   const visualRows = Object.values(groupedByResi).flat();
+  const processableRowCount = Object.values(
+    rows.reduce((acc, row) => {
+      const resiKey = row.resi || 'NO_RESI';
+      if (!acc[resiKey]) acc[resiKey] = [];
+      acc[resiKey].push(row);
+      return acc;
+    }, {} as Record<string, Stage3Row[]>)
+  ).reduce((sum, resiItems) => {
+    if (resiItems.length > 0 && resiItems.every(isRowReadyToProcess)) {
+      return sum + resiItems.length;
+    }
+    return sum;
+  }, 0);
 
   // Hitung status per grup resi
   const getGroupStatus = (items: Stage3Row[]) => {
-    const allReady = items.every(r => r.status_message === 'Ready' || (r.status_message === 'Double' && r.force_override_double));
+    const allReady = items.every(isRowReadyToProcess);
     const hasStokKurang = items.some(r => r.status_message === 'Stok Kurang' || r.status_message === 'Stok Total Kurang');
     const hasBelumScan = items.some(r => r.status_message === 'Belum Scan S1');
     const hasPendingS2 = items.some(r => r.status_message === 'Pending S2');
+    const hasHargaKosong = items.some(r => r.status_message === 'Harga Kosong');
     if (allReady) return { status: 'Ready', color: 'bg-green-600' };
     if (hasBelumScan) return { status: 'Belum Scan S1', color: 'bg-red-800' };
     if (hasPendingS2) return { status: 'Pending S2', color: 'bg-yellow-600' };
+    if (hasHargaKosong) return { status: 'Harga Kosong', color: 'bg-rose-700' };
     if (hasStokKurang) return { status: 'Stok Kurang', color: 'bg-red-600' };
     return { status: 'Butuh Input', color: 'bg-blue-600' };
   };
@@ -3307,32 +3583,33 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       alert("Pilih minimal 1 resi untuk diproses!");
       return;
     }
-    
-    // VALIDASI: Cek apakah ada resi yang memiliki item dengan stok kurang
-    // Semua item dalam satu resi harus ready sebelum bisa diproses
-    const resiWithStockIssues: string[] = [];
-    selectedResis.forEach(resi => {
-      const itemsInResi = rows.filter(r => r.resi === resi);
-      const hasStockIssue = itemsInResi.some(r => !r.is_stock_valid || r.stock_saat_ini < r.qty_keluar);
-      if (hasStockIssue) {
-        resiWithStockIssues.push(resi);
-      }
-    });
-    
-    if (resiWithStockIssues.length > 0) {
-      const resiListText = resiWithStockIssues.slice(0, 5).join('\n• ');
-      const moreText = resiWithStockIssues.length > 5 ? `\n... dan ${resiWithStockIssues.length - 5} resi lainnya` : '';
-      alert(`Tidak bisa memproses! Resi berikut memiliki item dengan stok kurang/kosong:\n\n• ${resiListText}${moreText}\n\nSemua item dalam satu resi harus memiliki stok cukup sebelum bisa diproses.`);
+    const selectedResiArray = Array.from(selectedResis);
+    const hargaKosongSelected = rows.filter(r => selectedResis.has(r.resi) && isHargaKosong(r));
+    if (hargaKosongSelected.length > 0) {
+      const sample = hargaKosongSelected.slice(0, 3).map(r => r.resi || r.no_pesanan || r.part_number || '-').join(', ');
+      alert(`Tidak bisa memproses resi terpilih karena ada harga 0 (${hargaKosongSelected.length} item). Lengkapi harga terlebih dahulu. Contoh resi: ${sample}`);
       return;
     }
     
-    // Filter rows yang resinya dipilih dan statusnya ready
-    const selectedRows = rows.filter(r => {
-      if (!selectedResis.has(r.resi)) return false;
-      const normalValid = r.is_db_verified && r.is_stock_valid && r.part_number;
-      const doubleOverridden = r.status_message === 'Double' && r.force_override_double && r.is_stock_valid && r.part_number;
-      return normalValid || doubleOverridden;
+    // VALIDASI: Semua item dalam satu resi harus ready sebelum bisa diproses
+    const resiNotReady: string[] = [];
+    selectedResiArray.forEach(resi => {
+      const itemsInResi = rows.filter(r => r.resi === resi);
+      const hasNotReadyItem = itemsInResi.length === 0 || itemsInResi.some(r => !isRowReadyToProcess(r));
+      if (hasNotReadyItem) {
+        resiNotReady.push(resi);
+      }
     });
+    
+    if (resiNotReady.length > 0) {
+      const resiListText = resiNotReady.slice(0, 5).join('\n- ');
+      const moreText = resiNotReady.length > 5 ? `\n... dan ${resiNotReady.length - 5} resi lainnya` : '';
+      alert(`Tidak bisa memproses! Resi berikut memiliki item belum ready:\n\n- ${resiListText}${moreText}\n\nSemua item dalam satu resi harus Ready sebelum bisa diproses.`);
+      return;
+    }
+    
+    // Karena sudah validasi all-or-nothing per resi, ambil semua item dari resi terpilih
+    const selectedRows = rows.filter(r => selectedResis.has(r.resi));
     
     if (selectedRows.length === 0) {
       alert("Tidak ada item siap proses dari resi yang dipilih. Pastikan status hijau (Ready).");
@@ -3341,97 +3618,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     
     if (!confirm(`Proses ${selectedRows.length} item dari ${selectedResis.size} resi ke Barang Keluar?`)) return;
     
-    // PROCESSING MODAL: Initialize
-    const initialItems: ProcessingItem[] = selectedRows.map(r => ({
-      id: r.id,
-      resi: r.resi,
-      part_number: r.part_number,
-      nama_barang: r.nama_barang_csv || r.nama_barang_base || '-',
-      qty: r.qty_keluar,
-      customer: r.customer || '',
-      status: 'pending' as const
-    }));
-    
-    setProcessingItems(initialItems);
-    setProcessingProgress(0);
-    setProcessingCurrentItem('');
-    setProcessingComplete(false);
-    setProcessingSuccessCount(0);
-    setProcessingErrorCount(0);
-    setShowProcessingModal(true);
-    setLoading(true);
-    
-    let successCount = 0;
-    let errorCount = 0;
-    const processedIds: string[] = [];
-    
-    // Process one by one untuk visual feedback
-    for (let i = 0; i < selectedRows.length; i++) {
-      const row = selectedRows[i];
-      const progress = Math.round(((i + 1) / selectedRows.length) * 100);
-      
-      // Update current item being processed
-      setProcessingCurrentItem(`${row.part_number} - ${row.nama_barang_csv || row.nama_barang_base}`);
-      setProcessingProgress(progress);
-      
-      // Update item status to processing
-      setProcessingItems(prev => prev.map(item => 
-        item.id === row.id ? { ...item, status: 'processing' } : item
-      ));
-      
-      try {
-        // Prepare single item untuk proses
-        const itemToProcess = [{
-          ...row,
-          nama_pesanan: row.nama_barang_base || row.nama_barang_csv
-        }];
-        
-        const result = await processBarangKeluarBatch(itemToProcess, selectedStore);
-        
-        if (result.success || result.processed > 0) {
-          // Insert alias
-          if (row.part_number && row.nama_barang_csv) {
-            await insertProductAlias(row.part_number, row.nama_barang_csv);
-          }
-          
-          // Delete from resi_items
-          await deleteProcessedResiItems(selectedStore, [{ resi: row.resi, part_number: row.part_number }]);
-          
-          // Update item status to success
-          setProcessingItems(prev => prev.map(item => 
-            item.id === row.id ? { ...item, status: 'success' } : item
-          ));
-          successCount++;
-          processedIds.push(row.id);
-          setProcessingSuccessCount(successCount);
-        } else {
-          // Update item status to error
-          setProcessingItems(prev => prev.map(item => 
-            item.id === row.id ? { ...item, status: 'error', errorMessage: result.errors.join(', ') } : item
-          ));
-          errorCount++;
-          setProcessingErrorCount(errorCount);
-        }
-      } catch (err: any) {
-        setProcessingItems(prev => prev.map(item => 
-          item.id === row.id ? { ...item, status: 'error', errorMessage: err.message } : item
-        ));
-        errorCount++;
-        setProcessingErrorCount(errorCount);
-      }
-      
-      // Small delay untuk visual effect
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    setProcessingComplete(true);
-    setProcessingCurrentItem('');
-    setLoading(false);
-    setSelectedResis(new Set()); // Clear selection
-    
-    // Refresh data
-    await loadSavedDataFromDB();
-    onRefresh?.();
+    await processRowsToBarangKeluar(selectedRows, { clearSelection: true });
   };
 
   // Handle delete all selected resis - Open modal
@@ -3716,8 +3903,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
   return (
     <div ref={containerRef} className="bg-gray-900 text-white h-screen p-2 pb-20 md:pb-2 text-sm font-sans flex flex-col overflow-hidden relative">
-      {/* Remote User Cursors */}
-      <UserCursors />
+      {/* Remote User Cursors disabled */}
       
       {/* Active Users Indicator */}
       <ActiveUsersIndicator />
@@ -3755,11 +3941,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         <DownloadCloud size={12}/> <span className="hidden sm:inline">DB</span> Pending
                     </button>
                     <button onClick={handleProcess} className="bg-green-600 hover:bg-green-500 text-white px-2 md:px-4 py-1 md:py-1.5 rounded font-bold shadow-md flex gap-1 md:gap-2 items-center text-[10px] md:text-sm transition-all transform active:scale-95">
-                        <Save size={14}/> PROSES ({rows.filter(r => {
-                          const normalValid = r.is_db_verified && r.is_stock_valid && r.part_number;
-                          const doubleOverridden = r.status_message === 'Double' && r.force_override_double && r.is_stock_valid && r.part_number;
-                          return normalValid || doubleOverridden;
-                        }).length})
+                        <Save size={14}/> PROSES ({processableRowCount})
                     </button>
                 </div>
             </div>
@@ -4162,20 +4344,19 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
             {(() => {
               // Hitung resi yang siap vs tidak siap
               const selectedResiArray = Array.from(selectedResis);
-              const resiWithStockIssues = selectedResiArray.filter(resi => {
+              const resiNotReady = selectedResiArray.filter(resi => {
                 const itemsInResi = rows.filter(r => r.resi === resi);
-                return itemsInResi.some(r => !r.is_stock_valid || r.stock_saat_ini < r.qty_keluar);
+                return itemsInResi.length === 0 || itemsInResi.some(r => !isRowReadyToProcess(r));
               });
-              const readyResiCount = selectedResiArray.length - resiWithStockIssues.length;
               
               return (
                 <>
                   <span className="text-blue-200 font-bold text-sm">
                     {selectedResis.size} resi dipilih ({rows.filter(r => selectedResis.has(r.resi)).length} item)
                   </span>
-                  {resiWithStockIssues.length > 0 && (
+                  {resiNotReady.length > 0 && (
                     <span className="text-red-400 text-xs">
-                      ⚠️ {resiWithStockIssues.length} resi tidak bisa diproses (stok kurang)
+                      {resiNotReady.length} resi belum siap diproses
                     </span>
                   )}
                 </>
@@ -4282,8 +4463,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                 const firstItem = resiItems[0];
                 const totalQty = resiItems.reduce((sum, r) => sum + r.qty_keluar, 0);
                 const totalHarga = resiItems.reduce((sum, r) => sum + r.harga_total, 0);
-                // Cek apakah ada item dengan stok kurang dalam resi ini
-                const hasStockIssue = resiItems.some(r => !r.is_stock_valid || r.stock_saat_ini < r.qty_keluar);
+                // Cek apakah ada item belum ready dalam resi ini
+                const hasNotReadyItem = resiItems.some(r => !isRowReadyToProcess(r));
                 const canProcess = groupStatus.status === 'Ready';
                 
                 return resiItems.map((row, itemIdx) => {
@@ -4297,21 +4478,21 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                       
                       {/* CHECKBOX - hanya tampil di baris pertama grup */}
                       {isFirstOfGroup ? (
-                        <td rowSpan={resiItems.length} className={`border border-gray-600 p-0 text-center align-middle ${isSelected ? 'bg-blue-900/30' : hasStockIssue ? 'bg-red-900/20' : 'bg-gray-800'}`}>
+                        <td rowSpan={resiItems.length} className={`border border-gray-600 p-0 text-center align-middle ${isSelected ? 'bg-blue-900/30' : hasNotReadyItem ? 'bg-red-900/20' : 'bg-gray-800'}`}>
                           <div className="flex flex-col items-center gap-1 py-1">
                             <input 
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => toggleSelectResi(resiKey)}
-                              className={`w-5 h-5 cursor-pointer ${hasStockIssue ? 'accent-red-500' : 'accent-green-500'}`}
-                              title={hasStockIssue ? 'Ada item dengan stok kurang - tidak bisa diproses' : (canProcess ? 'Siap diproses' : 'Belum siap diproses')}
+                              className={`w-5 h-5 cursor-pointer ${hasNotReadyItem ? 'accent-red-500' : 'accent-green-500'}`}
+                              title={hasNotReadyItem ? 'Ada item belum ready - tidak bisa diproses' : (canProcess ? 'Siap diproses' : 'Belum siap diproses')}
                             />
                             {resiItems.length > 1 && (
-                              <span className={`text-[9px] ${hasStockIssue ? 'text-red-400' : 'text-gray-400'}`}>
-                                {resiItems.length} item{hasStockIssue ? ' ⚠️' : ''}
+                              <span className={`text-[9px] ${hasNotReadyItem ? 'text-red-400' : 'text-gray-400'}`}>
+                                {resiItems.length} item{hasNotReadyItem ? ' ⚠️' : ''}
                               </span>
                             )}
-                            {hasStockIssue && resiItems.length === 1 && (
+                            {hasNotReadyItem && resiItems.length === 1 && (
                               <span className="text-[9px] text-red-400">⚠️</span>
                             )}
                           </div>
@@ -4324,6 +4505,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                           row.status_message === 'Ready' ? 'bg-green-600 text-white' : 
                           row.status_message === 'Stok Kurang' ? 'bg-red-600 text-white' :
                           row.status_message === 'Stok Total Kurang' ? 'bg-pink-600 text-white' :
+                          row.status_message === 'Harga Kosong' ? 'bg-rose-600 text-white' :
                           row.status_message === 'Double' ? (row.force_override_double ? 'bg-green-600 text-white' : 'bg-orange-600 text-white') :
                           row.status_message === 'Base Kosong' ? 'bg-purple-600 text-white' :
                           row.status_message === 'Belum Scan S1' ? 'bg-red-800 text-red-200' :
@@ -4384,7 +4566,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                       <EcommerceCellDropdown
                         value={row.ecommerce}
                         onChange={(v) => updateRow(row.id, 'ecommerce', v)}
-                        onSave={() => handleSaveRow(row)}
+                        onSave={() => {}}
                       />
                       {/* Badge INSTANT: untuk SHOPEE (jika resi === no_pesanan) ATAU TikTok (jika label INSTAN) */}
                       {((row.resi && row.no_pesanan && row.resi === row.no_pesanan && row.ecommerce?.toUpperCase().includes('SHOPEE')) ||
@@ -4399,7 +4581,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     <TokoCellDropdown
                       value={row.sub_toko}
                       onChange={(v) => updateRow(row.id, 'sub_toko', v)}
-                      onSave={() => handleSaveRow(row)}
+                      onSave={() => {}}
                     />
                   </td>
 
@@ -4410,7 +4592,6 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         type="text"
                         value={row.customer} 
                         onChange={(e) => updateRow(row.id, 'customer', e.target.value)} 
-                        onBlur={() => handleSaveRow(row)} 
                         onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'customer' })}
                         onKeyDown={(e) => handleKeyDown(e, idx, 'customer', row.id)}
                         className="w-full h-full bg-transparent px-1.5 outline-none text-gray-200 truncate focus:text-clip"
@@ -4532,7 +4713,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         type="number" 
                         value={row.qty_keluar || ''} 
                         onChange={(e) => updateRow(row.id, 'qty_keluar', parseInt(e.target.value) || 0)} 
-                        onBlur={() => handleSaveRow(row)} 
+                        // simpan manual via tombol
                         onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'qty_keluar' })}
                         onKeyDown={(e) => handleKeyDown(e, idx, 'qty_keluar', row.id)} 
                         className="w-full h-full bg-transparent text-center outline-none font-bold"
@@ -4553,7 +4734,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         type="number" 
                         value={row.harga_total || ''} 
                         onChange={(e) => updateRow(row.id, 'harga_total', parseInt(e.target.value) || 0)} 
-                        onBlur={() => handleSaveRow(row)} 
+                        // simpan manual via tombol
                         onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'harga_total' })}
                         onKeyDown={(e) => handleKeyDown(e, idx, 'harga_total', row.id)} 
                         className="absolute inset-0 w-full h-full bg-transparent text-right px-1 outline-none font-mono text-yellow-400 font-bold opacity-0 focus:opacity-100"
@@ -4574,7 +4755,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         type="number" 
                         value={row.harga_satuan || ''} 
                         onChange={(e) => updateRow(row.id, 'harga_satuan', parseInt(e.target.value) || 0)} 
-                        onBlur={() => handleSaveRow(row)} 
+                        // simpan manual via tombol
                         onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'harga_satuan' })}
                         onKeyDown={(e) => handleKeyDown(e, idx, 'harga_satuan', row.id)} 
                         className="absolute inset-0 w-full h-full bg-transparent text-right px-1 outline-none font-mono text-yellow-300 text-[11px] opacity-0 focus:opacity-100"

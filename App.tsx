@@ -16,6 +16,7 @@ import { ClosingView } from './components/finance/ClosingView';
 import { PiutangCustomerView } from './components/finance/PiutangCustomerView';
 import { TagihanTokoView } from './components/finance/TagihanTokoView';
 import { RekapBulananView } from './components/finance/RekapBulananView';
+import { ZakatTahunanView } from './components/finance/ZakatTahunanView';
 import { DataAgungView } from './components/online/DataAgungView';
 import StockOnlineView from './components/online/StockOnlineView';
 import { FotoProdukView } from './components/online/FotoProdukView';
@@ -80,6 +81,9 @@ const AppContent: React.FC = () => {
 
   const isKingFano = useMemo(() => loginName.trim().toLowerCase() === 'king fano', [loginName]);
 
+  // Helper untuk cache key (PERBAIKAN: Definisi fungsi yang hilang)
+  const getAppCacheKey = (key: string) => `app_cache_${selectedStore || 'unknown'}_${key}`;
+
   // --- EFFECTS ---
   useEffect(() => {
     let cId = localStorage.getItem(CUSTOMER_ID_KEY);
@@ -92,17 +96,49 @@ const AppContent: React.FC = () => {
   }, [isAuthenticated]);
 
   const refreshData = async () => {
-    setLoading(true);
-    try {
-        const inventoryData = await fetchInventory(selectedStore);
-        const bannerItem = inventoryData.find(i => i.partNumber === BANNER_PART_NUMBER);
-        if (bannerItem) setBannerUrl(bannerItem.imageUrl);
-        setItems(inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER));
+    // 1. LOAD FROM CACHE (Agar terasa instan saat refresh)
+    if (selectedStore) {
+      try {
+        const cachedItems = localStorage.getItem(getAppCacheKey('items'));
+        const cachedBanner = localStorage.getItem(getAppCacheKey('banner'));
+        const cachedHistory = localStorage.getItem(getAppCacheKey('history'));
 
-        const historyData = await fetchHistory();
+        if (cachedItems && items.length === 0) setItems(JSON.parse(cachedItems));
+        if (cachedBanner && !bannerUrl) setBannerUrl(cachedBanner);
+        if (cachedHistory && history.length === 0) setHistory(JSON.parse(cachedHistory));
+      } catch (e) {
+        console.warn("Gagal load cache lokal", e);
+      }
+    }
+
+    // Hanya tampilkan loading spinner jika data benar-benar kosong (belum ada cache)
+    if (items.length === 0) setLoading(true);
+
+    try {
+        const [inventoryData, bannerItem, historyData] = await Promise.all([
+          fetchInventory(selectedStore, {
+            includePhotos: false,
+            includePrices: false,
+            includeCostPrices: false
+          }),
+          getItemByPartNumber(BANNER_PART_NUMBER, selectedStore),
+          fetchHistory()
+        ]);
+        
+        const validItems = inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER);
+        const validBanner = bannerItem?.imageUrl || '';
+        
+        setItems(validItems);
+        setBannerUrl(validBanner);
         setHistory(historyData);
         setRefreshTrigger(prev => prev + 1);
 
+        // 3. SAVE TO CACHE
+        if (selectedStore) {
+          localStorage.setItem(getAppCacheKey('items'), JSON.stringify(validItems));
+          localStorage.setItem(getAppCacheKey('banner'), validBanner);
+          localStorage.setItem(getAppCacheKey('history'), JSON.stringify(historyData));
+        }
     } catch (e) { console.error("Gagal memuat data:", e); showToast("Gagal sinkronisasi data", 'error'); }
     setLoading(false);
   };
@@ -313,6 +349,7 @@ const AppContent: React.FC = () => {
         {activeView === 'piutang_customer' && isAdmin && <PiutangCustomerView />}
         {activeView === 'tagihan_toko' && isAdmin && <TagihanTokoView />}
         {activeView === 'rekap_bulanan' && isAdmin && <RekapBulananView />}
+        {activeView === 'zakat_tahunan' && isAdmin && <ZakatTahunanView />}
         {activeView === 'data_agung' && isAdmin && <DataAgungView items={items} onRefresh={refreshData} showToast={showToast} />}
           {activeView === 'stock_online' && isAdmin && <StockOnlineView />}
         {activeView === 'foto_produk' && isAdmin && <FotoProdukView />}
