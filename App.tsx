@@ -1,7 +1,8 @@
 // FILE: src/App.tsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { HashRouter as Router } from 'react-router-dom';
 import { CloudLightning } from 'lucide-react';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 // --- COMPONENTS ---
 import { Dashboard } from './components/Dashboard';
@@ -42,11 +43,12 @@ import { StoreProvider, useStore } from './context/StoreContext';
 
 // --- TYPES & SERVICES ---
 import { InventoryItem, InventoryFormData, CartItem, StockHistory } from './types';
-import { 
-  fetchInventory, addInventory, updateInventory, deleteInventory, getItemByPartNumber, 
+import {
+  fetchInventory, addInventory, updateInventory, deleteInventory, getItemByPartNumber,
   fetchHistory,
   saveOfflineOrder
 } from './services/supabaseService';
+import { supabase } from './services/supabaseClient';
 import { generateId } from './utils';
 
 const CUSTOMER_ID_KEY = 'stockmaster_my_customer_id';
@@ -55,7 +57,7 @@ const BANNER_PART_NUMBER = 'SYSTEM-BANNER-PROMO';
 const AppContent: React.FC = () => {
   // --- STORE CONTEXT ---
   const { selectedStore, userRole, userName, setStore, setUserRole, setUserName, logout: logoutStore, getStoreConfig } = useStore();
-  
+
   // --- STATE ---
   const isAuthenticated = selectedStore !== null && userRole !== null;
   const isAdmin = userRole === 'admin';
@@ -64,40 +66,37 @@ const AppContent: React.FC = () => {
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [history, setHistory] = useState<StockHistory[]>([]);
-  const [loading, setLoading] = useState(false); 
-  const [activeView, setActiveView] = useState<ActiveView>('inventory'); 
-  
+  const [loading, setLoading] = useState(false);
+  const [activeView, setActiveView] = useState<ActiveView>('inventory');
+
   const [bannerUrl, setBannerUrl] = useState<string>('');
   const [myCustomerId, setMyCustomerId] = useState<string>('');
-  
+
   const [isEditing, setIsEditing] = useState(false);
   const [editItem, setEditItem] = useState<InventoryItem | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
-  
+  const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
+
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  const showToast = (msg: string, type: 'success'|'error' = 'success') => setToast({msg, type});
+  const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
+  const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const realtimeRefreshInFlightRef = useRef(false);
+  const realtimeRefreshQueuedRef = useRef(false);
+
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => setToast({ msg, type });
 
   const isKingFano = useMemo(() => loginName.trim().toLowerCase() === 'king fano', [loginName]);
 
-  // Helper untuk cache key (PERBAIKAN: Definisi fungsi yang hilang)
+  // Helper untuk cache key
   const getAppCacheKey = (key: string) => `app_cache_${selectedStore || 'unknown'}_${key}`;
 
-  // --- EFFECTS ---
-  useEffect(() => {
-    let cId = localStorage.getItem(CUSTOMER_ID_KEY);
-    if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
-    setMyCustomerId(cId);
-    
-    if (isAuthenticated) {
-      refreshData();
-    }
-  }, [isAuthenticated]);
+  const refreshData = useCallback(async (opts?: { silent?: boolean; skipCache?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    const skipCache = opts?.skipCache ?? false;
 
-  const refreshData = async () => {
     // 1. LOAD FROM CACHE (Agar terasa instan saat refresh)
-    if (selectedStore) {
+    if (!skipCache && selectedStore) {
       try {
         const cachedItems = localStorage.getItem(getAppCacheKey('items'));
         const cachedBanner = localStorage.getItem(getAppCacheKey('banner'));
@@ -107,41 +106,135 @@ const AppContent: React.FC = () => {
         if (cachedBanner && !bannerUrl) setBannerUrl(cachedBanner);
         if (cachedHistory && history.length === 0) setHistory(JSON.parse(cachedHistory));
       } catch (e) {
-        console.warn("Gagal load cache lokal", e);
+        console.warn('Gagal load cache lokal', e);
       }
     }
 
     // Hanya tampilkan loading spinner jika data benar-benar kosong (belum ada cache)
-    if (items.length === 0) setLoading(true);
+    if (!silent && items.length === 0) setLoading(true);
 
     try {
-        const [inventoryData, bannerItem, historyData] = await Promise.all([
-          fetchInventory(selectedStore, {
-            includePhotos: false,
-            includePrices: false,
-            includeCostPrices: false
-          }),
-          getItemByPartNumber(BANNER_PART_NUMBER, selectedStore),
-          fetchHistory()
-        ]);
-        
-        const validItems = inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER);
-        const validBanner = bannerItem?.imageUrl || '';
-        
-        setItems(validItems);
-        setBannerUrl(validBanner);
-        setHistory(historyData);
-        setRefreshTrigger(prev => prev + 1);
+      const [inventoryData, bannerItem, historyData] = await Promise.all([
+        fetchInventory(selectedStore, {
+          includePhotos: false,
+          includePrices: false,
+          includeCostPrices: false
+        }),
+        getItemByPartNumber(BANNER_PART_NUMBER, selectedStore),
+        fetchHistory()
+      ]);
 
-        // 3. SAVE TO CACHE
-        if (selectedStore) {
-          localStorage.setItem(getAppCacheKey('items'), JSON.stringify(validItems));
-          localStorage.setItem(getAppCacheKey('banner'), validBanner);
-          localStorage.setItem(getAppCacheKey('history'), JSON.stringify(historyData));
+      const validItems = inventoryData.filter(i => i.partNumber !== BANNER_PART_NUMBER);
+      const validBanner = bannerItem?.imageUrl || '';
+
+      setItems(validItems);
+      setBannerUrl(validBanner);
+      setHistory(historyData);
+      setRefreshTrigger(prev => prev + 1);
+
+      // 3. SAVE TO CACHE
+      if (selectedStore) {
+        localStorage.setItem(getAppCacheKey('items'), JSON.stringify(validItems));
+        localStorage.setItem(getAppCacheKey('banner'), validBanner);
+        localStorage.setItem(getAppCacheKey('history'), JSON.stringify(historyData));
+      }
+    } catch (e) {
+      console.error('Gagal memuat data:', e);
+      if (!silent) showToast('Gagal sinkronisasi data', 'error');
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, [selectedStore, items.length, bannerUrl, history.length]);
+
+  const scheduleRealtimeRefresh = useCallback(() => {
+    if (!isAuthenticated || !selectedStore) return;
+
+    if (realtimeDebounceRef.current) {
+      clearTimeout(realtimeDebounceRef.current);
+    }
+
+    realtimeDebounceRef.current = setTimeout(async () => {
+      if (realtimeRefreshInFlightRef.current) {
+        realtimeRefreshQueuedRef.current = true;
+        return;
+      }
+
+      realtimeRefreshInFlightRef.current = true;
+      try {
+        await refreshData({ silent: true, skipCache: true });
+      } finally {
+        realtimeRefreshInFlightRef.current = false;
+        if (realtimeRefreshQueuedRef.current) {
+          realtimeRefreshQueuedRef.current = false;
+          scheduleRealtimeRefresh();
         }
-    } catch (e) { console.error("Gagal memuat data:", e); showToast("Gagal sinkronisasi data", 'error'); }
-    setLoading(false);
-  };
+      }
+    }, 400);
+  }, [isAuthenticated, selectedStore, refreshData]);
+
+  // --- EFFECTS ---
+  useEffect(() => {
+    let cId = localStorage.getItem(CUSTOMER_ID_KEY);
+    if (!cId) { cId = 'cust-' + generateId(); localStorage.setItem(CUSTOMER_ID_KEY, cId); }
+    setMyCustomerId(cId);
+
+    if (isAuthenticated) {
+      refreshData();
+    }
+  }, [isAuthenticated, refreshData]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !selectedStore) {
+      if (realtimeDebounceRef.current) {
+        clearTimeout(realtimeDebounceRef.current);
+        realtimeDebounceRef.current = null;
+      }
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+      return;
+    }
+
+    const storeSuffix = selectedStore === 'bjw' ? 'bjw' : 'mjm';
+    const watchedTables = [
+      `base_${storeSuffix}`,
+      `orders_${storeSuffix}`,
+      `barang_masuk_${storeSuffix}`,
+      `barang_keluar_${storeSuffix}`,
+      'foto'
+    ];
+
+    const channelName = `app-global-sync-${selectedStore}-${Date.now()}`;
+    let channel = supabase.channel(channelName);
+
+    watchedTables.forEach((table) => {
+      channel = channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table },
+        () => scheduleRealtimeRefresh()
+      );
+    });
+
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log(`[Realtime] Sinkron aktif untuk toko ${selectedStore}`);
+      }
+    });
+
+    realtimeChannelRef.current = channel;
+
+    return () => {
+      if (realtimeDebounceRef.current) {
+        clearTimeout(realtimeDebounceRef.current);
+        realtimeDebounceRef.current = null;
+      }
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+    };
+  }, [isAuthenticated, selectedStore, scheduleRealtimeRefresh]);
 
   // --- HANDLERS AUTH ---
   const handleSelectStore = (store: 'mjm' | 'bjw') => {
@@ -166,143 +259,143 @@ const AppContent: React.FC = () => {
     setUserName('');
   };
 
-  const handleLogout = () => { 
-    logoutStore(); 
+  const handleLogout = () => {
+    logoutStore();
     setActiveView('inventory');
   };
 
   // --- HANDLERS DATA ---
   const handleSaveItem = async (data: InventoryFormData) => {
-      setLoading(true);
-      const newQuantity = Number(data.quantity) || 0;
-      let updatedItem: InventoryItem = { ...editItem, ...data, quantity: newQuantity, initialStock: data.initialStock || 0, qtyIn: data.qtyIn || 0, qtyOut: data.qtyOut || 0, lastUpdated: Date.now() };
+    setLoading(true);
+    const newQuantity = Number(data.quantity) || 0;
+    let updatedItem: InventoryItem = { ...editItem, ...data, quantity: newQuantity, initialStock: data.initialStock || 0, qtyIn: data.qtyIn || 0, qtyOut: data.qtyOut || 0, lastUpdated: Date.now() };
 
-      if (editItem) {
-          if (await updateInventory(updatedItem)) { showToast('Update berhasil!'); refreshData(); }
-      } else {
-          if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number sudah ada!', 'error'); setLoading(false); return; }
-          if (await addInventory(data)) { showToast('Tersimpan!'); refreshData(); }
-      }
-      setIsEditing(false); setEditItem(null); setLoading(false);
+    if (editItem) {
+      if (await updateInventory(updatedItem)) { showToast('Update berhasil!'); refreshData(); }
+    } else {
+      if (items.some(i => i.partNumber === data.partNumber)) { showToast('Part Number sudah ada!', 'error'); setLoading(false); return; }
+      if (await addInventory(data)) { showToast('Tersimpan!'); refreshData(); }
+    }
+    setIsEditing(false); setEditItem(null); setLoading(false);
   };
 
   const handleUpdateBanner = async (base64: string) => {
-      const existingItem = await getItemByPartNumber(BANNER_PART_NUMBER, selectedStore);
+    const existingItem = await getItemByPartNumber(BANNER_PART_NUMBER, selectedStore);
 
-      const bannerData: any = { 
-          partNumber: BANNER_PART_NUMBER, 
-          name: 'SYSTEM BANNER PROMO', 
-          application: 'DO NOT DELETE', 
-          brand: 'SYS', 
-          price: 0, 
-          costPrice: 0, 
-          ecommerce: '', 
-          quantity: 0, 
-          initialStock: 0, 
-          qtyIn: 0, 
-          qtyOut: 0, 
-          shelf: 'SYSTEM', 
-          imageUrl: base64 
-      };
+    const bannerData: any = {
+      partNumber: BANNER_PART_NUMBER,
+      name: 'SYSTEM BANNER PROMO',
+      application: 'DO NOT DELETE',
+      brand: 'SYS',
+      price: 0,
+      costPrice: 0,
+      ecommerce: '',
+      quantity: 0,
+      initialStock: 0,
+      qtyIn: 0,
+      qtyOut: 0,
+      shelf: 'SYSTEM',
+      imageUrl: base64
+    };
 
-      let success = false;
-      if (existingItem) {
-          const updateData = { ...bannerData, id: existingItem.id };
-          const result = await updateInventory(updateData, undefined, selectedStore);
-          success = !!result;
-      } else {
-          const result = await addInventory(bannerData, selectedStore);
-          success = !!result;
-      }
+    let success = false;
+    if (existingItem) {
+      const updateData = { ...bannerData, id: existingItem.id };
+      const result = await updateInventory(updateData, undefined, selectedStore);
+      success = !!result;
+    } else {
+      const result = await addInventory(bannerData, selectedStore);
+      success = !!result;
+    }
 
-      if (success) { 
-          setBannerUrl(base64); 
-          showToast('Banner diperbarui!'); 
-      } else { 
-          showToast('Gagal update banner', 'error'); 
-      }
+    if (success) {
+      setBannerUrl(base64);
+      showToast('Banner diperbarui!');
+    } else {
+      showToast('Gagal update banner', 'error');
+    }
   };
-  
+
   const handleDelete = async (id: string) => {
-      // Hanya Bryan dan Ava yang bisa hapus barang
-      const allowedToDelete = ['Bryan', 'Ava'];
-      const canDelete = allowedToDelete.some(name => name.toLowerCase() === userName.toLowerCase());
-      
-      if (!canDelete) {
-          showToast('Anda tidak memiliki akses untuk menghapus barang', 'error');
-          return;
-      }
-      
-      if(confirm('Hapus Barang Permanen?')) {
-          setLoading(true);
-          if (await deleteInventory(id, selectedStore)) { showToast('Dihapus'); refreshData(); }
-          setLoading(false);
-      }
-  }
+    // Hanya Bryan dan Ava yang bisa hapus barang
+    const allowedToDelete = ['Bryan', 'Ava'];
+    const canDelete = allowedToDelete.some(name => name.toLowerCase() === userName.toLowerCase());
+
+    if (!canDelete) {
+      showToast('Anda tidak memiliki akses untuk menghapus barang', 'error');
+      return;
+    }
+
+    if (confirm('Hapus Barang Permanen?')) {
+      setLoading(true);
+      if (await deleteInventory(id, selectedStore)) { showToast('Dihapus'); refreshData(); }
+      setLoading(false);
+    }
+  };
 
   // --- HANDLERS ORDER ---
   const addToCart = (item: InventoryItem) => {
-      setCart(prev => {
-          const ex = prev.find(c => c.id === item.id);
-          return ex ? prev.map(c => c.id === item.id ? {...c, cartQuantity: c.cartQuantity + 1} : c) : [...prev, {...item, cartQuantity: 1}];
-      });
-      showToast('Masuk keranjang');
+    setCart(prev => {
+      const ex = prev.find(c => c.id === item.id);
+      return ex ? prev.map(c => c.id === item.id ? { ...c, cartQuantity: c.cartQuantity + 1 } : c) : [...prev, { ...item, cartQuantity: 1 }];
+    });
+    showToast('Masuk keranjang');
   };
 
   const updateCartItem = (itemId: string, changes: Partial<CartItem>) => {
-      setCart(prev => prev.map(item => item.id === itemId ? { ...item, ...changes } : item));
+    setCart(prev => prev.map(item => item.id === itemId ? { ...item, ...changes } : item));
   };
 
   // --- NEW CHECKOUT LOGIC (MENGGUNAKAN saveOfflineOrder) ---
   const doCheckout = async (orderData: any) => {
-      // 1. Ambil Data
-      let customerName = '';
-      let tempo = 'CASH';
-      let note = '';
+    // 1. Ambil Data
+    let customerName = '';
+    let tempo = 'CASH';
+    let note = '';
 
-      if (typeof orderData === 'string') {
-          customerName = orderData;
+    if (typeof orderData === 'string') {
+      customerName = orderData;
+    } else {
+      customerName = orderData.customerName;
+      tempo = orderData.tempo || 'CASH';
+      note = orderData.note || '';
+    }
+
+    // Gabungkan Note ke Nama jika perlu (opsional)
+    const finalCustomerName = note ? `${customerName} (${note})` : customerName;
+
+    // Update username di state jika guest
+    if (customerName !== userName && !isAdmin) {
+      setUserName(customerName);
+    }
+
+    if (cart.length === 0) return;
+
+    setLoading(true);
+    try {
+      // 2. SIMPAN KE TABLE ORDERS_MJM / ORDERS_BJW
+      // Stok BELUM dipotong disini, menunggu ACC dari Admin nanti
+      const success = await saveOfflineOrder(
+        cart,
+        finalCustomerName,
+        tempo,
+        selectedStore
+      );
+
+      if (success) {
+        showToast(`Order dibuat! Status: Belum Diproses. Tempo: ${tempo}`, 'success');
+        setCart([]);
+        setActiveView('shop'); // Tetap di shop agar bisa order lagi atau pindah view
+        await refreshData();
       } else {
-          customerName = orderData.customerName;
-          tempo = orderData.tempo || 'CASH';
-          note = orderData.note || '';
+        showToast('Gagal membuat pesanan (Database Error)', 'error');
       }
-
-      // Gabungkan Note ke Nama jika perlu (opsional)
-      const finalCustomerName = note ? `${customerName} (${note})` : customerName;
-
-      // Update username di state jika guest
-      if (customerName !== userName && !isAdmin) { 
-        setUserName(customerName); 
-      }
-
-      if (cart.length === 0) return;
-
-      setLoading(true);
-      try {
-          // 2. SIMPAN KE TABLE ORDERS_MJM / ORDERS_BJW
-          // Stok BELUM dipotong disini, menunggu ACC dari Admin nanti
-          const success = await saveOfflineOrder(
-              cart, 
-              finalCustomerName, 
-              tempo, 
-              selectedStore
-          );
-
-          if (success) {
-              showToast(`Order dibuat! Status: Belum Diproses. Tempo: ${tempo}`, 'success');
-              setCart([]); 
-              setActiveView('shop'); // Tetap di shop agar bisa order lagi atau pindah view
-              await refreshData();
-          } else {
-              showToast('Gagal membuat pesanan (Database Error)', 'error');
-          }
-      } catch (error: any) {
-          console.error("Checkout Error:", error);
-          showToast(`Gagal: ${error.message}`, 'error');
-      } finally {
-          setLoading(false);
-      }
+    } catch (error: any) {
+      console.error('Checkout Error:', error);
+      showToast(`Gagal: ${error.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // --- RENDERING ---
@@ -313,27 +406,27 @@ const AppContent: React.FC = () => {
   }
 
   if (!isAuthenticated || !userRole) {
-      return (
-        <LoginPage 
-          store={selectedStore} 
-          onLogin={handleLogin} 
-          onBack={handleBackToStoreSelection} 
-        />
-      );
+    return (
+      <LoginPage
+        store={selectedStore}
+        onLogin={handleLogin}
+        onBack={handleBackToStoreSelection}
+      />
+    );
   }
 
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col font-sans text-gray-100">
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
-      
+
       {currentStoreConfig && (
-        <Header 
-          isAdmin={isAdmin} 
-          activeView={activeView} 
-          setActiveView={setActiveView} 
-          loading={loading} 
-          onRefresh={() => { refreshData(); showToast('Data diperbarui'); }} 
-          loginName={loginName} 
+        <Header
+          isAdmin={isAdmin}
+          activeView={activeView}
+          setActiveView={setActiveView}
+          loading={loading}
+          onRefresh={() => { refreshData(); showToast('Data diperbarui'); }}
+          loginName={loginName}
           onLogout={handleLogout}
           storeConfig={currentStoreConfig}
         />
@@ -351,7 +444,7 @@ const AppContent: React.FC = () => {
         {activeView === 'rekap_bulanan' && isAdmin && <RekapBulananView />}
         {activeView === 'zakat_tahunan' && isAdmin && <ZakatTahunanView />}
         {activeView === 'data_agung' && isAdmin && <DataAgungView items={items} onRefresh={refreshData} showToast={showToast} />}
-          {activeView === 'stock_online' && isAdmin && <StockOnlineView />}
+        {activeView === 'stock_online' && isAdmin && <StockOnlineView />}
         {activeView === 'foto_produk' && isAdmin && <FotoProdukView />}
         {activeView === 'scan_resi_stage1' && isAdmin && <ScanResiStage1 onRefresh={refreshData} />}
         {activeView === 'scan_resi_stage2' && isAdmin && <ScanResiStage2 onRefresh={refreshData} />}
@@ -362,21 +455,21 @@ const AppContent: React.FC = () => {
         {activeView === 'kirim_barang' && isAdmin && <KirimBarangView />}
         {activeView === 'orders' && isAdmin && <OrderManagement />}
         {activeView === 'orders' && !isAdmin && <CustomerOrderView orders={[]} currentCustomerName={userName} />}
-        
+
         {isEditing && isAdmin && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in">
-                <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl">
-                    <ItemForm initialData={editItem || undefined} onCancel={() => { setIsEditing(false); setEditItem(null); }} onSuccess={(item) => { handleSaveItem(item as any); }} />
-                </div>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in">
+            <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl">
+              <ItemForm initialData={editItem || undefined} onCancel={() => { setIsEditing(false); setEditItem(null); }} onSuccess={(item) => { handleSaveItem(item as any); }} />
             </div>
+          </div>
         )}
       </div>
 
       <MobileNav isAdmin={isAdmin} activeView={activeView} setActiveView={setActiveView} pendingOrdersCount={0} myPendingOrdersCount={0} />
-      
+
       {/* Floating Quick Access Widget - Available for all authenticated users */}
       {isAuthenticated && (
-        <FloatingQuickAccess 
+        <FloatingQuickAccess
           onAddNew={() => { setEditItem(null); setIsEditing(true); }}
           onViewItem={(item) => { setEditItem(item); setIsEditing(true); }}
           isAdmin={isAdmin}
