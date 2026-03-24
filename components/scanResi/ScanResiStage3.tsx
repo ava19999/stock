@@ -478,7 +478,7 @@ const ProcessingModal = ({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-yellow-400 text-[11px]">{item.part_number}</span>
-                  <span className="text-gray-400">×{item.qty}</span>
+                  <span className="text-gray-400">Ãƒâ€”{item.qty}</span>
                 </div>
                 <div className="text-gray-300 truncate">{item.nama_barang}</div>
                 <div className="flex items-center gap-2 text-[10px] text-gray-500">
@@ -818,9 +818,9 @@ const UploadResultModal = ({
                     log.type === 'error' ? 'text-red-500' :
                     'text-blue-500'
                   }`}>
-                    {log.type === 'success' ? '✓' :
-                     log.type === 'skip' ? '⏭' :
-                     log.type === 'error' ? '✗' : '→'}
+                    {log.type === 'success' ? 'Ã¢Å“â€œ' :
+                     log.type === 'skip' ? 'Ã¢ÂÂ­' :
+                     log.type === 'error' ? 'Ã¢Å“â€”' : 'Ã¢â€ â€™'}
                   </span>
                   <span className="text-blue-300 font-semibold shrink-0">{log.resi}</span>
                   <span className="text-gray-500">-</span>
@@ -1144,6 +1144,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const pendingUpdates = useRef<Map<string, Stage3Row>>(new Map());
   const isFlushingPendingRef = useRef(false);
   const isMountedRef = useRef(true);
+  const AUTO_SAVE_DELAY_MS = 700;
   
   // SELECTED RESI FOR PROCESS
   const [selectedResis, setSelectedResis] = useState<Set<string>>(new Set());
@@ -1261,9 +1262,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   const lastCursorUpdate = useRef<number>(0);
   
   // Function untuk broadcast perubahan data ke user lain (instant, tanpa menunggu database)
-  const broadcastDataChange = useCallback((rowId: string, field: string, value: any) => {
+  const broadcastDataChange = useCallback((
+    rowId: string,
+    field: string,
+    value: any,
+    rowMeta?: Partial<Stage3Row>
+  ) => {
     if (!broadcastChannelRef.current) return;
-    
+
     broadcastChannelRef.current.send({
       type: 'broadcast',
       event: 'data_change',
@@ -1271,6 +1277,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         rowId,
         field,
         value,
+        resi: rowMeta?.resi || '',
+        order_id: rowMeta?.no_pesanan || '',
+        customer: rowMeta?.customer || '',
+        nama_produk: rowMeta?.nama_barang_csv || '',
         userId: userIdRef.current,
         timestamp: Date.now()
       }
@@ -1477,12 +1487,29 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           const newData = payload.new as any;
           const rowId = `db-${String(newData.id)}`;
           const legacyRowId = String(newData.id);
+          const resiUpper = String(newData.resi || '').trim().toUpperCase();
+          const orderUpper = String(newData.order_id || '').trim().toUpperCase();
+          const customerUpper = String(newData.customer || '').trim().toUpperCase();
+          const namaProdukUpper = String(newData.nama_produk || '').trim().toUpperCase();
+          const isSameLogicalRow = (row: Stage3Row) => {
+            const rowResiUpper = String(row.resi || '').trim().toUpperCase();
+            const rowOrderUpper = String(row.no_pesanan || '').trim().toUpperCase();
+            const rowCustomerUpper = String(row.customer || '').trim().toUpperCase();
+            const rowNamaUpper = String(row.nama_barang_csv || '').trim().toUpperCase();
+
+            const sameResi = resiUpper ? rowResiUpper === resiUpper : true;
+            const sameOrder = orderUpper ? rowOrderUpper === orderUpper : true;
+            if (!sameResi || !sameOrder) return false;
+            if (customerUpper && rowCustomerUpper && rowCustomerUpper !== customerUpper) return false;
+            if (namaProdukUpper && rowNamaUpper && rowNamaUpper !== namaProdukUpper) return false;
+            return Boolean(resiUpper || orderUpper);
+          };
           
           // Flash effect untuk cell yang berubah
           const changedFields: string[] = [];
           if (newData.part_number !== undefined) changedFields.push('part_number');
-          if (newData.qty !== undefined) changedFields.push('qty');
-          if (newData.harga_total !== undefined) changedFields.push('harga_total');
+          if (newData.qty !== undefined || newData.jumlah !== undefined) changedFields.push('qty_keluar');
+          if (newData.harga_total !== undefined || newData.total_harga_produk !== undefined) changedFields.push('harga_total');
           if (changedFields.length > 0) {
             flashCell(rowId, changedFields);
           }
@@ -1490,18 +1517,18 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           // STEP 1: Update data segera (tanpa menunggu lookup) - untuk kecepatan
           setRows(prevRows => 
             prevRows.map(row => {
-              if (row.id !== rowId && row.id !== legacyRowId) return row;
+              if (row.id !== rowId && row.id !== legacyRowId && !isSameLogicalRow(row)) return row;
               // Jangan timpa baris yang sedang difokuskan user ini (hindari kehilangan input)
               const focusedRowId = focusedCell && rowsRef.current[focusedCell.rowIndex]?.id;
-              if (focusedRowId && (focusedRowId === rowId || focusedRowId === legacyRowId)) {
+              if (focusedRowId && (focusedRowId === row.id || focusedRowId === rowId || focusedRowId === legacyRowId)) {
                 return row;
               }
               return { 
                 ...row, 
                 part_number: newData.part_number ?? row.part_number,
-                qty_keluar: newData.qty ?? row.qty_keluar,
+                qty_keluar: (newData.qty ?? newData.jumlah) ?? row.qty_keluar,
                 harga_satuan: newData.harga_satuan ?? row.harga_satuan,
-                harga_total: newData.harga_total ?? row.harga_total,
+                harga_total: (newData.harga_total ?? newData.total_harga_produk) ?? row.harga_total,
                 customer: newData.customer ?? row.customer,
                 ecommerce: newData.ecommerce ?? row.ecommerce,
                 sub_toko: newData.toko ?? row.sub_toko,
@@ -1516,10 +1543,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               if (partInfo) {
                 setRows(prevRows => 
                   prevRows.map(row => {
-                    if (row.id !== rowId && row.id !== legacyRowId) return row;
+                    if (row.id !== rowId && row.id !== legacyRowId && !isSameLogicalRow(row)) return row;
                     const keepPending = isStage1or2Pending(row);
-                    const qtyNow = newData.qty ?? row.qty_keluar;
-                    const hargaTotalNow = newData.harga_total ?? row.harga_total;
+                    const qtyNow = (newData.qty ?? newData.jumlah) ?? row.qty_keluar;
+                    const hargaTotalNow = (newData.harga_total ?? newData.total_harga_produk) ?? row.harga_total;
                     const hargaKosong = (qtyNow || 0) > 0 && (hargaTotalNow || 0) <= 0;
                     const stockValidNow = (partInfo.quantity || 0) >= qtyNow;
                     let status_message = row.status_message;
@@ -1603,14 +1630,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           ecommerce: newData.ecommerce || '-',
           sub_toko: newData.toko || (selectedStore === 'bjw' ? 'BJW' : 'MJM'),
           part_number: newData.part_number || '',
-          nama_barang_csv: newData.nama_barang || '',
+          nama_barang_csv: newData.nama_barang || newData.nama_produk || '',
           nama_barang_base: '',
           brand: '',
           application: '',
           stock_saat_ini: 0,
-          qty_keluar: newData.qty || 0,
-          harga_total: newData.harga_total || 0,
-          harga_satuan: newData.harga_satuan || 0,
+          qty_keluar: Number(newData.qty ?? newData.jumlah ?? 0),
+          harga_total: Number(newData.harga_total ?? newData.total_harga_produk ?? 0),
+          harga_satuan: Number(newData.harga_satuan || 0),
           mata_uang: 'IDR',
           no_pesanan: newData.order_id || '',
           customer: newData.customer || '',
@@ -1667,8 +1694,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                   prevRows.map(row => {
                     if (row.id !== newRowId) return row;
                     const keepPending = isStage1or2Pending(row);
-                    const qtyNow = newData.qty ?? row.qty_keluar;
-                    const hargaTotalNow = newData.harga_total ?? row.harga_total;
+                    const qtyNow = (newData.qty ?? newData.jumlah) ?? row.qty_keluar;
+                    const hargaTotalNow = (newData.harga_total ?? newData.total_harga_produk) ?? row.harga_total;
                     const hargaKosong = (qtyNow || 0) > 0 && (hargaTotalNow || 0) <= 0;
                     const stockValidNow = (partInfo.quantity || 0) >= qtyNow;
                     let status_message = row.status_message;
@@ -1770,41 +1797,77 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     // Channel untuk INSTANT broadcast perubahan data (tanpa menunggu database)
     broadcastChannelRef.current = supabase
       .channel(`stage3-broadcast-${selectedStore}`)
-      .on('broadcast', { event: 'data_change' }, (payload) => {
-        const { rowId, field, value, userId: senderId } = payload.payload;
-        
+            .on('broadcast', { event: 'data_change' }, (payload) => {
+        const {
+          rowId,
+          field,
+          value,
+          userId: senderId,
+          resi,
+          order_id,
+          customer,
+          nama_produk
+        } = payload.payload || {};
+
         // Jangan proses jika dari user yang sama
         if (senderId === userId) return;
-        
+
         console.log('[Broadcast] Data change received:', { rowId, field, value });
-        
+
         // Flash effect
         flashCell(rowId, [field]);
-        
-        // Update data langsung
-        setRows(prevRows =>
-          prevRows.map(row => {
-            if (row.id !== rowId) return row;
-            
-            // Map field names
-            const fieldMap: Record<string, keyof Stage3Row> = {
-              'part_number': 'part_number',
-              'qty_keluar': 'qty_keluar',
-              'harga_total': 'harga_total',
-              'harga_satuan': 'harga_satuan',
-              'customer': 'customer',
-              'ecommerce': 'ecommerce',
-              'sub_toko': 'sub_toko',
-              'tanggal': 'tanggal',
-            };
-            
-            const rowField = fieldMap[field];
-            if (rowField) {
-              return { ...row, [rowField]: value };
+
+        // Update data langsung (fallback matching by business key jika rowId beda)
+        setRows(prevRows => {
+          // Map field names
+          const fieldMap: Record<string, keyof Stage3Row> = {
+            'part_number': 'part_number',
+            'qty_keluar': 'qty_keluar',
+            'harga_total': 'harga_total',
+            'harga_satuan': 'harga_satuan',
+            'customer': 'customer',
+            'ecommerce': 'ecommerce',
+            'sub_toko': 'sub_toko',
+            'tanggal': 'tanggal',
+          };
+
+          const rowField = fieldMap[field];
+          if (!rowField) return prevRows;
+
+          let targetIndex = prevRows.findIndex(row => row.id === rowId);
+          if (targetIndex < 0) {
+            const norm = (v: any) => String(v || '').trim().toUpperCase();
+            const targetResi = norm(resi);
+            const targetOrder = norm(order_id);
+            const targetCustomer = norm(customer);
+            const targetNama = norm(nama_produk);
+
+            if (targetResi || targetOrder) {
+              targetIndex = prevRows.findIndex((row) => {
+                const rowResi = norm(row.resi);
+                const rowOrder = norm(row.no_pesanan);
+                const rowCustomer = norm(row.customer);
+                const rowNama = norm(row.nama_barang_csv);
+
+                const sameResi = targetResi ? rowResi === targetResi : true;
+                const sameOrder = targetOrder ? rowOrder === targetOrder : true;
+                if (!sameResi || !sameOrder) return false;
+                if (targetCustomer && rowCustomer && rowCustomer !== targetCustomer) return false;
+                if (targetNama && rowNama && rowNama !== targetNama) return false;
+                return true;
+              });
             }
-            return row;
-          })
-        );
+          }
+
+          if (targetIndex < 0) return prevRows;
+
+          const nextRows = [...prevRows];
+          nextRows[targetIndex] = {
+            ...nextRows[targetIndex],
+            [rowField]: value
+          };
+          return nextRows;
+        });
       })
       .subscribe((status) => {
         console.log(`[Broadcast] stage3-broadcast-${selectedStore} status:`, status);
@@ -2326,14 +2389,59 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
   }, [selectedStore]);
 
-  const flushPendingUpdates = useCallback(async (_reason: string = 'manual') => {
-    // Autosave dimatikan; tidak ada yang perlu diflush.
-    pendingUpdates.current.clear();
-    autoSaveTimers.current.forEach(timer => clearTimeout(timer));
-    autoSaveTimers.current.clear();
-  }, []);
+  const scheduleRowAutoSave = useCallback(async (
+    row: Stage3Row,
+    options?: { immediate?: boolean }
+  ) => {
+    if (!row) return;
 
-  // Autosave dimatikan: tidak perlu flush saat tab berubah/keluar
+    pendingUpdates.current.set(row.id, row);
+
+    const existingTimer = autoSaveTimers.current.get(row.id);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      autoSaveTimers.current.delete(row.id);
+    }
+
+    if (options?.immediate) {
+      const latestRow = pendingUpdates.current.get(row.id) || row;
+      await handleSaveRow(latestRow);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      autoSaveTimers.current.delete(row.id);
+      const latestRow = pendingUpdates.current.get(row.id) || row;
+      await handleSaveRow(latestRow);
+    }, AUTO_SAVE_DELAY_MS);
+
+    autoSaveTimers.current.set(row.id, timer);
+  }, [handleSaveRow, AUTO_SAVE_DELAY_MS]);
+
+  const saveRowNow = useCallback(async (rowId: string) => {
+    if (!rowId) return;
+    const latest = rowsRef.current.find(r => r.id === rowId);
+    if (!latest) return;
+    await scheduleRowAutoSave(latest, { immediate: true });
+  }, [scheduleRowAutoSave]);
+
+  const flushPendingUpdates = useCallback(async (_reason: string = 'manual') => {
+    if (isFlushingPendingRef.current) return;
+    isFlushingPendingRef.current = true;
+
+    try {
+      autoSaveTimers.current.forEach(timer => clearTimeout(timer));
+      autoSaveTimers.current.clear();
+
+      const pendingRows = Array.from(pendingUpdates.current.values());
+      for (const row of pendingRows) {
+        await handleSaveRow(row);
+      }
+    } finally {
+      isFlushingPendingRef.current = false;
+    }
+  }, [handleSaveRow]);
+
   useEffect(() => {
     return () => {
       void flushPendingUpdates('unmount');
@@ -2824,7 +2932,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           }
           
           // Log sukses final
-          addLog('info', 'SISTEM', `✓ Selesai: ${result.count} baru, ${result.updatedCount} update, ${allSkippedItems.length} skip`);
+          addLog('info', 'SISTEM', `Ã¢Å“â€œ Selesai: ${result.count} baru, ${result.updatedCount} update, ${allSkippedItems.length} skip`);
           
           // Set data untuk modal
           setUploadSummary({
@@ -3051,11 +3159,16 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     // Auto-save to database with debounce (only for editable fields)
     if (editableFields.includes(field)) {
       // INSTANT: Broadcast perubahan ke user lain (tanpa menunggu database)
-      broadcastDataChange(id, field, value);
+      broadcastDataChange(id, field, value, updatedRow);
       
       // Broadcast editing status (hanya indikasi, tidak auto-save)
       broadcastEditingCell(`${id}-${field}`);
       setTimeout(() => broadcastEditingCell(null), 500);
+
+      // Auto-save semua kolom editable selain part_number (part_number disimpan saat blur agar lookup valid)
+      if (field !== 'part_number') {
+        void scheduleRowAutoSave(updatedRow);
+      }
     }
   };
 
@@ -3211,7 +3324,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         return newRows;
       });
       
-      // Tidak auto-simpan; simpan manual lewat tombol
+      // Auto-save part number kosong agar sinkron ke user lain
+      if (rowToSave) {
+        await scheduleRowAutoSave(rowToSave, { immediate: true });
+      }
       return;
     }
     
@@ -3259,7 +3375,10 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         return newRows;
     });
 
-    // Tidak auto-simpan; simpan manual lewat tombol
+    // Auto-save setelah lookup part agar user lain langsung ikut update
+    if (rowToSave) {
+      await scheduleRowAutoSave(rowToSave, { immediate: true });
+    }
   };
 
   const PROCESS_CONCURRENCY = 4;
@@ -3712,11 +3831,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
   };
 
-  // Helper untuk menampilkan icon sort (↑ asc, ↓ desc, kosong jika none)
+  // Helper untuk menampilkan icon sort (Ã¢â€ â€˜ asc, Ã¢â€ â€œ desc, kosong jika none)
   const getSortIcon = (field: string) => {
     if (sortField !== field) return '';
-    if (sortDirection === 'asc') return '↑';
-    if (sortDirection === 'desc') return '↓';
+    if (sortDirection === 'asc') return 'Ã¢â€ â€˜';
+    if (sortDirection === 'desc') return 'Ã¢â€ â€œ';
     return '';
   };
 
@@ -4119,14 +4238,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                 className="text-gray-400 hover:text-white text-xs"
                                 title="Hapus filter"
                             >
-                                ✕
+                                Ã¢Å“â€¢
                             </button>
                         )}
                     </div>
                     {showPartNumberDropdown && (
                         <div className="absolute left-0 top-full mt-1 w-64 bg-gray-800 border border-gray-600 rounded shadow-lg max-h-60 overflow-auto z-50">
                             <div className="p-1.5 text-[9px] text-yellow-400 border-b border-gray-700 bg-yellow-900/20 font-semibold sticky top-0 z-10">
-                                📦 Part Number di Tabel ({(() => {
+                                Ã°Å¸â€œÂ¦ Part Number di Tabel ({(() => {
                                     const uniqueParts = [...new Set(rows.filter(r => r.part_number).map(r => r.part_number))];
                                     const filtered = filterPartNumber 
                                         ? uniqueParts.filter(p => p.toLowerCase().includes(filterPartNumber.toLowerCase()))
@@ -4162,7 +4281,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                             <div className="flex gap-2 text-gray-500 mt-0.5">
                                                 <span>Total Qty: {totalQty}</span>
                                                 <span>Stok: {stock}</span>
-                                                {totalQty > stock && <span className="text-pink-400">⚠️ Kurang {totalQty - stock}</span>}
+                                                {totalQty > stock && <span className="text-pink-400">Ã¢Å¡Â Ã¯Â¸Â Kurang {totalQty - stock}</span>}
                                             </div>
                                         </div>
                                     );
@@ -4208,7 +4327,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                 className="text-gray-400 hover:text-white text-xs px-1"
                                 title="Hapus pencarian"
                             >
-                                ✕
+                                Ã¢Å“â€¢
                             </button>
                         )}
                     </div>
@@ -4227,7 +4346,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                 return filteredTableRows.length > 0 && (
                                     <>
                                         <div className="p-1.5 text-[9px] text-green-400 border-b border-gray-700 bg-green-900/20 font-semibold sticky top-0 z-10">
-                                            📋 Hasil di Tabel S3 ({filteredTableRows.length})
+                                            Ã°Å¸â€œâ€¹ Hasil di Tabel S3 ({filteredTableRows.length})
                                         </div>
                                         {filteredTableRows.slice(0, 20).map((r, i) => {
                                             const rowIndex = visualRows.indexOf(r);
@@ -4270,7 +4389,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                             
                             {/* SECTION 2: Hasil dari Stage 1 (untuk referensi) */}
                             <div className="p-1.5 text-[9px] text-blue-400 border-b border-gray-700 bg-blue-900/20 font-semibold sticky top-0 z-10">
-                                🔍 Resi Stage 1 ({stage1ResiList.filter(r => 
+                                Ã°Å¸â€Â Resi Stage 1 ({stage1ResiList.filter(r => 
                                     !resiSearchQuery || 
                                     String(r.resi || '').toLowerCase().includes(resiSearchQuery.toLowerCase()) ||
                                     (r.no_pesanan && String(r.no_pesanan).toLowerCase().includes(resiSearchQuery.toLowerCase()))
@@ -4306,7 +4425,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                                     <span className="px-1 rounded text-[9px] bg-green-600/30 text-green-300">Di S3</span>
                                                 )}
                                                 <span className={`px-1 rounded text-[9px] ${r.stage2_verified ? 'bg-green-600/30 text-green-300' : 'bg-yellow-600/30 text-yellow-300'}`}>
-                                                    {r.stage2_verified ? 'S2 ✓' : 'S1 only'}
+                                                    {r.stage2_verified ? 'S2 Ã¢Å“â€œ' : 'S1 only'}
                                                 </span>
                                             </div>
                                         </div>
@@ -4489,11 +4608,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                             />
                             {resiItems.length > 1 && (
                               <span className={`text-[9px] ${hasNotReadyItem ? 'text-red-400' : 'text-gray-400'}`}>
-                                {resiItems.length} item{hasNotReadyItem ? ' ⚠️' : ''}
+                                {resiItems.length} item{hasNotReadyItem ? ' Ã¢Å¡Â Ã¯Â¸Â' : ''}
                               </span>
                             )}
                             {hasNotReadyItem && resiItems.length === 1 && (
-                              <span className="text-[9px] text-red-400">⚠️</span>
+                              <span className="text-[9px] text-red-400">Ã¢Å¡Â Ã¯Â¸Â</span>
                             )}
                           </div>
                         </td>
@@ -4549,6 +4668,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         type="date" 
                         value={row.tanggal} 
                         onChange={(e) => updateRow(row.id, 'tanggal', e.target.value)} 
+                        onBlur={() => { void saveRowNow(row.id); }} 
                         onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'tanggal' })}
                         onKeyDown={(e) => handleKeyDown(e, idx, 'tanggal', row.id)} 
                         className="w-full h-full bg-transparent px-1 outline-none text-center cursor-pointer"
@@ -4566,7 +4686,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                       <EcommerceCellDropdown
                         value={row.ecommerce}
                         onChange={(v) => updateRow(row.id, 'ecommerce', v)}
-                        onSave={() => {}}
+                        onSave={() => { void saveRowNow(row.id); }}
                       />
                       {/* Badge INSTANT: untuk SHOPEE (jika resi === no_pesanan) ATAU TikTok (jika label INSTAN) */}
                       {((row.resi && row.no_pesanan && row.resi === row.no_pesanan && row.ecommerce?.toUpperCase().includes('SHOPEE')) ||
@@ -4581,7 +4701,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                     <TokoCellDropdown
                       value={row.sub_toko}
                       onChange={(v) => updateRow(row.id, 'sub_toko', v)}
-                      onSave={() => {}}
+                      onSave={() => { void saveRowNow(row.id); }}
                     />
                   </td>
 
@@ -4592,6 +4712,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         type="text"
                         value={row.customer} 
                         onChange={(e) => updateRow(row.id, 'customer', e.target.value)} 
+                        onBlur={() => { void saveRowNow(row.id); }} 
                         onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'customer' })}
                         onKeyDown={(e) => handleKeyDown(e, idx, 'customer', row.id)}
                         className="w-full h-full bg-transparent px-1.5 outline-none text-gray-200 truncate focus:text-clip"
@@ -4713,6 +4834,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         type="number" 
                         value={row.qty_keluar || ''} 
                         onChange={(e) => updateRow(row.id, 'qty_keluar', parseInt(e.target.value) || 0)} 
+                        onBlur={() => { void saveRowNow(row.id); }} 
                         // simpan manual via tombol
                         onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'qty_keluar' })}
                         onKeyDown={(e) => handleKeyDown(e, idx, 'qty_keluar', row.id)} 
@@ -4734,6 +4856,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         type="number" 
                         value={row.harga_total || ''} 
                         onChange={(e) => updateRow(row.id, 'harga_total', parseInt(e.target.value) || 0)} 
+                        onBlur={() => { void saveRowNow(row.id); }} 
                         // simpan manual via tombol
                         onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'harga_total' })}
                         onKeyDown={(e) => handleKeyDown(e, idx, 'harga_total', row.id)} 
@@ -4755,6 +4878,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                         type="number" 
                         value={row.harga_satuan || ''} 
                         onChange={(e) => updateRow(row.id, 'harga_satuan', parseInt(e.target.value) || 0)} 
+                        onBlur={() => { void saveRowNow(row.id); }} 
                         // simpan manual via tombol
                         onFocus={() => setFocusedCell({ rowIndex: idx, colKey: 'harga_satuan' })}
                         onKeyDown={(e) => handleKeyDown(e, idx, 'harga_satuan', row.id)} 
@@ -4820,3 +4944,18 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     </div>
   );
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
