@@ -61,6 +61,16 @@ interface Stage3Row {
   force_override_double: boolean;  // FITUR 1: Flag untuk force override status Double
 }
 
+type EditableStage3Field =
+  | 'tanggal'
+  | 'ecommerce'
+  | 'sub_toko'
+  | 'part_number'
+  | 'qty_keluar'
+  | 'harga_total'
+  | 'harga_satuan'
+  | 'customer';
+
 // Interface untuk item yang di-skip saat upload CSV
 interface SkippedItem {
   resi: string;
@@ -1142,6 +1152,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   // AUTO-SAVE DEBOUNCE REFS
   const autoSaveTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const pendingUpdates = useRef<Map<string, Stage3Row>>(new Map());
+  const pendingDirtyFields = useRef<Map<string, Set<keyof Stage3Row>>>(new Map());
   const isFlushingPendingRef = useRef(false);
   const isMountedRef = useRef(true);
   const AUTO_SAVE_DELAY_MS = 700;
@@ -1209,6 +1220,49 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     const doubleOverridden = row.status_message === 'Double' && row.force_override_double && row.is_stock_valid && hasPartNumber;
     return normalValid || doubleOverridden;
   };
+
+  const toCreatedAtFromDate = useCallback((tanggal: string) => {
+    const dateOnly = String(tanggal || '').trim();
+    if (!dateOnly) return undefined;
+    return `${dateOnly}T00:00:00.000Z`;
+  }, []);
+
+  const buildResiItemUpdatePayload = useCallback((
+    row: Stage3Row,
+    dirtyFields?: Array<keyof Stage3Row>
+  ) => {
+    const payload: Record<string, any> = {};
+    const dirtySet = dirtyFields && dirtyFields.length > 0 ? new Set(dirtyFields) : null;
+    const shouldInclude = (field: keyof Stage3Row) => !dirtySet || dirtySet.has(field);
+
+    if (shouldInclude('customer')) payload.customer = row.customer;
+    if (shouldInclude('part_number')) payload.part_number = row.part_number;
+    if (shouldInclude('nama_barang_csv')) payload.nama_produk = row.nama_barang_csv;
+    if (shouldInclude('qty_keluar')) payload.jumlah = row.qty_keluar;
+    if (shouldInclude('harga_total') || shouldInclude('harga_satuan')) payload.total_harga_produk = row.harga_total;
+    if (shouldInclude('ecommerce')) payload.ecommerce = row.ecommerce;
+    if (shouldInclude('sub_toko')) payload.toko = row.sub_toko;
+    if (shouldInclude('tanggal')) {
+      const createdAt = toCreatedAtFromDate(row.tanggal);
+      if (createdAt) payload.created_at = createdAt;
+    }
+
+    return payload;
+  }, [toCreatedAtFromDate]);
+
+  const buildResiItemInsertPayload = useCallback((row: Stage3Row) => ({
+    resi: row.resi,
+    ecommerce: row.ecommerce,
+    toko: row.sub_toko,
+    customer: row.customer,
+    part_number: row.part_number,
+    nama_produk: row.nama_barang_csv,
+    jumlah: row.qty_keluar,
+    total_harga_produk: row.harga_total,
+    status: 'pending',
+    order_id: row.no_pesanan,
+    created_at: toCreatedAtFromDate(row.tanggal) || new Date().toISOString()
+  }), [toCreatedAtFromDate]);
 
   // REALTIME COLLABORATION STATE
   const [activeUsers, setActiveUsers] = useState<{userId: string, userName: string, color: string}[]>([]);
@@ -1510,6 +1564,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           if (newData.part_number !== undefined) changedFields.push('part_number');
           if (newData.qty !== undefined || newData.jumlah !== undefined) changedFields.push('qty_keluar');
           if (newData.harga_total !== undefined || newData.total_harga_produk !== undefined) changedFields.push('harga_total');
+          if (newData.created_at !== undefined || newData.tanggal !== undefined) changedFields.push('tanggal');
           if (changedFields.length > 0) {
             flashCell(rowId, changedFields);
           }
@@ -1525,6 +1580,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
               }
               return { 
                 ...row, 
+                tanggal: newData.created_at ? String(newData.created_at).split('T')[0] : (newData.tanggal ?? row.tanggal),
                 part_number: newData.part_number ?? row.part_number,
                 qty_keluar: (newData.qty ?? newData.jumlah) ?? row.qty_keluar,
                 harga_satuan: newData.harga_satuan ?? row.harga_satuan,
@@ -2321,46 +2377,30 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
   };
 
-  const handleSaveRow = useCallback(async (row: Stage3Row) => {
+  const handleSaveRow = useCallback(async (
+    row: Stage3Row,
+    dirtyFields?: Array<keyof Stage3Row>
+  ) => {
     if (isMountedRef.current) {
       setSavingStatus('saving');
     }
     try {
       if (row.id.startsWith('db-')) {
          const dbId = row.id.replace('db-', '');
-         const payload = {
-            customer: row.customer,
-            part_number: row.part_number,
-            nama_produk: row.nama_barang_csv,
-            jumlah: row.qty_keluar,
-            total_harga_produk: row.harga_total,
-            // Update juga Ecomm/Toko jika berubah
-            ecommerce: row.ecommerce,
-            toko: row.sub_toko
-         };
-         const res = await updateResiItem(selectedStore, dbId, payload);
-         if (!res.success) {
-           alert(res.message || 'Gagal update data (Toko/E-Comm).');
-           throw new Error(res.message || 'Gagal update resi item');
+         const payload = buildResiItemUpdatePayload(row, dirtyFields);
+
+         if (Object.keys(payload).length > 0) {
+           const res = await updateResiItem(selectedStore, dbId, payload);
+           if (!res.success) {
+             alert(res.message || 'Gagal update data (Toko/E-Comm).');
+             throw new Error(res.message || 'Gagal update resi item');
+           }
          }
-      } 
+      }
       else {
-         const payload = {
-            resi: row.resi,
-            ecommerce: row.ecommerce,
-            toko: row.sub_toko,
-            customer: row.customer,
-            part_number: row.part_number,
-            nama_produk: row.nama_barang_csv,
-            jumlah: row.qty_keluar,
-            total_harga_produk: row.harga_total,
-            status: 'pending',
-            order_id: row.no_pesanan,
-            created_at: new Date().toISOString()
-         };
-         
+         const payload = buildResiItemInsertPayload(row);
          const newId = await insertResiItem(selectedStore, payload);
-         
+
          if (newId && isMountedRef.current) {
            setRows(prev => prev.map(r => r.id === row.id ? { ...r, id: `db-${newId}` } : r));
          }
@@ -2381,21 +2421,28 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
         autoSaveTimers.current.delete(row.id);
       }
       pendingUpdates.current.delete(row.id);
+      pendingDirtyFields.current.delete(row.id);
     } catch (e) {
-      console.error("Auto-save failed:", e);
+      console.error('Auto-save failed:', e);
       if (isMountedRef.current) {
         setSavingStatus('idle');
       }
     }
-  }, [selectedStore]);
+  }, [selectedStore, buildResiItemUpdatePayload, buildResiItemInsertPayload]);
 
   const scheduleRowAutoSave = useCallback(async (
     row: Stage3Row,
-    options?: { immediate?: boolean }
+    options?: { immediate?: boolean; dirtyFields?: Array<keyof Stage3Row> }
   ) => {
     if (!row) return;
 
     pendingUpdates.current.set(row.id, row);
+
+    if (options?.dirtyFields && options.dirtyFields.length > 0) {
+      const existingDirtySet = pendingDirtyFields.current.get(row.id) || new Set<keyof Stage3Row>();
+      options.dirtyFields.forEach((field) => existingDirtySet.add(field));
+      pendingDirtyFields.current.set(row.id, existingDirtySet);
+    }
 
     const existingTimer = autoSaveTimers.current.get(row.id);
     if (existingTimer) {
@@ -2405,18 +2452,20 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
     if (options?.immediate) {
       const latestRow = pendingUpdates.current.get(row.id) || row;
-      await handleSaveRow(latestRow);
+      const dirtyFieldsToSave = Array.from(pendingDirtyFields.current.get(row.id) || []);
+      await handleSaveRow(latestRow, dirtyFieldsToSave.length > 0 ? dirtyFieldsToSave : undefined);
       return;
     }
 
     const timer = setTimeout(async () => {
       autoSaveTimers.current.delete(row.id);
       const latestRow = pendingUpdates.current.get(row.id) || row;
-      await handleSaveRow(latestRow);
+      const dirtyFieldsToSave = Array.from(pendingDirtyFields.current.get(row.id) || []);
+      await handleSaveRow(latestRow, dirtyFieldsToSave.length > 0 ? dirtyFieldsToSave : undefined);
     }, AUTO_SAVE_DELAY_MS);
 
     autoSaveTimers.current.set(row.id, timer);
-  }, [handleSaveRow, AUTO_SAVE_DELAY_MS]);
+  }, [handleSaveRow]);
 
   const saveRowNow = useCallback(async (rowId: string) => {
     if (!rowId) return;
@@ -2435,7 +2484,8 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
       const pendingRows = Array.from(pendingUpdates.current.values());
       for (const row of pendingRows) {
-        await handleSaveRow(row);
+        const dirtyFieldsToSave = Array.from(pendingDirtyFields.current.get(row.id) || []);
+        await handleSaveRow(row, dirtyFieldsToSave.length > 0 ? dirtyFieldsToSave : undefined);
       }
     } finally {
       isFlushingPendingRef.current = false;
@@ -2471,15 +2521,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           const dbId = row.id.replace('db-', '');
           rowsToUpdate.push({
             id: dbId,
-            payload: {
-              customer: row.customer,
-              part_number: row.part_number,
-              nama_produk: row.nama_barang_csv,
-              jumlah: row.qty_keluar,
-              total_harga_produk: row.harga_total,
-              ecommerce: row.ecommerce,
-              toko: row.sub_toko
-            }
+            payload: buildResiItemUpdatePayload(row)
           });
         } else {
           // Row baru, perlu insert
@@ -2499,19 +2541,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       // Insert rows baru satu per satu (karena perlu mendapat ID baru)
       for (const row of rowsToInsert) {
         try {
-          const payload = {
-            resi: row.resi,
-            ecommerce: row.ecommerce,
-            toko: row.sub_toko,
-            customer: row.customer,
-            part_number: row.part_number,
-            nama_produk: row.nama_barang_csv,
-            jumlah: row.qty_keluar,
-            total_harga_produk: row.harga_total,
-            status: 'pending',
-            order_id: row.no_pesanan,
-            created_at: new Date().toISOString()
-          };
+          const payload = buildResiItemInsertPayload(row);
           
           const newId = await insertResiItem(selectedStore, payload);
           
@@ -2527,6 +2557,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       
       // Clear pending updates
       pendingUpdates.current.clear();
+      pendingDirtyFields.current.clear();
       
       console.log(`[SaveAll] Total: ${savedCount} saved, ${errorCount} errors`);
       setSavingStatus('saved');
@@ -2565,15 +2596,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           const dbId = row.id.replace('db-', '');
           rowsToUpdate.push({
             id: dbId,
-            payload: {
-              customer: row.customer,
-              part_number: row.part_number,
-              nama_produk: row.nama_barang_csv,
-              jumlah: row.qty_keluar,
-              total_harga_produk: row.harga_total,
-              ecommerce: row.ecommerce,
-              toko: row.sub_toko
-            }
+            payload: buildResiItemUpdatePayload(row)
           });
         } else {
           // Row baru, perlu insert
@@ -2593,19 +2616,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       // Insert rows baru satu per satu (karena perlu mendapat ID baru)
       for (const row of rowsToInsert) {
         try {
-          const payload = {
-            resi: row.resi,
-            ecommerce: row.ecommerce,
-            toko: row.sub_toko,
-            customer: row.customer,
-            part_number: row.part_number,
-            nama_produk: row.nama_barang_csv,
-            jumlah: row.qty_keluar,
-            total_harga_produk: row.harga_total,
-            status: 'pending',
-            order_id: row.no_pesanan,
-            created_at: new Date().toISOString()
-          };
+          const payload = buildResiItemInsertPayload(row);
           
           const newId = await insertResiItem(selectedStore, payload);
           
@@ -2618,7 +2629,9 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           errorCount++;
         }
       }
-      
+      pendingUpdates.current.clear();
+      pendingDirtyFields.current.clear();
+
       console.log(`[SaveKilat] Total: ${savedCount} saved, ${errorCount} errors`);
       setSavingStatus('saved');
       setTimeout(() => setSavingStatus('idle'), 3000);
@@ -3086,7 +3099,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
   };
 
   const updateRow = (id: string, field: keyof Stage3Row, value: any) => {
-    const editableFields: Array<keyof Stage3Row> = [
+    const editableFields: EditableStage3Field[] = [
       'part_number',
       'qty_keluar',
       'harga_total',
@@ -3167,7 +3180,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
       // Auto-save semua kolom editable selain part_number (part_number disimpan saat blur agar lookup valid)
       if (field !== 'part_number') {
-        void scheduleRowAutoSave(updatedRow);
+        const dirtyFields: Array<keyof Stage3Row> = [field];
+        if (field === 'harga_satuan') {
+          dirtyFields.push('harga_total');
+        }
+        void scheduleRowAutoSave(updatedRow, { dirtyFields });
       }
     }
   };
@@ -3326,7 +3343,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
       
       // Auto-save part number kosong agar sinkron ke user lain
       if (rowToSave) {
-        await scheduleRowAutoSave(rowToSave, { immediate: true });
+        await scheduleRowAutoSave(rowToSave, { immediate: true, dirtyFields: ['part_number'] });
       }
       return;
     }
@@ -3377,7 +3394,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
 
     // Auto-save setelah lookup part agar user lain langsung ikut update
     if (rowToSave) {
-      await scheduleRowAutoSave(rowToSave, { immediate: true });
+      await scheduleRowAutoSave(rowToSave, { immediate: true, dirtyFields: ['part_number'] });
     }
   };
 
