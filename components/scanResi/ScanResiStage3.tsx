@@ -1,4 +1,4 @@
-// FILE: components/scanResi/ScanResiStage3.tsx
+﻿// FILE: components/scanResi/ScanResiStage3.tsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { useStore } from '../../context/StoreContext';
@@ -488,7 +488,7 @@ const ProcessingModal = ({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-yellow-400 text-[11px]">{item.part_number}</span>
-                  <span className="text-gray-400">Ãƒâ€”{item.qty}</span>
+                  <span className="text-gray-400">x{item.qty}</span>
                 </div>
                 <div className="text-gray-300 truncate">{item.nama_barang}</div>
                 <div className="flex items-center gap-2 text-[10px] text-gray-500">
@@ -828,9 +828,9 @@ const UploadResultModal = ({
                     log.type === 'error' ? 'text-red-500' :
                     'text-blue-500'
                   }`}>
-                    {log.type === 'success' ? 'Ã¢Å“â€œ' :
-                     log.type === 'skip' ? 'Ã¢ÂÂ­' :
-                     log.type === 'error' ? 'Ã¢Å“â€”' : 'Ã¢â€ â€™'}
+                    {log.type === 'success' ? 'OK' :
+                     log.type === 'skip' ? 'SKIP' :
+                     log.type === 'error' ? 'ERR' : '->'}
                   </span>
                   <span className="text-blue-300 font-semibold shrink-0">{log.resi}</span>
                   <span className="text-gray-500">-</span>
@@ -2945,7 +2945,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
           }
           
           // Log sukses final
-          addLog('info', 'SISTEM', `Ã¢Å“â€œ Selesai: ${result.count} baru, ${result.updatedCount} update, ${allSkippedItems.length} skip`);
+          addLog('info', 'SISTEM', `Selesai: ${result.count} baru, ${result.updatedCount} update, ${allSkippedItems.length} skip`);
           
           // Set data untuk modal
           setUploadSummary({
@@ -3848,11 +3848,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
     }
   };
 
-  // Helper untuk menampilkan icon sort (Ã¢â€ â€˜ asc, Ã¢â€ â€œ desc, kosong jika none)
+  // Helper untuk menampilkan icon sort (^ asc, v desc, kosong jika none)
   const getSortIcon = (field: string) => {
     if (sortField !== field) return '';
-    if (sortDirection === 'asc') return 'Ã¢â€ â€˜';
-    if (sortDirection === 'desc') return 'Ã¢â€ â€œ';
+    if (sortDirection === 'asc') return '^';
+    if (sortDirection === 'desc') return 'v';
     return '';
   };
 
@@ -4255,14 +4255,14 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                 className="text-gray-400 hover:text-white text-xs"
                                 title="Hapus filter"
                             >
-                                Ã¢Å“â€¢
+                                x
                             </button>
                         )}
                     </div>
                     {showPartNumberDropdown && (
                         <div className="absolute left-0 top-full mt-1 w-64 bg-gray-800 border border-gray-600 rounded shadow-lg max-h-60 overflow-auto z-50">
                             <div className="p-1.5 text-[9px] text-yellow-400 border-b border-gray-700 bg-yellow-900/20 font-semibold sticky top-0 z-10">
-                                Ã°Å¸â€œÂ¦ Part Number di Tabel ({(() => {
+                                Part Number di Tabel ({(() => {
                                     const uniqueParts = [...new Set(rows.filter(r => r.part_number).map(r => r.part_number))];
                                     const filtered = filterPartNumber 
                                         ? uniqueParts.filter(p => p.toLowerCase().includes(filterPartNumber.toLowerCase()))
@@ -4298,7 +4298,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                             <div className="flex gap-2 text-gray-500 mt-0.5">
                                                 <span>Total Qty: {totalQty}</span>
                                                 <span>Stok: {stock}</span>
-                                                {totalQty > stock && <span className="text-pink-400">Ã¢Å¡Â Ã¯Â¸Â Kurang {totalQty - stock}</span>}
+                                                {totalQty > stock && <span className="text-pink-400">[!] Kurang {totalQty - stock}</span>}
                                             </div>
                                         </div>
                                     );
@@ -4344,7 +4344,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                 className="text-gray-400 hover:text-white text-xs px-1"
                                 title="Hapus pencarian"
                             >
-                                Ã¢Å“â€¢
+                                x
                             </button>
                         )}
                     </div>
@@ -4363,7 +4363,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                 return filteredTableRows.length > 0 && (
                                     <>
                                         <div className="p-1.5 text-[9px] text-green-400 border-b border-gray-700 bg-green-900/20 font-semibold sticky top-0 z-10">
-                                            Ã°Å¸â€œâ€¹ Hasil di Tabel S3 ({filteredTableRows.length})
+                                            Hasil di Tabel S3 ({filteredTableRows.length})
                                         </div>
                                         {filteredTableRows.slice(0, 20).map((r, i) => {
                                             const rowIndex = visualRows.indexOf(r);
@@ -4406,7 +4406,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                             
                             {/* SECTION 2: Hasil dari Stage 1 (untuk referensi) */}
                             <div className="p-1.5 text-[9px] text-blue-400 border-b border-gray-700 bg-blue-900/20 font-semibold sticky top-0 z-10">
-                                Ã°Å¸â€Â Resi Stage 1 ({stage1ResiList.filter(r => 
+                                Resi Stage 1 ({stage1ResiList.filter(r => 
                                     !resiSearchQuery || 
                                     String(r.resi || '').toLowerCase().includes(resiSearchQuery.toLowerCase()) ||
                                     (r.no_pesanan && String(r.no_pesanan).toLowerCase().includes(resiSearchQuery.toLowerCase()))
@@ -4442,7 +4442,7 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                                                     <span className="px-1 rounded text-[9px] bg-green-600/30 text-green-300">Di S3</span>
                                                 )}
                                                 <span className={`px-1 rounded text-[9px] ${r.stage2_verified ? 'bg-green-600/30 text-green-300' : 'bg-yellow-600/30 text-yellow-300'}`}>
-                                                    {r.stage2_verified ? 'S2 Ã¢Å“â€œ' : 'S1 only'}
+                                                    {r.stage2_verified ? 'S2 OK' : 'S1 only'}
                                                 </span>
                                             </div>
                                         </div>
@@ -4625,11 +4625,11 @@ export const ScanResiStage3 = ({ onRefresh }: { onRefresh?: () => void }) => {
                             />
                             {resiItems.length > 1 && (
                               <span className={`text-[9px] ${hasNotReadyItem ? 'text-red-400' : 'text-gray-400'}`}>
-                                {resiItems.length} item{hasNotReadyItem ? ' Ã¢Å¡Â Ã¯Â¸Â' : ''}
+                                {resiItems.length} item{hasNotReadyItem ? ' [!]' : ''}
                               </span>
                             )}
                             {hasNotReadyItem && resiItems.length === 1 && (
-                              <span className="text-[9px] text-red-400">Ã¢Å¡Â Ã¯Â¸Â</span>
+                              <span className="text-[9px] text-red-400">[!]</span>
                             )}
                           </div>
                         </td>

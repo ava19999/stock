@@ -15,8 +15,8 @@ $repoRoot = Get-RepoRoot
 $projectId = Get-ProjectId -RepoRoot $repoRoot
 
 Write-Step "Validasi status server lokal..."
-& cmd /c "npx supabase status" *> $null
-if ($LASTEXITCODE -ne 0) {
+$statusCode = Invoke-CmdCommand -Command "npx supabase status >nul 2>nul"
+if ($statusCode -ne 0) {
   Write-Warn "Supabase belum aktif. Menjalankan start otomatis."
   & "$PSScriptRoot\start-server.ps1"
   if ($LASTEXITCODE -ne 0) {
@@ -80,12 +80,12 @@ $zipPath = Join-Path $rootPath "$stamp.zip"
 Compress-Archive -Path (Join-Path $backupDir "*") -DestinationPath $zipPath -Force
 
 if ($Keep -gt 0) {
-  $backupFolders = Get-ChildItem $rootPath -Directory | Sort-Object Name -Descending
+  $backupFolders = @(Get-ChildItem $rootPath -Directory | Sort-Object Name -Descending)
   if ($backupFolders.Count -gt $Keep) {
     $backupFolders | Select-Object -Skip $Keep | Remove-Item -Recurse -Force
   }
 
-  $backupZipFiles = Get-ChildItem $rootPath -File -Filter "*.zip" | Sort-Object Name -Descending
+  $backupZipFiles = @(Get-ChildItem $rootPath -File -Filter "*.zip" | Sort-Object Name -Descending)
   if ($backupZipFiles.Count -gt $Keep) {
     $backupZipFiles | Select-Object -Skip $Keep | Remove-Item -Force
   }
